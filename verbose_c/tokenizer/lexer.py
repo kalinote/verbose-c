@@ -20,26 +20,25 @@ class Lexer:
         'final', 'extends', 'implements', 'interface', 'abstract',
     }
 
-    def __init__(self, text):
-        # 预处理：将 .[key] 转换为 .key
-        self.original_text = text
-        self.text = self._preprocess_text(text)
+    def __init__(self, filename, source):
+        self.filename = filename
+        self.source = source
         self.pos = 0
         self.line = 1
         self.column = 0
+        self.tokens = []
 
         # 基于 TokenType 构造 master_pattern
         patterns = [f"(?P<{t.name}>{t.pattern})"
                     for t in TokenType]
         self.master_pattern = re.compile("|".join(patterns))
 
-    def _preprocess_text(self, text):
-        """预处理文本，转换特殊语法形式"""
-        return re.sub(r'\.(?=\[)', r'.*', text)
-
     def tokenize(self):
+        self.tokens = list(self._tokenize())
+        return self.tokens
 
-        for m in self.master_pattern.finditer(self.text):
+    def _tokenize(self):
+        for m in self.master_pattern.finditer(self.source):
             kind = m.lastgroup
             value = m.group(kind)
 
@@ -80,3 +79,6 @@ class Lexer:
             self.column = len(lines[-1])
         else:
             self.column += len(text)
+
+    def __repr__(self) -> str:
+        return f"Lexer(filename={self.filename})"

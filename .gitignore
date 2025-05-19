@@ -1,2 +1,6 @@
 .vscode
 __pycache__
+*_test.*
+test.*
+*.build/
+*.dist/
