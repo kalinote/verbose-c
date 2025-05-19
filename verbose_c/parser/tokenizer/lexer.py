@@ -1,6 +1,6 @@
 import re
-from .token import Token
-from .enum import TokenType
+from verbose_c.parser.tokenizer.token import Token
+from verbose_c.parser.tokenizer.enum import TokenType
 
 
 class Lexer:

@@ -1,6 +1,6 @@
 import argparse
 import os
-from tokenizer.lexer import Lexer
+from verbose_c.parser.tokenizer.lexer import Lexer
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Verbose-C Compiler")

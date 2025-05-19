@@ -1,4 +1,4 @@
-from .enum import TokenType
+from verbose_c.parser.tokenizer.enum import TokenType
 
 
 class Token:
