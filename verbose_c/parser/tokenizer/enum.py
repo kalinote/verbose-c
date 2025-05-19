@@ -2,7 +2,7 @@ from enum import Enum, auto
 
 class TokenType(Enum):
     """
-    C语言词法分析器的token类型
+    Token枚举，后续改成通过配置文件配置
     """
     # 空白符和注释
     WHITESPACE = ("whitespace", r"\s+")                 # 空白符
