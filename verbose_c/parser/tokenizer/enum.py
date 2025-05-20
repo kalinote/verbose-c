@@ -5,11 +5,12 @@ class TokenType(Enum):
     Token枚举，后续改成通过配置文件配置
     """
     # 空白符和注释
-    WHITESPACE = ("whitespace", r"\s+")                 # 空白符
-    COMMENT    = ("comment", r"//.*|/\*[\s\S]*?\*/")    # 单行和多行注释
+    WHITESPACE = ("WHITESPACE", r"[ \t\f\v]+")                 # 空白符（不包括换行）
+    COMMENT    = ("COMMENT", r"//.*|/\*[\s\S]*?\*/")    # 单行和多行注释
+    NEWLINE    = ("NEWLINE", r"\r?\n")                          # 换行符
 
     # 预处理器相关或特殊构造
-    INCLUDE_HEADER = ("include_header", r"<[a-zA-Z0-9_./]+>")      # 导入名称
+    INCLUDE_HEADER = ("INCLUDE_HEADER", r"<[a-zA-Z0-9_./]+>")      # 导入名称
     HASH       = ("#", r"#")                            # 井号 (预处理器等)
 
     # 复合操作符
@@ -55,11 +56,12 @@ class TokenType(Enum):
     DOT        = (".", r"\.")                           # 点操作符
     QUESTION   = ("?", r"\?")                           # 问号
     COLON      = (":", r":")                            # 冒号
+    AT         = ("@", r"@")                            # 符号@
 
     # 字面量和标识符
-    STRING     = ("string", r""""(?:\\.|[^"\\])*"|'(?:\\.|[^\\'])*'""")  # 字符串和字符字面量
-    NUMBER     = ("number", r"(?:0[xX][0-9a-fA-F]+|0[0-7]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)")  # 整数、浮点数、八进制、十六进制
-    IDENTIFIER = ("identifier", r"[a-zA-Z_][a-zA-Z0-9_]*")      # 标识符 (关键字通过后处理识别)
+    STRING     = ("STRING", r""""(?:\\.|[^"\\])*"|'(?:\\.|[^\\'])*'""")  # 字符串和字符字面量
+    NUMBER     = ("NUMBER", r"(?:0[xX][0-9a-fA-F]+|0[0-7]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)")  # 整数、浮点数、八进制、十六进制
+    IDENTIFIER = ("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*")      # 标识符 (关键字通过后处理识别)
     
     # 分隔符和标点符号
     SEMICOLON  = (";", r";")                            # 分号
@@ -75,6 +77,10 @@ class TokenType(Enum):
     UNKNOWN    = ("UNKNOWN", r".")                      # 未知字符 (必须在所有其他实际token之后)
     END        = ("EOF", r"$^")                         # 结束标记 (模式不匹配任何内容，由词法分析器在末尾添加)
     
+    # 预留
+    INDENT     = ("INDENT", r"$^")                    # 缩进
+    DEDENT     = ("DEDENT", r"$^")                    # 去缩进
+    
     def __init__(self, literal, pattern):
         self._literal = literal
         self._pattern = pattern
@@ -89,4 +95,14 @@ class TokenType(Enum):
     
     def __repr__(self) -> str:
         return f"TokenType(literal={self.literal}, pattern={self.pattern})"
+
+    @classmethod
+    def from_literal(cls, literal):
+        if cls._literal_map is None:
+            cls._literal_map = {member.literal: member for member in cls}
+        try:
+            return cls._literal_map[literal]
+        except KeyError:
+            return None
     
+TokenType._literal_map = None
