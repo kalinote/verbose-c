@@ -106,3 +106,28 @@ class TokenType(Enum):
             return None
     
 TokenType._literal_map = None
+
+class Operator(Enum):
+    """
+    Operator 枚举类
+    用于定义支持的操作符类型，便于后续表达式解析和判断。
+    """
+    EQUAL = "=="
+    NOT_EQUAL = "!="
+    LESS_THAN = "<"
+    GREATER_THAN = ">"
+    LESS_EQUAL = "<="
+    GREATER_EQUAL = ">="
+    LOGICAL_AND = "&&"
+    LOGICAL_OR = "||"
+    ASSIGN = "="
+    ADD = "+"
+    SUBTRACT = "-"
+    MULTIPLY = "*"
+    DIVIDE = "/"
+
+    def __str__(self):
+        return self.value 
+
+    def __repr__(self) -> str:
+        return f"Operator(value='{self.value}')"

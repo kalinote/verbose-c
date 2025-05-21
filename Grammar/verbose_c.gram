@@ -1,0 +1,39 @@
+start: var_decl
+
+# 函数定义
+function: a=return_type b=function_name "(" c=param? ")" {FunctionNode(a,b,c,None,None)}
+
+return_type[NameNode]: NAME { NameNode(name.string) }
+function_name[NameNode]: NAME { NameNode(name.string) }
+param[List[ParamNode]]: p1=typed_param p2=("," typed_param)* { [p1] + ([item[1] for item in p2] if p2 else []) }
+typed_param[ParamNode]: t=NAME n=NAME { ParamNode(t.string, n.string) }
+
+# 变量声明
+var_decl: t=type_name n=var_name v=( "=" var_value )? ";" { VarDeclNode(t,n,v[1] if v else None) }
+# TODO 增加多变量声明支持
+
+type_name: NAME { NameNode(name.string) }
+var_name: NAME { NameNode(name.string) }
+var_value: expr
+
+# 变量赋值
+var_assign: n=var_name "=" v=var_value ";" { AssignmentNode(n,v) }
+
+# 四则
+expr: ( expr '+' term { BinaryOpNode(expr, Operator.ADD, term) }
+      | expr '-' term { BinaryOpNode(expr, Operator.SUBTRACT, term) }
+      | term { term }
+      )
+term: ( l=term '*' r=factor { BinaryOpNode(l, Operator.MULTIPLY, r) }
+      | term '/' factor { BinaryOpNode(term, Operator.DIVIDE, factor) }
+      | factor { factor }
+      )
+factor: ('(' expr ')' { expr }
+        | atom { atom }
+        )
+atom: ( NAME { NameNode(name.string) }
+      | NUMBER { NumberNode(number.string) }
+      | STRING { StringNode(string.string) }
+      | b=("true"|"false") { BoolNode(b) }
+      | "null" { NullNode() }
+      )

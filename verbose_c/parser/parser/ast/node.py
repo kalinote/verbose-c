@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional, Union
 
+from verbose_c.parser.tokenizer.enum import Operator
+
 
 class ASTNode:
     """
@@ -80,7 +82,7 @@ class BinaryOpNode(ASTNode):
     def __init__(self, left: ASTNode, op: str, right: ASTNode, line: Optional[int] = None, column: Optional[int] = None) -> None:
         super().__init__(self.__class__.__name__, line, column)
         self.left: ASTNode = left
-        self.op: str = op
+        self.op: Operator = op
         self.right: ASTNode = right
     
 
@@ -96,11 +98,11 @@ class VarDeclNode(ASTNode):
     """
     变量声明节点
     """
-    def __init__(self, var_type: str, name: str, value: Optional[ASTNode] = None, line: Optional[int] = None, column: Optional[int] = None) -> None:
+    def __init__(self, var_type: str, name: str, init_exp: Optional[ASTNode] = None, line: Optional[int] = None, column: Optional[int] = None) -> None:
         super().__init__(self.__class__.__name__, line, column)
-        self.var_type: str = var_type
-        self.name: str = name
-        self.value: Optional[ASTNode] = value
+        self.var_type: ASTNode = var_type
+        self.name: ASTNode = name
+        self.init_exp: ASTNode = init_exp
 
 class VariableNode(ASTNode):
     """
@@ -114,9 +116,8 @@ class AssignmentNode(ASTNode):
     """
     赋值节点
     """
-    def __init__(self, var_type: ASTNode, name: ASTNode, value: ASTNode, line: Optional[int] = None, column: Optional[int] = None) -> None:
+    def __init__(self, name: ASTNode, value: ASTNode, line: Optional[int] = None, column: Optional[int] = None) -> None:
         super().__init__(self.__class__.__name__, line, column)
-        self.var_type: ASTNode = var_type
         self.name: ASTNode = name
         self.value: ASTNode = value
         
