@@ -17,7 +17,7 @@ TokenDefinitions = Tuple[Dict[int, str], Dict[str, int], Set[str]]
 def build_parser(
     grammar_file: str, verbose_tokenizer: bool = False, verbose_parser: bool = False
 ) -> Tuple[Grammar, Parser, Tokenizer]:
-    with open(grammar_file) as file:
+    with open(grammar_file, encoding="utf-8") as file:
         tokenizer = Tokenizer(tokenize.generate_tokens(file.readline), verbose=verbose_tokenizer)
         parser = GrammarParser(tokenizer, verbose=verbose_parser)
         grammar = parser.start()

@@ -32,12 +32,12 @@ class RuleCheckingVisitor(GrammarVisitor):
 
     def visit_NameLeaf(self, node: NameLeaf) -> None:
         if node.value not in self.rules and node.value not in self.tokens:
-            # TODO: Add line/col info to (leaf) nodes
-            raise GrammarError(f"Dangling reference to rule {node.value!r}")
+            # TODO: 为（叶子）节点添加行/列信息
+            raise GrammarError(f"悬空引用规则 {node.value!r}")
 
     def visit_NamedItem(self, node: NamedItem) -> None:
         if node.name and node.name.startswith("_"):
-            raise GrammarError(f"Variable names cannot start with underscore: '{node.name}'")
+            raise GrammarError(f"变量名不能以下划线开头: '{node.name}'")
         self.visit(node.item)
 
 
@@ -50,7 +50,7 @@ class ParserGenerator:
         self.rules = grammar.rules
         self.validate_rule_names()
         if "trailer" not in grammar.metas and "start" not in self.rules:
-            raise GrammarError("Grammar without a trailer must have a 'start' rule")
+            raise GrammarError("没有 trailer 的语法必须有 'start' 规则")
         checker = RuleCheckingVisitor(self.rules, self.tokens)
         for rule in self.rules.values():
             checker.visit(rule)
@@ -58,15 +58,15 @@ class ParserGenerator:
         self.level = 0
         compute_nullables(self.rules)
         self.first_graph, self.first_sccs = compute_left_recursives(self.rules)
-        self.todo = self.rules.copy()  # Rules to generate
-        self.counter = 0  # For name_rule()/name_loop()
-        self.all_rules: Dict[str, Rule] = {}  # Rules + temporal rules
+        self.todo = self.rules.copy()  # 需要生成的规则
+        self.counter = 0  # 用于 name_rule()/name_loop() 的计数器
+        self.all_rules: Dict[str, Rule] = {}  # 规则 + 临时规则
         self._local_variable_stack: List[List[str]] = []
 
     def validate_rule_names(self) -> None:
         for rule in self.rules:
             if rule.startswith("_"):
-                raise GrammarError(f"Rule names cannot start with underscore: '{rule}'")
+                raise GrammarError(f"规则名不能以下划线开头: '{rule}'")
 
     @contextlib.contextmanager
     def local_variable_context(self) -> Iterator[None]:
@@ -115,7 +115,7 @@ class ParserGenerator:
 
     def artificial_rule_from_rhs(self, rhs: Rhs) -> str:
         self.counter += 1
-        name = f"_tmp_{self.counter}"  # TODO: Pick a nicer name.
+        name = f"_tmp_{self.counter}"  # TODO: 取一个更好的名字。
         self.todo[name] = Rule(name, None, rhs)
         return name
 
@@ -125,7 +125,7 @@ class ParserGenerator:
             prefix = "_loop1_"
         else:
             prefix = "_loop0_"
-        name = f"{prefix}{self.counter}"  # TODO: It's ugly to signal via the name.
+        name = f"{prefix}{self.counter}"  # TODO: 通过名字传递信息不太优雅。
         self.todo[name] = Rule(name, None, Rhs([Alt([NamedItem(None, node)])]))
         return name
 
@@ -220,19 +220,15 @@ class NullableVisitor(GrammarVisitor):
     def visit_NameLeaf(self, node: NameLeaf) -> bool:
         if node.value in self.rules:
             return self.visit(self.rules[node.value])
-        # Token or unknown; never empty.
+        # Token 或未知；永远不为空。
         return False
 
     def visit_StringLeaf(self, node: StringLeaf) -> bool:
-        # The string token '' is considered empty.
+        # 字符串 token '' 被认为是空。
         return not node.value
 
 
 def compute_nullables(rules: Dict[str, Rule]) -> None:
-    """Compute which rules in a grammar are nullable.
-
-    Thanks to TatSu (tatsu/leftrec.py) for inspiration.
-    """
     nullable_visitor = NullableVisitor(rules)
     for rule in rules.values():
         nullable_visitor.visit(rule)
@@ -247,7 +243,7 @@ def compute_left_recursives(
         if len(scc) > 1:
             for name in scc:
                 rules[name].left_recursive = True
-            # Try to find a leader such that all cycles go through it.
+            # 尝试找到一个领导者，使所有环路都经过它。
             leaders = set(scc)
             for start in scc:
                 for cycle in sccutils.find_cycles_in_scc(graph, scc, start):
@@ -255,13 +251,13 @@ def compute_left_recursives(
                     leaders -= scc - set(cycle)
                     if not leaders:
                         raise ValueError(
-                            f"SCC {scc} has no leadership candidate (no element is included in all cycles)"
+                            f"强连通分量 {scc} 没有领导候选者（没有元素包含在所有环路中）"
                         )
             # print("Leaders:", leaders)
-            leader = min(leaders)  # Pick an arbitrary leader from the candidates.
+            leader = min(leaders)  # 从候选者中任意选择一个领导者。
             rules[leader].leader = True
         else:
-            name = min(scc)  # The only element.
+            name = min(scc)  # 唯一的元素。
             if name in graph[name]:
                 rules[name].left_recursive = True
                 rules[name].leader = True
@@ -269,12 +265,11 @@ def compute_left_recursives(
 
 
 def make_first_graph(rules: Dict[str, Rule]) -> Dict[str, AbstractSet[str]]:
-    """Compute the graph of left-invocations.
+    """计算左侧调用的图。
 
-    There's an edge from A to B if A may invoke B at its initial
-    position.
+    如果 A 在初始位置可能调用 B，则从 A 到 B 有一条边。
 
-    Note that this requires the nullable flags to have been computed.
+    注意，这需要先计算可空标志。
     """
     graph = {}
     vertices: Set[str] = set()

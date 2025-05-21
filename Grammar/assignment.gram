@@ -1,0 +1,11 @@
+# 简单赋值语句
+start: a=assign+ END { BlockNode(a) }
+
+assign: t=type_name n=func_name "=" v=value ";" { AssignmentNode(t,n,v) }
+
+type_name: NAME { NameNode(name.string) }
+func_name: NAME { NameNode(name.string) }
+value:
+    | NAME { NameNode(name.string) }
+    | STRING { StringNode(string.string) }
+    | NUMBER { NumberNode(number.string) }

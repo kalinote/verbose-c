@@ -45,7 +45,7 @@ MODULE_SUFFIX = """
 
 if __name__ == '__main__':
     # TODO: 需要根据实际情况动态修改
-    from verbose_c.parser.parser import simple_parser_main
+    from verbose_c.parser.parser.parser import simple_parser_main
     simple_parser_main({class_name})
 """
 

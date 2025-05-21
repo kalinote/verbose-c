@@ -20,9 +20,10 @@ class NameNode(ASTNode):
     """
     标识符节点
     """
-    def __init__(self, name: str, line: Optional[int] = None, column: Optional[int] = None) -> None:
+    def __init__(self, name: str, is_keyword: bool = False, line: Optional[int] = None, column: Optional[int] = None) -> None:
         super().__init__(self.__class__.__name__, line, column)
         self.name: str = name
+        self.is_keyword: bool = is_keyword
 
 class NumberNode(ASTNode):
     """
@@ -47,6 +48,14 @@ class StringNode(ASTNode):
     def __init__(self, value: str, line: Optional[int] = None, column: Optional[int] = None) -> None:
         super().__init__(self.__class__.__name__, line, column)
         self.value: str = value
+        
+class OpreatorNode(ASTNode):
+    """
+    操作符节点
+    """
+    def __init__(self, op: str, line: Optional[int] = None, column: Optional[int] = None) -> None:
+        super().__init__(self.__class__.__name__, line, column)
+        self.op: str = op
         
 class NullNode(ASTNode):
     """
@@ -105,10 +114,11 @@ class AssignmentNode(ASTNode):
     """
     赋值节点
     """
-    def __init__(self, left: ASTNode, right: ASTNode, line: Optional[int] = None, column: Optional[int] = None) -> None:
+    def __init__(self, var_type: ASTNode, name: ASTNode, value: ASTNode, line: Optional[int] = None, column: Optional[int] = None) -> None:
         super().__init__(self.__class__.__name__, line, column)
-        self.left: ASTNode = left
-        self.right: ASTNode = right
+        self.var_type: ASTNode = var_type
+        self.name: ASTNode = name
+        self.value: ASTNode = value
         
 class ExprStmtNode(ASTNode):
     """
@@ -174,15 +184,27 @@ class BreakNode(ASTNode):
     def __init__(self, line: Optional[int] = None, column: Optional[int] = None) -> None:
         super().__init__(self.__class__.__name__, line, column)
 
+# 函数结构
+
+class ParamNode(ASTNode):
+    """
+    参数节点
+    """
+    def __init__(self, var_type: ASTNode, name: ASTNode, line: Optional[int] = None, column: Optional[int] = None) -> None:
+        super().__init__(self.__class__.__name__, line, column)
+        self.var_type: ASTNode = var_type
+        self.name: ASTNode = name
+
 class FunctionNode(ASTNode):
     """
     函数定义节点
     """
-    def __init__(self, name: ASTNode, args: List[ASTNode], kwargs: Dict[str, ASTNode], body: ASTNode, line: Optional[int] = None, column: Optional[int] = None) -> None:
+    def __init__(self, return_type: ASTNode, name: ASTNode, args: List[ASTNode], kwargs: Dict[str, ASTNode], body: ASTNode, line: Optional[int] = None, column: Optional[int] = None) -> None:
         super().__init__(self.__class__.__name__, line, column)
+        self.return_type: ASTNode = return_type
         self.name: ASTNode = name
         self.args: List[ASTNode] = args
-        self.kwargs: Dict[str, ASTNode] = kwargs
+        self.kwargs: Dict[str, ASTNode] = kwargs        # TODO 暂未使用
         self.body: ASTNode = body
 
 class CallNode(ASTNode):
