@@ -61,7 +61,7 @@ class TokenType(Enum):
     # 字面量和标识符
     STRING     = ("STRING", r""""(?:\\.|[^"\\])*"|'(?:\\.|[^\\'])*'""")  # 字符串和字符字面量
     NUMBER     = ("NUMBER", r"(?:0[xX][0-9a-fA-F]+|0[0-7]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)")  # 整数、浮点数、八进制、十六进制
-    IDENTIFIER = ("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*")      # 标识符 (关键字通过后处理识别)
+    NAME       = ("NAME", r"[a-zA-Z_][a-zA-Z0-9_]*")    # 标识符 (关键字通过后处理识别)
     
     # 分隔符和标点符号
     SEMICOLON  = (";", r";")                            # 分号
@@ -75,7 +75,7 @@ class TokenType(Enum):
     
     # 特殊标记
     UNKNOWN    = ("UNKNOWN", r".")                      # 未知字符 (必须在所有其他实际token之后)
-    END        = ("EOF", r"$^")                         # 结束标记 (模式不匹配任何内容，由词法分析器在末尾添加)
+    END        = ("END", r"$^")                         # 结束标记 (模式不匹配任何内容，由词法分析器在末尾添加)
     
     # 预留
     INDENT     = ("INDENT", r"$^")                    # 缩进

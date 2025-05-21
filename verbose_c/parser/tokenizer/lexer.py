@@ -57,7 +57,7 @@ class Lexer:
             tok_type = TokenType[kind]
 
             # 如果是标识符，检查是否是关键字
-            if tok_type == TokenType.IDENTIFIER and value in self.KEYWORDS:
+            if tok_type == TokenType.NAME and value in self.KEYWORDS:
                 # 将关键字作为特殊的标识符处理
                 yield Token(tok_type, value, column=token_start_column, line=token_start_line, is_keyword=True)
             else:
