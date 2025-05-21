@@ -31,11 +31,10 @@ def build_parser(
 def build_python_generator(
     grammar: Grammar,
     grammar_file: str,
-    output_file: str,
-    skip_actions: bool = False,
+    output_file: str
 ) -> ParserGenerator:
-    with open(output_file, "w") as file:
-        gen: ParserGenerator = PythonParserGenerator(grammar, file)  # TODO: skip_actions
+    with open(output_file, "w", encoding="utf-8") as file:
+        gen: ParserGenerator = PythonParserGenerator(grammar, file)
         gen.generate(grammar_file)
     return gen
 
@@ -45,24 +44,22 @@ def build_python_parser_and_generator(
     output_file: str,
     verbose_tokenizer: bool = False,
     verbose_parser: bool = False,
-    skip_actions: bool = False,
 ) -> Tuple[Grammar, Parser, Tokenizer, ParserGenerator]:
-    """Generate rules, python parser, tokenizer, parser generator for a given grammar
+    """为给定的语法生成规则、Python解析器、分词器和解析器生成器
 
-    Args:
-        grammar_file (string): Path for the grammar file
-        output_file (string): Path for the output file
-        verbose_tokenizer (bool, optional): Whether to display additional output
-          when generating the tokenizer. Defaults to False.
-        verbose_parser (bool, optional): Whether to display additional output
-          when generating the parser. Defaults to False.
-        skip_actions (bool, optional): Whether to pretend no rule has any actions.
+    参数:
+        grammar_file (string): 语法文件的路径
+        output_file (string): 输出文件的路径
+        verbose_tokenizer (bool, optional): 生成分词器时是否显示额外输出。
+          默认为False。
+        verbose_parser (bool, optional): 生成解析器时是否显示额外输出。
+          默认为False。
+        skip_actions (bool, optional): 是否假装没有任何规则包含动作。
     """
     grammar, parser, tokenizer = build_parser(grammar_file, verbose_tokenizer, verbose_parser)
     gen = build_python_generator(
         grammar,
         grammar_file,
         output_file,
-        skip_actions=skip_actions,
     )
     return grammar, parser, tokenizer, gen
