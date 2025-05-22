@@ -1,4 +1,4 @@
-start: var_decl
+start: function_call
 
 # 函数定义
 function: a=return_type b=function_name "(" c=param? ")" {FunctionNode(a,b,c,None,None,LOCATIONS)}
@@ -7,6 +7,13 @@ return_type[NameNode]: NAME { NameNode(name.string,LOCATIONS) }
 function_name[NameNode]: NAME { NameNode(name.string,LOCATIONS) }
 param[List[ParamNode]]: p1=typed_param p2=("," typed_param)* { [p1] + ([item[1] for item in p2] if p2 else []) }
 typed_param[ParamNode]: t=NAME n=NAME { ParamNode(t.string, n.string,LOCATIONS) }
+
+# 函数调用
+function_call: f=function_call_expr ";" {f}
+function_call_expr[CallNode]: n=function_name "(" a=func_call_param? ")" { CallNode(n,a,LOCATIONS) }
+# TODO 增加链式调用
+
+func_call_param[List[ASTNode]]: e1=expr e2=("," expr)* { [e1] + ([item[1] for item in e2] if e2 else []) }
 
 # 变量声明
 var_decl: t=type_name n=var_name v=( "=" var_value )? ";" { VarDeclNode(t,n,v[1] if v else None,LOCATIONS) }
@@ -20,20 +27,24 @@ var_value: expr
 var_assign: n=var_name "=" v=var_value ";" { AssignmentNode(n,v,LOCATIONS) }
 
 # 四则运算
-expr: ( expr '+' term { BinaryOpNode(expr, Operator.ADD, term,LOCATIONS) }
+expr: 
+      | expr '+' term { BinaryOpNode(expr, Operator.ADD, term,LOCATIONS) }
       | expr '-' term { BinaryOpNode(expr, Operator.SUBTRACT, term,LOCATIONS) }
       | term { term }
-      )
-term: ( l=term '*' r=factor { BinaryOpNode(l, Operator.MULTIPLY, r,LOCATIONS) }
+
+term: 
+      | l=term '*' r=factor { BinaryOpNode(l, Operator.MULTIPLY, r,LOCATIONS) }
       | term '/' factor { BinaryOpNode(term, Operator.DIVIDE, factor,LOCATIONS) }
       | factor { factor }
-      )
-factor: ('(' expr ')' { expr }
-        | atom { atom }
-        )
-atom: ( NAME { NameNode(name.string,LOCATIONS) }
-      | NUMBER { NumberNode(number.string,LOCATIONS) }
-      | STRING { StringNode(string.string,LOCATIONS) }
+
+factor:
+      | '(' expr ')' { expr }
+      | atom { atom }
+
+atom:
+      | function_call_expr
       | b=("true"|"false") { BoolNode(b,LOCATIONS) }
       | "null" { NullNode(LOCATIONS) }
-      )
+      | NAME { NameNode(name.string,LOCATIONS) }
+      | NUMBER { NumberNode(number.string,LOCATIONS) }
+      | STRING { StringNode(string.string,LOCATIONS) }

@@ -390,11 +390,8 @@ def simple_parser_main(parser_class: Type[Parser]) -> None:
         traceback.print_exception(err.__class__, err, None)
         sys.exit(1)
 
-    if not args.quiet:
-        print(ast_dump(tree, indent=4))
-    if args.run:
-        exec(compile(tree, filename=filename, mode="exec"))
-
+    print(ast_dump(tree, indent=4))
+    
     if verbose:
         dt = t1 - t0
         diag = tokenizer.diagnose()
@@ -411,4 +408,4 @@ def simple_parser_main(parser_class: Type[Parser]) -> None:
         print("Caches sizes:")
         print(f"  token array : {len(tokenizer.tokens):10}")
         print(f"        cache : {len(parser._cache):10}")
-        ## print_memstats()
+

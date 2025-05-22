@@ -215,8 +215,8 @@ class CallNode(ASTNode):
     """
     函数调用节点
     """
-    def __init__(self, name: ASTNode, args: List[ASTNode], kwargs: Dict[str, ASTNode], start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
+    def __init__(self, name: ASTNode, args: List[ASTNode], kwargs: Dict[str, ASTNode] = None, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.name: ASTNode = name
         self.args: List[ASTNode] = args
-        self.kwargs: Dict[str, ASTNode] = kwargs
+        self.kwargs: Dict[str, ASTNode] = kwargs        # TODO 暂未使用
