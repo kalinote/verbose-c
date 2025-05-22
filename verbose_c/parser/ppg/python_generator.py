@@ -111,9 +111,7 @@ class PythonCallMakerVisitor(GrammarVisitor):
             "NAME",
             "NUMBER",
             "STRING",
-            "FSTRING_START",
-            "FSTRING_MIDDLE",
-            "FSTRING_END",
+            "INCLUDE_HEADER",
             "OP",
             "TYPE_COMMENT",
         ):

@@ -69,6 +69,14 @@ class TypeNode(ASTNode):
     
 # 结构和运算
 
+class PackImportNode(ASTNode):
+    """
+    包导入节点
+    """
+    def __init__(self, name: ASTNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None):
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.name: ASTNode = name
+
 class UnaryOpNode(ASTNode):
     """
     一元运算符节点

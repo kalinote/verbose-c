@@ -281,6 +281,13 @@ class Parser:
         return None
 
     @memoize
+    def include_header(self) -> Token:
+        tok = self._tokenizer.peek()
+        if tok.type == TokenType.INCLUDE_HEADER:
+            return self._tokenizer.getnext()
+        return None
+
+    @memoize
     def op(self) -> Token:
         # TODO 需要考虑实现方式
         tok = self._tokenizer.peek()

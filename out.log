@@ -1,0 +1,105 @@
+原始语法:
+ Grammar(
+   [
+     Rule('start', None, Rhs([Alt([NamedItem(None, NameLeaf('pack_import'))])])),
+     Rule('pack_import', None, Rhs([Alt([NamedItem(None, StringLeaf('"#"')), NamedItem(None, StringLeaf('"include"')), NamedItem('n', NameLeaf('include_name'))], action='PackImportNode ( n , LOCATIONS )')])),
+     Rule('include_name', 'NameNode', Rhs([Alt([NamedItem('i', NameLeaf('INCLUDE_HEADER'))], action='NameNode ( i . string , LOCATIONS )'), Alt([NamedItem('s', NameLeaf('STRING'))], action='NameNode ( s . string , LOCATIONS )'), Alt([NamedItem('n', NameLeaf('NAME'))], action='NameNode ( n . string , LOCATIONS )')])),
+     Rule('function', None, Rhs([Alt([NamedItem('a', NameLeaf('return_type')), NamedItem('b', NameLeaf('function_name')), NamedItem(None, StringLeaf('"("')), NamedItem('c', Opt(NameLeaf('param'))), NamedItem(None, StringLeaf('")"'))], action='FunctionNode ( a , b , c , None , None , LOCATIONS )')])),
+     Rule('return_type', 'NameNode', Rhs([Alt([NamedItem(None, NameLeaf('NAME'))], action='NameNode ( name . string , LOCATIONS )')])),
+     Rule('function_name', 'NameNode', Rhs([Alt([NamedItem(None, NameLeaf('NAME'))], action='NameNode ( name . string , LOCATIONS )')])),
+     Rule('param', 'List [ParamNode]', Rhs([Alt([NamedItem('p1', NameLeaf('typed_param')), NamedItem('p2', Repeat0(Group(Rhs([Alt([NamedItem(None, StringLeaf('","')), NamedItem(None, NameLeaf('typed_param'))])]))))], action='[p1] + ( [item [1] for item in p2] if p2 else [] )')])),
+     Rule('typed_param', 'ParamNode', Rhs([Alt([NamedItem('t', NameLeaf('NAME')), NamedItem('n', NameLeaf('NAME'))], action='ParamNode ( t . string , n . string , LOCATIONS )')])),
+     Rule('function_call', None, Rhs([Alt([NamedItem('f', NameLeaf('function_call_expr')), NamedItem(None, StringLeaf('";"'))], action='f')])),
+     Rule('function_call_expr', 'CallNode', Rhs([Alt([NamedItem('n', NameLeaf('function_name')), NamedItem(None, StringLeaf('"("')), NamedItem('a', Opt(NameLeaf('func_call_param'))), NamedItem(None, StringLeaf('")"'))], action='CallNode ( n , a , LOCATIONS )')])),
+     Rule('func_call_param', 'List [ASTNode]', Rhs([Alt([NamedItem('e1', NameLeaf('expr')), NamedItem('e2', Repeat0(Group(Rhs([Alt([NamedItem(None, StringLeaf('","')), NamedItem(None, NameLeaf('expr'))])]))))], action='[e1] + ( [item [1] for item in e2] if e2 else [] )')])),
+     Rule('var_decl', None, Rhs([Alt([NamedItem('t', NameLeaf('type_name')), NamedItem('n', NameLeaf('var_name')), NamedItem('v', Opt(Group(Rhs([Alt([NamedItem(None, StringLeaf('"="')), NamedItem(None, NameLeaf('var_value'))])])))), NamedItem(None, StringLeaf('";"'))], action='VarDeclNode ( t , n , v [1] if v else None , LOCATIONS )')])),
+     Rule('type_name', None, Rhs([Alt([NamedItem(None, NameLeaf('NAME'))], action='NameNode ( name . string , LOCATIONS )')])),
+     Rule('var_name', None, Rhs([Alt([NamedItem(None, NameLeaf('NAME'))], action='NameNode ( name . string , LOCATIONS )')])),
+     Rule('var_value', None, Rhs([Alt([NamedItem(None, NameLeaf('expr'))])])),
+     Rule('var_assign', None, Rhs([Alt([NamedItem('n', NameLeaf('var_name')), NamedItem(None, StringLeaf('"="')), NamedItem('v', NameLeaf('var_value')), NamedItem(None, StringLeaf('";"'))], action='AssignmentNode ( n , v , LOCATIONS )')])),
+     Rule('expr', None, Rhs([Alt([NamedItem(None, NameLeaf('expr')), NamedItem(None, StringLeaf("'+'")), NamedItem(None, NameLeaf('term'))], action='BinaryOpNode ( expr , Operator . ADD , term , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('expr')), NamedItem(None, StringLeaf("'-'")), NamedItem(None, NameLeaf('term'))], action='BinaryOpNode ( expr , Operator . SUBTRACT , term , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('term'))], action='term')])),
+     Rule('term', None, Rhs([Alt([NamedItem('l', NameLeaf('term')), NamedItem(None, StringLeaf("'*'")), NamedItem('r', NameLeaf('factor'))], action='BinaryOpNode ( l , Operator . MULTIPLY , r , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('term')), NamedItem(None, StringLeaf("'/'")), NamedItem(None, NameLeaf('factor'))], action='BinaryOpNode ( term , Operator . DIVIDE , factor , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('factor'))], action='factor')])),
+     Rule('factor', None, Rhs([Alt([NamedItem(None, StringLeaf("'('")), NamedItem(None, NameLeaf('expr')), NamedItem(None, StringLeaf("')'"))], action='expr'), Alt([NamedItem(None, NameLeaf('atom'))], action='atom')])),
+     Rule('atom', None, Rhs([Alt([NamedItem(None, NameLeaf('function_call_expr'))]), Alt([NamedItem('b', Group(Rhs([Alt([NamedItem(None, StringLeaf('"true"'))]), Alt([NamedItem(None, StringLeaf('"false"'))])])))], action='BoolNode ( b , LOCATIONS )'), Alt([NamedItem(None, StringLeaf('"null"'))], action='NullNode ( LOCATIONS )'), Alt([NamedItem(None, NameLeaf('NAME'))], action='NameNode ( name . string , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('NUMBER'))], action='NumberNode ( number . string , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('STRING'))], action='StringNode ( string . string , LOCATIONS )')])),
+   ],
+   {repr(list(self.metas.items()))}
+ )
+--------------------------------
+干净语法:
+ start: pack_import
+ pack_import: "#" "include" include_name
+ include_name: INCLUDE_HEADER | STRING | NAME
+ function: return_type function_name "(" param? ")"
+ return_type: NAME
+ function_name: NAME
+ param: typed_param (("," typed_param))*
+ typed_param: NAME NAME
+ function_call: function_call_expr ";"
+ function_call_expr: function_name "(" func_call_param? ")"
+ func_call_param: expr (("," expr))*
+ var_decl: type_name var_name [("=" var_value)] ";"
+ type_name: NAME
+ var_name: NAME
+ var_value: expr
+ var_assign: var_name "=" var_value ";"
+ expr: expr '+' term | expr '-' term | term
+ term: term '*' factor | term '/' factor | factor
+ factor: '(' expr ')' | atom
+ atom: function_call_expr | ("true" | "false") | "null" | NAME | NUMBER | STRING
+--------------------------------
+首项图:
+  start -> pack_import
+  pack_import -> 
+  include_name -> STRING, INCLUDE_HEADER, NAME
+  function -> return_type
+  return_type -> NAME
+  function_name -> NAME
+  param -> typed_param
+  typed_param -> NAME
+  function_call -> function_call_expr
+  function_call_expr -> function_name
+  func_call_param -> expr
+  var_decl -> type_name
+  type_name -> NAME
+  var_name -> NAME
+  var_value -> expr
+  var_assign -> var_name
+  expr -> term, expr
+  term -> term, factor
+  factor -> atom
+  atom -> STRING, NUMBER, NAME, function_call_expr
+  INCLUDE_HEADER -> 
+  STRING -> 
+  NUMBER -> 
+  NAME -> 
+--------------------------------
+首项强连通分量:
+ {'pack_import'}
+ {'start'}
+ {'STRING'}
+ {'INCLUDE_HEADER'}
+ {'NAME'}
+ {'include_name'}
+ {'return_type'}
+ {'function'}
+ {'function_name'}
+ {'typed_param'}
+ {'param'}
+ {'function_call_expr'}
+ {'function_call'}
+ {'NUMBER'}
+ {'atom'}
+ {'factor'}
+ {'term'}  # 左递归
+ {'expr'}  # 左递归
+ {'func_call_param'}
+ {'type_name'}
+ {'var_decl'}
+ {'var_name'}
+ {'var_value'}
+ {'var_assign'}
+--------------------------------
+总耗时: 0.024 秒; 共 58 行; 2430 行/s
+缓存大小:
+  token array :        567
+        cache :       4752

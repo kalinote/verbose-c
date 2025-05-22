@@ -16,6 +16,7 @@ def parse_args():
     parser.add_argument("-o", "--output", help="输出文件名")
     parser.add_argument("-v", "--verbose", help="显示详细信息", action="store_true")
     parser.add_argument("-l", "--log", help="记录编译过程")
+    parser.add_argument("-t", "--tokenization", help="仅计算文件 token", action="store_true")
     return parser.parse_args()
 
 
@@ -26,8 +27,17 @@ def main():
         if not os.path.exists(args.filename):
             print(f"错误: 文件 '{args.filename}' 不存在")
             return
-        
-        compile_file(args.filename, args.output, args.verbose, args.log)
+    
+    if args.tokenization:
+        from verbose_c.parser.tokenizer.lexer import Lexer
+        with open(args.filename, "r", encoding="utf-8") as f:
+            source = f.read()
+        lexer = Lexer(args.filename, source)
+        for token in lexer.tokenize():
+            print(token)
+        return
+    
+    compile_file(args.filename, args.output, args.verbose, args.log)
     
 def compile_file(filename, output, verbose, log=None):
     t0 = time.time()

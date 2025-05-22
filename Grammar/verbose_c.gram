@@ -1,4 +1,13 @@
-start: function_call
+start: pack_import
+
+# 包导入
+pack_import: "#" "include" n=include_name { PackImportNode(n,LOCATIONS) }
+# TODO 结构优化
+
+include_name[NameNode]:
+      | i=INCLUDE_HEADER { NameNode(i.string,LOCATIONS) }
+      | s=STRING { NameNode(s.string,LOCATIONS) }
+      | n=NAME { NameNode(n.string,LOCATIONS) }
 
 # 函数定义
 function: a=return_type b=function_name "(" c=param? ")" {FunctionNode(a,b,c,None,None,LOCATIONS)}
