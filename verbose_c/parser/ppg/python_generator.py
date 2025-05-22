@@ -244,8 +244,8 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         self.unreachable_formatting = unreachable_formatting or "None  # pragma: no cover"
         self.location_formatting = (
             location_formatting
-            or "lineno=start_lineno, col_offset=start_col_offset, "
-            "end_lineno=end_lineno, end_col_offset=end_col_offset"
+            or "start_line=start_line, start_column=start_column, "
+            "end_line=end_line, end_column=end_column"
         )
         self.cleanup_statements: List[str] = []
 
@@ -317,7 +317,8 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
             self.print("mark = self._mark()")
             if self.alts_uses_locations(node.rhs.alts):
                 self.print("tok = self._tokenizer.peek()")
-                self.print("start_lineno, start_col_offset = tok.start")
+                self.print("start_line = tok.line")
+                self.print("start_column = tok.column")
             if is_loop:
                 self.print("children = []")
             self.visit(rhs, is_loop=is_loop, is_gather=is_gather)
@@ -379,8 +380,8 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
 
         if locations:
             self.print("tok = self._tokenizer.get_last_non_whitespace_token()")
-            self.print("end_lineno, end_col_offset = tok.end")
-
+            self.print("end_line = tok.line")
+            self.print("end_column = tok.column")
         if is_loop:
             self.print(f"children.append({action})")
             self.print("mark = self._mark()")
