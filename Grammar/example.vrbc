@@ -1,22 +1,5 @@
-// int main() {
-//     int a = 1;
-//     int b = 2;
-//     int c;
-//     c = a + b;
-//     return c;
-// }
-
-// int a = 1;
-// int main(int a, int b, char v, string x)
-
-// int a = 1 * 2 + ( 3 * 5 / ( 2 + 3 ));
-
-// a(add(2,3));
-
-#include <test>
-
 int main(int a, string b) {
-    int c;
-    c=max(a, b);
+    int c
+    c=max(a, b)
     return c
 }

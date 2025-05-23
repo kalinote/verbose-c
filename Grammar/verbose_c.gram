@@ -1,11 +1,4 @@
-start: s=statement* { BlockNode(s,LOCATIONS) }
-
-statement[ASTNode]:
-      | pack_import
-      | function
-      | var_decl
-      | var_assign
-      | expr
+start: function
 
 # 包导入
 pack_import: "#"? "include" n=include_name { PackImportNode(n,LOCATIONS) }
@@ -17,12 +10,24 @@ include_name[NameNode]:
       | n=NAME { NameNode(n.string,LOCATIONS) }
 
 # 函数定义
-function: a=return_type b=function_name "(" c=param? ")" {FunctionNode(a,b,c,None,None,LOCATIONS)}
+function: a=return_type b=function_name "(" c=param? ")" "{" fb=func_block* "}" {FunctionNode(a,b,c,None,fb,LOCATIONS)}
 
 return_type[NameNode]: NAME { NameNode(name.string,LOCATIONS) }
 function_name[NameNode]: NAME { NameNode(name.string,LOCATIONS) }
 param[List[ParamNode]]: p1=typed_param p2=("," typed_param)* { [p1] + ([item[1] for item in p2] if p2 else []) }
 typed_param[ParamNode]: t=NAME n=NAME { ParamNode(t.string, n.string,LOCATIONS) }
+
+# 函数体
+func_block[ASTNode]:
+      | function_ret
+      | pack_import
+      | function
+      | var_decl
+      | var_assign
+      | expr
+
+# 函数返回
+function_ret[ReturnNode]: "return" r=expr ";"? { ReturnNode(r,LOCATIONS) }
 
 # 函数调用
 function_call: f=function_call_expr ";"? {f}
