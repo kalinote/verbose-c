@@ -24,6 +24,7 @@ func_block[ASTNode]:
       | function
       | var_decl
       | var_assign
+      | if_statement
       | expression_as_statement # 表达式语句 (包括函数调用语句)
 
 # 函数返回
@@ -49,6 +50,26 @@ var_assign: n=var_name "=" v=var_value ";"? { AssignmentNode(n,v,LOCATIONS) }
 
 # 表达式作为语句
 expression_as_statement[ASTNode]: e=expr ";"? { e }
+
+# 比较运算
+comparison:
+      | comparison "==" logical_and { BinaryOpNode(comparison, Operator.EQUAL, logical_and,LOCATIONS) }
+      | comparison "!=" logical_and { BinaryOpNode(comparison, Operator.NOT_EQUAL, logical_and,LOCATIONS) }
+      | comparison "<" logical_and { BinaryOpNode(comparison, Operator.LESS_THAN, logical_and,LOCATIONS) }
+      | comparison "<=" logical_and { BinaryOpNode(comparison, Operator.LESS_EQUAL, logical_and,LOCATIONS) }
+      | comparison ">" logical_and { BinaryOpNode(comparison, Operator.GREATER_THAN, logical_and,LOCATIONS) }
+      | comparison ">=" logical_and { BinaryOpNode(comparison, Operator.GREATER_EQUAL, logical_and,LOCATIONS) }
+      | logical_and { logical_and }
+
+# 逻辑与运算
+logical_and:
+      | logical_and "&&" logical_or { BinaryOpNode(logical_and, Operator.LOGICAL_AND, logical_or,LOCATIONS) }
+      | logical_or { logical_or }
+
+# 逻辑或运算
+logical_or:
+      | logical_or "||" expr { BinaryOpNode(logical_or, Operator.LOGICAL_OR, expr,LOCATIONS) }
+      | expr { expr }
 
 # 四则运算
 expr: 
