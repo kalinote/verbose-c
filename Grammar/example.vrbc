@@ -14,3 +14,9 @@
 // a(add(2,3));
 
 #include <test>
+
+int main(int a, string b) {
+    int c;
+    c=max(a, b);
+    return c
+}

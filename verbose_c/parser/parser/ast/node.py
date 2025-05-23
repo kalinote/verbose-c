@@ -95,7 +95,6 @@ class BinaryOpNode(ASTNode):
         self.left: ASTNode = left
         self.op: Operator = op
         self.right: ASTNode = right
-    
 
 class BlockNode(ASTNode):
     """
