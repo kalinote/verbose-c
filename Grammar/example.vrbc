@@ -1,5 +1,5 @@
 int main(int a, string b) {
-    int c
+    int c;
     c=max(a, b)
-    return c
+    return c;
 }

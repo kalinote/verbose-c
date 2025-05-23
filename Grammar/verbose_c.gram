@@ -24,7 +24,7 @@ func_block[ASTNode]:
       | function
       | var_decl
       | var_assign
-      | expr
+      | expression_as_statement # 表达式语句 (包括函数调用语句)
 
 # 函数返回
 function_ret[ReturnNode]: "return" r=expr ";"? { ReturnNode(r,LOCATIONS) }
@@ -46,6 +46,9 @@ var_value: expr
 
 # 变量赋值
 var_assign: n=var_name "=" v=var_value ";"? { AssignmentNode(n,v,LOCATIONS) }
+
+# 表达式作为语句
+expression_as_statement[ASTNode]: e=expr ";"? { e }
 
 # 四则运算
 expr: 
