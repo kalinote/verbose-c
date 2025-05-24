@@ -51,35 +51,43 @@ var_assign: n=var_name "=" v=var_value ";"? { AssignmentNode(n,v,LOCATIONS) }
 # 表达式作为语句
 expression_as_statement[ASTNode]: e=expr ";"? { e }
 
-# 比较运算
-comparison:
-      | comparison "==" logical_and { BinaryOpNode(comparison, Operator.EQUAL, logical_and,LOCATIONS) }
-      | comparison "!=" logical_and { BinaryOpNode(comparison, Operator.NOT_EQUAL, logical_and,LOCATIONS) }
-      | comparison "<" logical_and { BinaryOpNode(comparison, Operator.LESS_THAN, logical_and,LOCATIONS) }
-      | comparison "<=" logical_and { BinaryOpNode(comparison, Operator.LESS_EQUAL, logical_and,LOCATIONS) }
-      | comparison ">" logical_and { BinaryOpNode(comparison, Operator.GREATER_THAN, logical_and,LOCATIONS) }
-      | comparison ">=" logical_and { BinaryOpNode(comparison, Operator.GREATER_EQUAL, logical_and,LOCATIONS) }
+# 表达式 - 按运算符优先级组织
+# 优先级从低到高：逻辑或 -> 逻辑与 -> 相等比较 -> 关系比较 -> 加减 -> 乘除 -> 因子
+
+# 逻辑或运算 (最低优先级)
+expr: 
+      | expr "||" logical_and { BinaryOpNode(expr, Operator.LOGICAL_OR, logical_and,LOCATIONS) }
       | logical_and { logical_and }
 
 # 逻辑与运算
 logical_and:
-      | logical_and "&&" logical_or { BinaryOpNode(logical_and, Operator.LOGICAL_AND, logical_or,LOCATIONS) }
-      | logical_or { logical_or }
+      | logical_and "&&" equality { BinaryOpNode(logical_and, Operator.LOGICAL_AND, equality,LOCATIONS) }
+      | equality { equality }
 
-# 逻辑或运算
-logical_or:
-      | logical_or "||" expr { BinaryOpNode(logical_or, Operator.LOGICAL_OR, expr,LOCATIONS) }
-      | expr { expr }
+# 相等比较运算
+equality:
+      | equality "==" relational { BinaryOpNode(equality, Operator.EQUAL, relational,LOCATIONS) }
+      | equality "!=" relational { BinaryOpNode(equality, Operator.NOT_EQUAL, relational,LOCATIONS) }
+      | relational { relational }
 
-# 四则运算
-expr: 
-      | expr '+' term { BinaryOpNode(expr, Operator.ADD, term,LOCATIONS) }
-      | expr '-' term { BinaryOpNode(expr, Operator.SUBTRACT, term,LOCATIONS) }
-      | term { term }
+# 关系比较运算
+relational:
+      | relational "<" additive { BinaryOpNode(relational, Operator.LESS_THAN, additive,LOCATIONS) }
+      | relational "<=" additive { BinaryOpNode(relational, Operator.LESS_EQUAL, additive,LOCATIONS) }
+      | relational ">" additive { BinaryOpNode(relational, Operator.GREATER_THAN, additive,LOCATIONS) }
+      | relational ">=" additive { BinaryOpNode(relational, Operator.GREATER_EQUAL, additive,LOCATIONS) }
+      | additive { additive }
 
-term: 
-      | l=term '*' r=factor { BinaryOpNode(l, Operator.MULTIPLY, r,LOCATIONS) }
-      | term '/' factor { BinaryOpNode(term, Operator.DIVIDE, factor,LOCATIONS) }
+# 加减运算
+additive: 
+      | additive '+' multiplicative { BinaryOpNode(additive, Operator.ADD, multiplicative,LOCATIONS) }
+      | additive '-' multiplicative { BinaryOpNode(additive, Operator.SUBTRACT, multiplicative,LOCATIONS) }
+      | multiplicative { multiplicative }
+
+# 乘除运算
+multiplicative: 
+      | multiplicative '*' factor { BinaryOpNode(multiplicative, Operator.MULTIPLY, factor,LOCATIONS) }
+      | multiplicative '/' factor { BinaryOpNode(multiplicative, Operator.DIVIDE, factor,LOCATIONS) }
       | factor { factor }
 
 factor:
@@ -93,3 +101,7 @@ atom:
       | NAME { NameNode(name.string,LOCATIONS) }
       | NUMBER { NumberNode(number.string,LOCATIONS) }
       | STRING { StringNode(string.string,LOCATIONS) }
+
+# if语句块
+if_statement:
+      | 'if' "(" e=expr ")" ':' "{" fb=func_block* "}" { IfNode(e, fb, None,LOCATIONS) }
