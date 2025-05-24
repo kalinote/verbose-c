@@ -1,5 +1,6 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
+from verbose_c.parser.parser.ast.enum import AttributeType
 from verbose_c.parser.tokenizer.enum import Operator
 
 
@@ -32,9 +33,9 @@ class NumberNode(ASTNode):
     """
     数字节点
     """
-    def __init__(self, value: str, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
+    def __init__(self, value: str | int, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.value: Union[int, float] = float(value) if '.' in value or 'e' in value.lower() else int(value)
+        self.value: int | float = float(value) if '.' in str(value) or 'e' in str(value).lower() else int(value)
         
 class BoolNode(ASTNode):
     """
@@ -63,9 +64,9 @@ class TypeNode(ASTNode):
     """
     类型节点
     """
-    def __init__(self, type_name: ASTNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
+    def __init__(self, type_name: NameNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.type_name: ASTNode = type_name
+        self.type_name: NameNode = type_name
     
 # 结构和运算
 
@@ -73,9 +74,9 @@ class PackImportNode(ASTNode):
     """
     包导入节点
     """
-    def __init__(self, name: ASTNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None):
+    def __init__(self, name: NameNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None):
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.name: ASTNode = name
+        self.name: NameNode = name
 
 class UnaryOpNode(ASTNode):
     """
@@ -108,15 +109,15 @@ class VarDeclNode(ASTNode):
     """
     变量声明节点
     """
-    def __init__(self, var_type: ASTNode, name: ASTNode, init_exp: Optional[ASTNode] = None, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
+    def __init__(self, var_type: NameNode, name: NameNode, init_exp: Optional[ASTNode] = None, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.var_type: ASTNode = var_type
-        self.name: ASTNode = name
+        self.var_type: NameNode = var_type
+        self.name: NameNode = name
         self.init_exp: Optional[ASTNode] = init_exp
 
 class VariableNode(ASTNode):
     """
-    变量节点
+    [暂未使用]变量节点
     """
     def __init__(self, name: ASTNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
@@ -126,9 +127,9 @@ class AssignmentNode(ASTNode):
     """
     赋值节点
     """
-    def __init__(self, name: ASTNode, value: ASTNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
+    def __init__(self, name: NameNode, value: ASTNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.name: ASTNode = name
+        self.name: NameNode = name
         self.value: ASTNode = value
         
 class ExprStmtNode(ASTNode):
@@ -227,3 +228,32 @@ class CallNode(ASTNode):
         self.name: ASTNode = name
         self.args: List[ASTNode] = args
         self.kwargs: Dict[str, ASTNode] = kwargs        # TODO 暂未使用
+
+# 类与对象
+class ClassNode(ASTNode):
+    """
+    类节点
+
+    Args:
+        name (NameNode): 类名称
+        base_classes (List[NameNode]): 父类名称
+        body (BlockNode): 类主体，包括类属性和类方法
+    """
+    def __init__(self, name: NameNode, base_classes: List["ClassNode"], body: BlockNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None):
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.name: NameNode = name
+        self.base_classes: List[ClassNode] = base_classes
+        self.body: BlockNode = body
+
+class AttributeNode(ASTNode):
+    """
+    TODO 属性节点
+    
+    Args:
+        name (NameNode): 属性名
+        type str: 属性类型
+    """
+    def __init__(self, name: NameNode, type: str, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None):
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.name: NameNode = name
+        self.type: AttributeType = type
