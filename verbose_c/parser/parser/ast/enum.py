@@ -1,9 +1,9 @@
 
 
-import enum
+from enum import Enum
 
 
-class AttributeType(enum):
+class AttributeType(Enum):
     """
     类属性类型枚举
     """

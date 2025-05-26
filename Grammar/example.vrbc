@@ -1,5 +1,9 @@
-int main(int a, string b) {
-    int c;
-    c = max(a, b)
-    return c;
+if (null) {
+    false
+} else {
+    if (a > 3) {
+        c
+    } else {
+        d
+    }
 }

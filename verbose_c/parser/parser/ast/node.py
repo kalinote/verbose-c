@@ -52,7 +52,10 @@ class BoolNode(ASTNode):
     """
     def __init__(self, value: bool, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.value: bool = bool(value)
+        self.value: bool = False
+        # TODO 暂定，后续使用专用token
+        if value in ["true", "True"]:
+            self.value = True
         
 class StringNode(ASTNode):
     """
