@@ -1,9 +1,6 @@
-if (null) {
-    false
-} else {
-    if (a > 3) {
-        c
-    } else {
-        d
-    }
+while(true) {
+    do_some_thing();
+    break;
 }
+int a;
+continue;

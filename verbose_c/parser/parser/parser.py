@@ -262,7 +262,7 @@ class Parser:
     @memoize
     def name(self) -> Token:
         tok = self._tokenizer.peek()
-        if tok.type == TokenType.NAME:
+        if tok.type == TokenType.NAME and not tok.is_keyword:
             return self._tokenizer.getnext()
         return None
 
@@ -394,6 +394,13 @@ def simple_parser_main(parser_class: Type[Parser]) -> None:
 
     if not tree:
         err = parser.make_syntax_error(filename)
+        traceback.print_exception(err.__class__, err, None)
+        sys.exit(1)
+
+    if not parser._tokenizer.is_end():
+        # 还有未解析的token，说明解析不完整
+        tok = parser._tokenizer.peek()
+        err = parser.make_syntax_error(f"unexpected token '{tok.string}'", filename)
         traceback.print_exception(err.__class__, err, None)
         sys.exit(1)
 
