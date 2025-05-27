@@ -60,5 +60,3 @@ class Tokenizer:
                 return tok
         return self.tokens[-1]
 
-    def is_end(self) -> bool:
-        return self._index >= len(self.tokens)

@@ -397,9 +397,8 @@ def simple_parser_main(parser_class: Type[Parser]) -> None:
         traceback.print_exception(err.__class__, err, None)
         sys.exit(1)
 
-    if not parser._tokenizer.is_end():
-        # 还有未解析的token，说明解析不完整
-        tok = parser._tokenizer.peek()
+    tok = parser._tokenizer.peek()
+    if tok.type != TokenType.END:
         err = parser.make_syntax_error(f"unexpected token '{tok.string}'", filename)
         traceback.print_exception(err.__class__, err, None)
         sys.exit(1)

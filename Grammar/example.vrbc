@@ -3,4 +3,4 @@ while(true) {
     break;
 }
 int a;
-continue;
+// continue;

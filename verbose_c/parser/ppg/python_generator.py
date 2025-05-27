@@ -235,6 +235,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         location_formatting: Optional[str] = None,
         unreachable_formatting: Optional[str] = None,
     ):
+        tokens.add("SOFT_KEYWORD")
         super().__init__(grammar, tokens, file)
         self.callmakervisitor: PythonCallMakerVisitor = PythonCallMakerVisitor(self)
         self.invalidvisitor: InvalidNodeVisitor = InvalidNodeVisitor()

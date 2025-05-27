@@ -149,7 +149,7 @@ class VarDeclNode(ASTNode):
     """
     def __init__(self, var_type: NameNode, name: NameNode, init_exp: Optional[ASTNode] = None, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.var_type: NameNode = var_type
+        self.var_type: TypeNode = var_type
         self.name: NameNode = name
         self.init_exp: Optional[ASTNode] = init_exp
 
