@@ -5,7 +5,7 @@ import time
 import traceback
 from verbose_c.parser.ppg.build import build_python_parser_and_generator
 from verbose_c.parser.ppg.validator import validate_grammar
-from verbose_c.parser.tokenizer.lexer import Lexer
+from verbose_c.parser.lexer.lexer import Lexer
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -29,7 +29,7 @@ def main():
             return
     
     if args.tokenization:
-        from verbose_c.parser.tokenizer.lexer import Lexer
+        from verbose_c.parser.lexer.lexer import Lexer
         with open(args.filename, "r", encoding="utf-8") as f:
             source = f.read()
         lexer = Lexer(args.filename, source)

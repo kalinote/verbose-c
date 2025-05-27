@@ -1,0 +1,188 @@
+原始语法:
+ Grammar(
+   [
+     Rule('start', None, Rhs([Alt([NamedItem('fb', Repeat1(NameLeaf('func_block')))], action='BlockNode ( fb , LOCATIONS )')])),
+     Rule('pack_import', None, Rhs([Alt([NamedItem(None, Opt(StringLeaf('"#"'))), NamedItem(None, StringLeaf("'include'")), NamedItem('n', NameLeaf('include_name'))], action='PackImportNode ( n , LOCATIONS )')])),
+     Rule('include_name', 'NameNode', Rhs([Alt([NamedItem('i', NameLeaf('INCLUDE_HEADER'))], action='NameNode ( i . string , LOCATIONS )'), Alt([NamedItem('s', NameLeaf('STRING'))], action='StringNode ( s . string , LOCATIONS )'), Alt([NamedItem('n', NameLeaf('NAME'))], action='NameNode ( n . string , LOCATIONS )')])),
+     Rule('function', None, Rhs([Alt([NamedItem('a', NameLeaf('type_name')), NamedItem('b', NameLeaf('function_name')), NamedItem(None, StringLeaf('"("')), NamedItem('c', Opt(NameLeaf('param'))), NamedItem(None, StringLeaf('")"')), NamedItem(None, StringLeaf('"{"')), NamedItem('fb', Opt(NameLeaf('func_block'))), NamedItem(None, StringLeaf('"}"'))], action='FunctionNode ( a , b , c , None , fb , LOCATIONS )')])),
+     Rule('function_name', 'NameNode', Rhs([Alt([NamedItem(None, NameLeaf('NAME'))], action='NameNode ( name . string , LOCATIONS )')])),
+     Rule('param', 'List [ParamNode]', Rhs([Alt([NamedItem('p1', NameLeaf('typed_param')), NamedItem('p2', Repeat0(Group(Rhs([Alt([NamedItem(None, StringLeaf('","')), NamedItem(None, NameLeaf('typed_param'))])]))))], action='[p1] + ( [item [1] for item in p2] if p2 else [] )')])),
+     Rule('typed_param', 'ParamNode', Rhs([Alt([NamedItem('t', NameLeaf('NAME')), NamedItem('n', NameLeaf('NAME'))], action='ParamNode ( t . string , n . string , LOCATIONS )')])),
+     Rule('func_block', 'BlockNode', Rhs([Alt([NamedItem('b', Repeat1(Group(Rhs([Alt([NamedItem(None, NameLeaf('function_ret'))]), Alt([NamedItem(None, NameLeaf('pack_import'))]), Alt([NamedItem(None, NameLeaf('function'))]), Alt([NamedItem(None, NameLeaf('var_decl'))]), Alt([NamedItem(None, NameLeaf('var_assign'))]), Alt([NamedItem(None, NameLeaf('if_statement'))]), Alt([NamedItem(None, NameLeaf('while_statement'))]), Alt([NamedItem(None, NameLeaf('for_statement'))]), Alt([NamedItem(None, NameLeaf('expression_as_statement'))])]))))], action='BlockNode ( b , LOCATIONS )')])),
+     Rule('function_ret', 'ReturnNode', Rhs([Alt([NamedItem(None, StringLeaf("'return'")), NamedItem('r', NameLeaf('expr')), NamedItem(None, Opt(StringLeaf('";"')))], action='ReturnNode ( r , LOCATIONS )')])),
+     Rule('function_call', None, Rhs([Alt([NamedItem('f', NameLeaf('function_call_expr')), NamedItem(None, Opt(StringLeaf('";"')))], action='f')])),
+     Rule('function_call_expr', 'CallNode', Rhs([Alt([NamedItem('n', NameLeaf('function_name')), NamedItem(None, StringLeaf('"("')), NamedItem('a', Opt(NameLeaf('func_call_param'))), NamedItem(None, StringLeaf('")"'))], action='CallNode ( n , a , LOCATIONS )')])),
+     Rule('func_call_param', 'List [ASTNode]', Rhs([Alt([NamedItem('e1', NameLeaf('expr')), NamedItem('e2', Repeat0(Group(Rhs([Alt([NamedItem(None, StringLeaf('","')), NamedItem(None, NameLeaf('expr'))])]))))], action='[e1] + ( [item [1] for item in e2] if e2 else [] )')])),
+     Rule('var_decl', None, Rhs([Alt([NamedItem('t', NameLeaf('type_name')), NamedItem('n', NameLeaf('var_name')), NamedItem('v', Opt(Group(Rhs([Alt([NamedItem(None, StringLeaf('"="')), NamedItem(None, NameLeaf('var_value'))])])))), NamedItem(None, Opt(StringLeaf('";"')))], action='VarDeclNode ( t , n , v [1] if v else None , LOCATIONS )')])),
+     Rule('type_name', None, Rhs([Alt([NamedItem('sk', NameLeaf('SOFT_KEYWORD'))], action='TypeNode ( sk . string , LOCATIONS )'), Alt([NamedItem('n', NameLeaf('NAME'))], action='TypeNode ( n . string , LOCATIONS )')])),
+     Rule('var_name', None, Rhs([Alt([NamedItem(None, NameLeaf('NAME'))], action='NameNode ( name . string , LOCATIONS )')])),
+     Rule('var_value', None, Rhs([Alt([NamedItem(None, NameLeaf('expr'))])])),
+     Rule('var_assign', None, Rhs([Alt([NamedItem('n', NameLeaf('var_name')), NamedItem(None, StringLeaf('"="')), NamedItem('v', NameLeaf('var_value')), NamedItem(None, Opt(StringLeaf('";"')))], action='AssignmentNode ( n , v , LOCATIONS )')])),
+     Rule('expression_as_statement', 'ASTNode', Rhs([Alt([NamedItem('e', NameLeaf('expr')), NamedItem(None, Opt(StringLeaf('";"')))], action='e')])),
+     Rule('expr', None, Rhs([Alt([NamedItem(None, NameLeaf('expr')), NamedItem(None, StringLeaf('"||"')), NamedItem(None, NameLeaf('logical_and'))], action='BinaryOpNode ( expr , Operator . LOGICAL_OR , logical_and , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('logical_and'))], action='logical_and')])),
+     Rule('logical_and', None, Rhs([Alt([NamedItem(None, NameLeaf('logical_and')), NamedItem(None, StringLeaf('"&&"')), NamedItem(None, NameLeaf('equality'))], action='BinaryOpNode ( logical_and , Operator . LOGICAL_AND , equality , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('equality'))], action='equality')])),
+     Rule('equality', None, Rhs([Alt([NamedItem(None, NameLeaf('equality')), NamedItem(None, StringLeaf("'=='")), NamedItem(None, NameLeaf('relational'))], action='BinaryOpNode ( equality , Operator . EQUAL , relational , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('equality')), NamedItem(None, StringLeaf("'!='")), NamedItem(None, NameLeaf('relational'))], action='BinaryOpNode ( equality , Operator . NOT_EQUAL , relational , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('relational'))], action='relational')])),
+     Rule('relational', None, Rhs([Alt([NamedItem(None, NameLeaf('relational')), NamedItem(None, StringLeaf("'<'")), NamedItem(None, NameLeaf('additive'))], action='BinaryOpNode ( relational , Operator . LESS_THAN , additive , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('relational')), NamedItem(None, StringLeaf("'<='")), NamedItem(None, NameLeaf('additive'))], action='BinaryOpNode ( relational , Operator . LESS_EQUAL , additive , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('relational')), NamedItem(None, StringLeaf("'>'")), NamedItem(None, NameLeaf('additive'))], action='BinaryOpNode ( relational , Operator . GREATER_THAN , additive , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('relational')), NamedItem(None, StringLeaf("'>='")), NamedItem(None, NameLeaf('additive'))], action='BinaryOpNode ( relational , Operator . GREATER_EQUAL , additive , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('additive'))], action='additive')])),
+     Rule('additive', None, Rhs([Alt([NamedItem(None, NameLeaf('additive')), NamedItem(None, StringLeaf("'+'")), NamedItem(None, NameLeaf('multiplicative'))], action='BinaryOpNode ( additive , Operator . ADD , multiplicative , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('additive')), NamedItem(None, StringLeaf("'-'")), NamedItem(None, NameLeaf('multiplicative'))], action='BinaryOpNode ( additive , Operator . SUBTRACT , multiplicative , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('multiplicative'))], action='multiplicative')])),
+     Rule('multiplicative', None, Rhs([Alt([NamedItem(None, NameLeaf('multiplicative')), NamedItem(None, StringLeaf("'*'")), NamedItem(None, NameLeaf('factor'))], action='BinaryOpNode ( multiplicative , Operator . MULTIPLY , factor , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('multiplicative')), NamedItem(None, StringLeaf("'/'")), NamedItem(None, NameLeaf('factor'))], action='BinaryOpNode ( multiplicative , Operator . DIVIDE , factor , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('factor'))], action='factor')])),
+     Rule('factor', None, Rhs([Alt([NamedItem(None, StringLeaf("'('")), NamedItem(None, NameLeaf('expr')), NamedItem(None, StringLeaf("')'"))], action='expr'), Alt([NamedItem(None, NameLeaf('atom'))], action='atom')])),
+     Rule('atom', None, Rhs([Alt([NamedItem(None, NameLeaf('function_call_expr'))]), Alt([NamedItem('b', Group(Rhs([Alt([NamedItem(None, StringLeaf('"true"'))]), Alt([NamedItem(None, StringLeaf('"false"'))])])))], action='BoolNode ( b , LOCATIONS )'), Alt([NamedItem(None, StringLeaf('"null"'))], action='NullNode ( LOCATIONS )'), Alt([NamedItem(None, NameLeaf('NAME'))], action='NameNode ( name . string , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('NUMBER'))], action='NumberNode ( number . string , LOCATIONS )'), Alt([NamedItem(None, NameLeaf('STRING'))], action='StringNode ( string . string , LOCATIONS )')])),
+     Rule('if_statement', None, Rhs([Alt([NamedItem(None, StringLeaf("'if'")), NamedItem(None, StringLeaf('"("')), NamedItem('c', NameLeaf('expr')), NamedItem(None, StringLeaf('")"')), NamedItem(None, StringLeaf('"{"')), NamedItem('tb', Opt(NameLeaf('func_block'))), NamedItem(None, StringLeaf('"}"')), NamedItem('eb', NameLeaf('else_if_barch'))], action='IfNode ( c , tb , eb , LOCATIONS )'), Alt([NamedItem(None, StringLeaf("'if'")), NamedItem(None, StringLeaf('"("')), NamedItem('c', NameLeaf('expr')), NamedItem(None, StringLeaf('")"')), NamedItem(None, StringLeaf('"{"')), NamedItem('tb', Opt(NameLeaf('func_block'))), NamedItem(None, StringLeaf('"}"')), NamedItem('eb', Opt(NameLeaf('else_barch')))], action='IfNode ( c , tb , eb , LOCATIONS )')])),
+     Rule('else_if_barch', None, Rhs([Alt([NamedItem(None, StringLeaf("'else'")), NamedItem(None, StringLeaf("'if'")), NamedItem(None, StringLeaf('"("')), NamedItem('c', NameLeaf('expr')), NamedItem(None, StringLeaf('")"')), NamedItem(None, StringLeaf('"{"')), NamedItem('tb', Opt(NameLeaf('func_block'))), NamedItem(None, StringLeaf('"}"')), NamedItem('eb', NameLeaf('else_if_barch'))], action='IfNode ( c , tb , eb , LOCATIONS )'), Alt([NamedItem(None, StringLeaf("'else'")), NamedItem(None, StringLeaf("'if'")), NamedItem(None, StringLeaf('"("')), NamedItem('c', NameLeaf('expr')), NamedItem(None, StringLeaf('")"')), NamedItem(None, StringLeaf('"{"')), NamedItem('tb', Opt(NameLeaf('func_block'))), NamedItem(None, StringLeaf('"}"')), NamedItem('eb', Opt(NameLeaf('else_barch')))], action='IfNode ( c , tb , eb , LOCATIONS )')])),
+     Rule('else_barch', None, Rhs([Alt([NamedItem(None, StringLeaf("'else'")), NamedItem(None, StringLeaf('"{"')), NamedItem('eb', Opt(NameLeaf('func_block'))), NamedItem(None, StringLeaf('"}"'))], action='eb')])),
+     Rule('break_statement', None, Rhs([Alt([NamedItem(None, StringLeaf('"break"')), NamedItem(None, StringLeaf('";"'))], action='BreakNode ( LOCATIONS )')])),
+     Rule('continue_statement', None, Rhs([Alt([NamedItem(None, StringLeaf('"continue"')), NamedItem(None, StringLeaf('";"'))], action='ContinueNode ( LOCATIONS )')])),
+     Rule('loop_body_statement', None, Rhs([Alt([NamedItem(None, NameLeaf('break_statement'))]), Alt([NamedItem(None, NameLeaf('continue_statement'))]), Alt([NamedItem(None, NameLeaf('function_ret'))]), Alt([NamedItem(None, NameLeaf('pack_import'))]), Alt([NamedItem(None, NameLeaf('function'))]), Alt([NamedItem(None, NameLeaf('var_decl'))]), Alt([NamedItem(None, NameLeaf('var_assign'))]), Alt([NamedItem(None, NameLeaf('if_statement'))]), Alt([NamedItem(None, NameLeaf('while_statement'))]), Alt([NamedItem(None, NameLeaf('for_statement'))]), Alt([NamedItem(None, NameLeaf('expression_as_statement'))])])),
+     Rule('loop_block', 'BlockNode', Rhs([Alt([NamedItem('b', Repeat1(NameLeaf('loop_body_statement')))], action='BlockNode ( b , LOCATIONS )')])),
+     Rule('while_statement', None, Rhs([Alt([NamedItem(None, StringLeaf("'while'")), NamedItem(None, StringLeaf('"("')), NamedItem('c', NameLeaf('expr')), NamedItem(None, StringLeaf('")"')), NamedItem(None, StringLeaf('"{"')), NamedItem('b', Opt(NameLeaf('loop_block'))), NamedItem(None, StringLeaf('"}"'))], action='WhileNode ( c , b , LOCATIONS )')])),
+     Rule('for_statement', None, Rhs([Alt([NamedItem(None, StringLeaf("'for'")), NamedItem(None, StringLeaf('"("')), NamedItem('i', NameLeaf('expr')), NamedItem(None, StringLeaf('";"')), NamedItem('c', NameLeaf('expr')), NamedItem(None, StringLeaf('";"')), NamedItem('u', NameLeaf('expr')), NamedItem(None, StringLeaf('")"')), NamedItem(None, StringLeaf('"{"')), NamedItem('b', Opt(NameLeaf('loop_block'))), NamedItem(None, StringLeaf('"}"'))], action='ForNode ( i , c , u , b , LOCATIONS )')])),
+   ],
+   {repr(list(self.metas.items()))}
+ )
+--------------------------------
+干净语法:
+ start: func_block+
+ pack_import: "#"? 'include' include_name
+ include_name: INCLUDE_HEADER | STRING | NAME
+ function: type_name function_name "(" param? ")" "{" func_block? "}"
+ function_name: NAME
+ param: typed_param (("," typed_param))*
+ typed_param: NAME NAME
+ func_block:
+     | ((function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement))+
+ function_ret: 'return' expr ";"?
+ function_call: function_call_expr ";"?
+ function_call_expr: function_name "(" func_call_param? ")"
+ func_call_param: expr (("," expr))*
+ var_decl: type_name var_name [("=" var_value)] ";"?
+ type_name: SOFT_KEYWORD | NAME
+ var_name: NAME
+ var_value: expr
+ var_assign: var_name "=" var_value ";"?
+ expression_as_statement: expr ";"?
+ expr: expr "||" logical_and | logical_and
+ logical_and: logical_and "&&" equality | equality
+ equality: equality '==' relational | equality '!=' relational | relational
+ relational:
+     | relational '<' additive
+     | relational '<=' additive
+     | relational '>' additive
+     | relational '>=' additive
+     | additive
+ additive: additive '+' multiplicative | additive '-' multiplicative | multiplicative
+ multiplicative: multiplicative '*' factor | multiplicative '/' factor | factor
+ factor: '(' expr ')' | atom
+ atom: function_call_expr | ("true" | "false") | "null" | NAME | NUMBER | STRING
+ if_statement:
+     | 'if' "(" expr ")" "{" func_block? "}" else_if_barch
+     | 'if' "(" expr ")" "{" func_block? "}" else_barch?
+ else_if_barch:
+     | 'else' 'if' "(" expr ")" "{" func_block? "}" else_if_barch
+     | 'else' 'if' "(" expr ")" "{" func_block? "}" else_barch?
+ else_barch: 'else' "{" func_block? "}"
+ break_statement: "break" ";"
+ continue_statement: "continue" ";"
+ loop_body_statement:
+     | break_statement
+     | continue_statement
+     | function_ret
+     | pack_import
+     | function
+     | var_decl
+     | var_assign
+     | if_statement
+     | while_statement
+     | for_statement
+     | expression_as_statement
+ loop_block: loop_body_statement+
+ while_statement: 'while' "(" expr ")" "{" loop_block? "}"
+ for_statement: 'for' "(" expr ";" expr ";" expr ")" "{" loop_block? "}"
+--------------------------------
+首项图:
+  start -> func_block
+  pack_import -> 
+  include_name -> STRING, NAME, INCLUDE_HEADER
+  function -> type_name
+  function_name -> NAME
+  param -> typed_param
+  typed_param -> NAME
+  func_block -> expression_as_statement, function, for_statement, function_ret, var_decl, while_statement, pack_import, var_assign, if_statement
+  function_ret -> 
+  function_call -> function_call_expr
+  function_call_expr -> function_name
+  func_call_param -> expr
+  var_decl -> type_name
+  type_name -> SOFT_KEYWORD, NAME
+  var_name -> NAME
+  var_value -> expr
+  var_assign -> var_name
+  expression_as_statement -> expr
+  expr -> logical_and, expr
+  logical_and -> logical_and, equality
+  equality -> equality, relational
+  relational -> additive, relational
+  additive -> multiplicative, additive
+  multiplicative -> multiplicative, factor
+  factor -> atom
+  atom -> STRING, function_call_expr, NUMBER, NAME
+  if_statement -> 
+  else_if_barch -> 
+  else_barch -> 
+  break_statement -> 
+  continue_statement -> 
+  loop_body_statement -> continue_statement, expression_as_statement, function, break_statement, for_statement, function_ret, var_decl, while_statement, pack_import, var_assign, if_statement
+  loop_block -> loop_body_statement
+  while_statement -> 
+  for_statement -> 
+  SOFT_KEYWORD -> 
+  NUMBER -> 
+  STRING -> 
+  NAME -> 
+  INCLUDE_HEADER -> 
+--------------------------------
+首项强连通分量:
+ {'STRING'}
+ {'NAME'}
+ {'function_name'}
+ {'function_call_expr'}
+ {'NUMBER'}
+ {'atom'}
+ {'factor'}
+ {'multiplicative'}  # 左递归
+ {'additive'}  # 左递归
+ {'relational'}  # 左递归
+ {'equality'}  # 左递归
+ {'logical_and'}  # 左递归
+ {'expr'}  # 左递归
+ {'expression_as_statement'}
+ {'SOFT_KEYWORD'}
+ {'type_name'}
+ {'function'}
+ {'for_statement'}
+ {'function_ret'}
+ {'var_decl'}
+ {'while_statement'}
+ {'pack_import'}
+ {'var_name'}
+ {'var_assign'}
+ {'if_statement'}
+ {'func_block'}
+ {'start'}
+ {'INCLUDE_HEADER'}
+ {'include_name'}
+ {'typed_param'}
+ {'param'}
+ {'function_call'}
+ {'func_call_param'}
+ {'var_value'}
+ {'else_if_barch'}
+ {'else_barch'}
+ {'break_statement'}
+ {'continue_statement'}
+ {'loop_body_statement'}
+ {'loop_block'}
+--------------------------------
+总耗时: 0.051 秒; 共 137 行; 2698 行/s
+缓存大小:
+  token array :       1143
+        cache :       9701

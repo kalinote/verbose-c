@@ -7,9 +7,9 @@ from abc import abstractmethod
 from typing import Any, Callable, ClassVar, Dict, Optional, Tuple, Type, TypeVar, cast
 
 from verbose_c.parser.parser.ast.node import ASTNode
-from verbose_c.parser.tokenizer.enum import TokenType
-from verbose_c.parser.tokenizer.tokenizer import Mark, Tokenizer
-from verbose_c.parser.tokenizer.token import Token
+from verbose_c.parser.lexer.enum import TokenType
+from verbose_c.parser.lexer.tokenizer import Mark, Tokenizer
+from verbose_c.parser.lexer.token import Token
 
 T = TypeVar("T")
 P = TypeVar("P", bound="Parser")

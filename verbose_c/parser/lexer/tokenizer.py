@@ -1,8 +1,8 @@
 from typing import List
 
-from verbose_c.parser.tokenizer.enum import TokenType
-from verbose_c.parser.tokenizer.token import Token
-from verbose_c.parser.tokenizer.lexer import Lexer
+from verbose_c.parser.lexer.enum import TokenType
+from verbose_c.parser.lexer.token import Token
+from verbose_c.parser.lexer.lexer import Lexer
 
 Mark = int
 

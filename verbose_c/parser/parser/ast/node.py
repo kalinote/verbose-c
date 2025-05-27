@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 
 from verbose_c.parser.parser.ast.enum import AttributeType
-from verbose_c.parser.tokenizer.enum import Operator
+from verbose_c.parser.lexer.enum import Operator
 
 
 class ASTNode:

@@ -25,7 +25,7 @@ from verbose_c.parser.ppg.grammar import (
     StringLeaf,
 )
 from verbose_c.parser.ppg.parser_generator import ParserGenerator
-from verbose_c.parser.tokenizer.enum import TokenType
+from verbose_c.parser.lexer.enum import TokenType
 
 MODULE_PREFIX = """\
 #!/usr/bin/env python3.8
