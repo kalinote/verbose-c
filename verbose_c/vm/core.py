@@ -19,7 +19,7 @@ class VBCVirtualMachine:
         """
         编译核心模块
         """
-        core_module_name = "_core_"
+        core_module_name = "__core"
         self.modules[core_module_name] = Module(core_module_name)
 
 
