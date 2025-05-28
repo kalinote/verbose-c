@@ -39,7 +39,7 @@ from typing import Any, Optional
 # TODO: 需要根据实际情况动态修改
 from verbose_c.parser.parser.ast.node import *
 from verbose_c.parser.parser.parser import memoize, memoize_left_rec, logger, Parser
-from verbose_c.parser.tokenizer.enum import Operator
+from verbose_c.parser.lexer.enum import Operator
 
 """
 MODULE_SUFFIX = """

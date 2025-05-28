@@ -87,6 +87,16 @@ class TypeNode(ASTNode):
         self.type_name: NameNode = type_name
     
 # 结构和运算
+class ModuleNode(ASTNode):
+    """
+    包节点，作为每个包的根节点
+    
+    Args:
+        body (List[ASTNode]): 模块内容节点列表
+    """
+    def __init__(self, body: List[ASTNode], start_line = None, start_column = None, end_line = None, end_column = None):
+        super().__init__(start_line, start_column, end_line, end_column)
+        self.body: List[ASTNode] = body
 
 class PackImportNode(ASTNode):
     """

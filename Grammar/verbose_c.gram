@@ -1,4 +1,4 @@
-start: fb=func_block+ {BlockNode(fb, LOCATIONS)}
+start: fb=func_block+ {ModuleNode(fb, LOCATIONS)}
 
 # 包导入
 pack_import: "#"? 'include' n=include_name { PackImportNode(n, LOCATIONS) }
