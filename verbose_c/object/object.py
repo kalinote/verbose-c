@@ -1,12 +1,18 @@
 
-from verbose_c.object.enum import ObjectType
+from verbose_c.object.enum import VBCObjectType
 
-class ObjectHeader:
-    def __init__(self, object_type: ObjectType):
-        self.object_type: ObjectType = object_type
+class VBCObjectHeader:
+    """
+    对象头类
+    """
+    def __init__(self, object_type: VBCObjectType):
+        self._object_type: VBCObjectType = object_type
         
 class VBCObject:
-    def __init__(self, object_type: ObjectType):
-        if not isinstance(object_type, ObjectType):
-            raise TypeError(f"对象类型必须是 {ObjectType}")
-        self.object_header = ObjectHeader(object_type)
+    """
+    对象基类
+    """
+    def __init__(self, object_type: VBCObjectType):
+        if not isinstance(object_type, VBCObjectType):
+            raise TypeError(f"对象类型必须是 {VBCObjectType}")
+        self._object_header = VBCObjectHeader(object_type)

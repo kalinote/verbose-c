@@ -127,6 +127,21 @@ class BinaryOpNode(ASTNode):
         self.op: Operator = op
         self.right: ASTNode = right
 
+class RangeNode(ASTNode):
+    """
+    范围节点
+
+    Args:
+        start (NumberNode): 起始值
+        end (NumberNode): 结束值
+        step (NumberNode): 步长值
+    """
+    def __init__(self, start: NumberNode, end: NumberNode, step: NumberNode, start_line: Optional[int] = None, start_column: Optional[int] = None, end_line: Optional[int] = None, end_column: Optional[int] = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.start: NumberNode = start
+        self.end: NumberNode = end
+        self.step: NumberNode = step or 1
+
 class BlockNode(ASTNode):
     """
     语句块节点

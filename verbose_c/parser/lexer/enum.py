@@ -38,6 +38,7 @@ class TokenType(Enum):
     OR         = ("||", r"\|\|")                        # 逻辑或
     SHIFT_LEFT = ("<<", r"<<")                          # 左移
     SHIFT_RIGHT = (">>", r">>")                         # 右移
+    ELLIPSES    = ("...", r"\.\.\.")                    # 省略号
 
     # 单字符操作符
     PLUS       = ("+", r"\+")                           # 加号

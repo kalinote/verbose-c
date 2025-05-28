@@ -1,6 +1,6 @@
 from enum import Enum, auto
 
-class ObjectType(Enum):
+class VBCObjectType(Enum):
     """
     类与对象类型
     """
@@ -12,4 +12,6 @@ class ObjectType(Enum):
     STRING = auto()
     FUNCTION = auto()
     INSTANCE = auto()
+    RANGE = auto()
+
     
