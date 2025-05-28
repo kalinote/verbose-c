@@ -1,5 +1,4 @@
-
-from ast import Module
+from verbose_c.utils.stack import Stack
 
 
 class VBCVirtualMachine:
@@ -7,20 +6,19 @@ class VBCVirtualMachine:
     verbose-c 虚拟机核心功能
     """
     def __init__(self):
-        self.modules = {}
+        self._stack: Stack = Stack()
+        self._modules = {}
 
-    def import_module(self):
+    @property
+    def modules(self):
+        return self._modules
+    
+    
+    def get_module(self, module_name: str):
         """
-        导入模块
+        获取模块
         """
-        raise NotImplementedError
-
-    def build_core(self):
-        """
-        编译核心模块
-        """
-        core_module_name = "__core"
-        self.modules[core_module_name] = Module(core_module_name)
+        return self._modules.get(module_name, None)
 
 
 global_vm = VBCVirtualMachine()
