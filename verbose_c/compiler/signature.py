@@ -1,4 +1,4 @@
-from verbose_c.complier.enum import FunctionSignatureType
+from verbose_c.compiler.enum import FunctionSignatureType
 
 
 class FunctionSignature:
