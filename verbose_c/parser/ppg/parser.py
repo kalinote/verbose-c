@@ -6,7 +6,7 @@ import token
 import tokenize
 import traceback
 from abc import abstractmethod
-from typing import Any, Callable, ClassVar, Dict, Optional, Tuple, Type, TypeVar, cast
+from typing import Any, Callable, ClassVar, Optional, Type, TypeVar, cast
 
 from verbose_c.parser.ppg.tokenizer import Mark, Tokenizer, exact_token_types
 
@@ -27,7 +27,7 @@ def logger(method: F) -> F:
     """
     method_name = method.__name__
 
-    def logger_wrapper(self: P, *args: object) -> F:
+    def logger_wrapper(self: "Parser", *args: object) -> F:
         if not self._verbose:
             return method(self, *args)
         argsr = ",".join(repr(arg) for arg in args)
@@ -47,7 +47,7 @@ def memoize(method: F) -> F:
     """Memoize a symbol method."""
     method_name = method.__name__
 
-    def memoize_wrapper(self: P, *args: object) -> F:
+    def memoize_wrapper(self: "Parser", *args: object) -> F:
         mark = self._mark()
         key = mark, method_name, args
         # Fast path: cache hit, and not verbose.
@@ -165,15 +165,15 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
 class Parser:
     """Parsing base class."""
 
-    KEYWORDS: ClassVar[Tuple[str, ...]]
+    KEYWORDS: ClassVar[tuple[str, ...]]
 
-    SOFT_KEYWORDS: ClassVar[Tuple[str, ...]]
+    SOFT_KEYWORDS: ClassVar[tuple[str, ...]]
 
     def __init__(self, tokenizer: Tokenizer, *, verbose: bool = False):
         self._tokenizer = tokenizer
         self._verbose = verbose
         self._level = 0
-        self._cache: Dict[Tuple[Mark, str, Tuple[Any, ...]], Tuple[Any, Mark]] = {}
+        self._cache: dict[tuple[Mark, str, tuple[Any, ...]], tuple[Any, Mark]] = {}
 
         # Integer tracking wether we are in a left recursive rule or not. Can be useful
         # for error reporting.

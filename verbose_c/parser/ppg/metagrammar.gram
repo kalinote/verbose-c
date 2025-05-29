@@ -126,13 +126,6 @@ target_atom[str]:
     | NAME { name.string }
     | NUMBER { number.string }
     | STRING { string.string }
-    | l=FSTRING_START m=target_fstring_middle* r=FSTRING_END { l.string + "".join(m) + r.string }
     | "?" { "?" }
     | ":" { ":" }
     | !"}" !"]" OP { op.string }
-
-target_fstring_middle[str]:
-    | FSTRING_MIDDLE { fstring_middle.string }
-    | "{" { "{" }
-    | "}" { "}" }
-    | target_atom { target_atom }

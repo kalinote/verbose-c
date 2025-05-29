@@ -1,6 +1,5 @@
 import pathlib
 import tokenize
-from typing import Dict, Set, Tuple
 
 from verbose_c.parser.ppg.grammar import Grammar
 from verbose_c.parser.ppg.grammar_parser import GeneratedParser as GrammarParser
@@ -11,12 +10,12 @@ from verbose_c.parser.ppg.tokenizer import Tokenizer
 
 MOD_DIR = pathlib.Path(__file__).resolve().parent
 
-TokenDefinitions = Tuple[Dict[int, str], Dict[str, int], Set[str]]
+TokenDefinitions = tuple[dict[int, str], dict[str, int], set[str]]
 
 
 def build_parser(
     grammar_file: str, verbose_tokenizer: bool = False, verbose_parser: bool = False
-) -> Tuple[Grammar, Parser, Tokenizer]:
+) -> tuple[Grammar, Parser, Tokenizer]:
     with open(grammar_file, encoding="utf-8") as file:
         tokenizer = Tokenizer(tokenize.generate_tokens(file.readline), verbose=verbose_tokenizer)
         parser = GrammarParser(tokenizer, verbose=verbose_parser)
@@ -44,7 +43,7 @@ def build_python_parser_and_generator(
     output_file: str,
     verbose_tokenizer: bool = False,
     verbose_parser: bool = False,
-) -> Tuple[Grammar, Parser, Tokenizer, ParserGenerator]:
+) -> tuple[Grammar, Parser, Tokenizer, ParserGenerator]:
     """为给定的语法生成规则、Python解析器、分词器和解析器生成器
 
     参数:

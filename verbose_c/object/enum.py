@@ -8,7 +8,6 @@ class VBCObjectType(Enum):
     LIST = auto()
     MAP = auto()
     MODULE = auto()
-    MAP = auto()
     STRING = auto()
     FUNCTION = auto()
     INSTANCE = auto()

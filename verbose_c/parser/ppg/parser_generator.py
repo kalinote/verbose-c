@@ -1,6 +1,6 @@
 import contextlib
 from abc import abstractmethod
-from typing import Any, IO, AbstractSet, Dict, Iterator, List, Optional, Set, Text, Tuple
+from typing import Any, IO, AbstractSet, Iterator, Optional, Text
 
 from verbose_c.parser.ppg import sccutils
 from verbose_c.parser.ppg.grammar import (
@@ -26,7 +26,7 @@ from verbose_c.parser.ppg.grammar import (
 
 
 class RuleCheckingVisitor(GrammarVisitor):
-    def __init__(self, rules: Dict[str, Rule], tokens: Set[str]):
+    def __init__(self, rules: dict[str, Rule], tokens: set[str]):
         self.rules = rules
         self.tokens = tokens
 
@@ -44,7 +44,7 @@ class RuleCheckingVisitor(GrammarVisitor):
 class ParserGenerator:
     callmakervisitor: GrammarVisitor
 
-    def __init__(self, grammar: Grammar, tokens: Set[str], file: Optional[IO[Text]]):
+    def __init__(self, grammar: Grammar, tokens: set[str], file: Optional[IO[Text]]):
         self.grammar = grammar
         self.tokens = tokens
         self.rules = grammar.rules
@@ -60,8 +60,8 @@ class ParserGenerator:
         self.first_graph, self.first_sccs = compute_left_recursives(self.rules)
         self.todo = self.rules.copy()  # 需要生成的规则
         self.counter = 0  # 用于 name_rule()/name_loop() 的计数器
-        self.all_rules: Dict[str, Rule] = {}  # 规则 + 临时规则
-        self._local_variable_stack: List[List[str]] = []
+        self.all_rules: dict[str, Rule] = {}  # 规则 + 临时规则
+        self._local_variable_stack: list[list[str]] = []
 
     def validate_rule_names(self) -> None:
         for rule in self.rules:
@@ -75,7 +75,7 @@ class ParserGenerator:
         self._local_variable_stack.pop()
 
     @property
-    def local_variable_names(self) -> List[str]:
+    def local_variable_names(self) -> list[str]:
         return self._local_variable_stack[-1]
 
     @abstractmethod
@@ -102,7 +102,7 @@ class ParserGenerator:
             self.print(line)
 
     def collect_todo(self) -> None:
-        done: Set[str] = set()
+        done: set[str] = set()
         while True:
             alltodo = list(self.todo)
             self.all_rules.update(self.todo)
@@ -164,9 +164,9 @@ class ParserGenerator:
 
 
 class NullableVisitor(GrammarVisitor):
-    def __init__(self, rules: Dict[str, Rule]) -> None:
+    def __init__(self, rules: dict[str, Rule]) -> None:
         self.rules = rules
-        self.visited: Set[Any] = set()
+        self.visited: set[Any] = set()
 
     def visit_Rule(self, rule: Rule) -> bool:
         if rule in self.visited:
@@ -228,15 +228,15 @@ class NullableVisitor(GrammarVisitor):
         return not node.value
 
 
-def compute_nullables(rules: Dict[str, Rule]) -> None:
+def compute_nullables(rules: dict[str, Rule]) -> None:
     nullable_visitor = NullableVisitor(rules)
     for rule in rules.values():
         nullable_visitor.visit(rule)
 
 
 def compute_left_recursives(
-    rules: Dict[str, Rule]
-) -> Tuple[Dict[str, AbstractSet[str]], List[AbstractSet[str]]]:
+    rules: dict[str, Rule]
+) -> tuple[dict[str, AbstractSet[str]], list[AbstractSet[str]]]:
     graph = make_first_graph(rules)
     sccs = list(sccutils.strongly_connected_components(graph.keys(), graph))
     for scc in sccs:
@@ -264,7 +264,7 @@ def compute_left_recursives(
     return graph, sccs
 
 
-def make_first_graph(rules: Dict[str, Rule]) -> Dict[str, AbstractSet[str]]:
+def make_first_graph(rules: dict[str, Rule]) -> dict[str, AbstractSet[str]]:
     """计算左侧调用的图。
 
     如果 A 在初始位置可能调用 B，则从 A 到 B 有一条边。
@@ -272,7 +272,7 @@ def make_first_graph(rules: Dict[str, Rule]) -> Dict[str, AbstractSet[str]]:
     注意，这需要先计算可空标志。
     """
     graph = {}
-    vertices: Set[str] = set()
+    vertices: set[str] = set()
     for rulename, rhs in rules.items():
         graph[rulename] = names = rhs.initial_names()
         vertices |= names

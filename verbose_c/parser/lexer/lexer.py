@@ -40,6 +40,9 @@ class Lexer:
     def _tokenize(self):
         for m in self.master_pattern.finditer(self.source):
             kind = m.lastgroup
+            if not kind:
+                continue
+
             value = m.group(kind)
 
             # 保存当前词法单元的起始位置

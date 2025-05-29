@@ -1,5 +1,5 @@
 
-from ast import List
+from typing import List
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.parser.parser.ast.node import ASTNode
 
@@ -10,6 +10,11 @@ class Compiler:
     """
     def __init__(self, target_ast: ASTNode):
         self._target_ast = target_ast
-        self._opcodes: List[tuple(Opcode)] = []
+        self._opcodes: List[tuple[Opcode]] = []
 
+    def compile(self):
+        """
+        TODO 执行编译
+        """
+        pass
 

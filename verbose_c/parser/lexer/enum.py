@@ -83,8 +83,8 @@ class TokenType(Enum):
     DEDENT     = ("DEDENT", r"$^")                    # 去缩进
     
     def __init__(self, literal, pattern):
-        self._literal = literal
-        self._pattern = pattern
+        self._literal: str = literal
+        self._pattern: str = pattern
 
     @property
     def literal(self):
@@ -106,7 +106,7 @@ class TokenType(Enum):
         except KeyError:
             return None
     
-TokenType._literal_map = None
+TokenType._literal_map = {}
 
 class Operator(Enum):
     """

@@ -50,8 +50,8 @@ def strongly_connected_components(
 
 
 def topsort(
-    data: Dict[AbstractSet[str], Set[AbstractSet[str]]]
-) -> Iterable[AbstractSet[AbstractSet[str]]]:
+    data: Dict[frozenset[str], Set[frozenset[str]]]
+) -> Iterable[Set[frozenset[str]]]:
     """Topological sort.
 
     Args:

@@ -34,7 +34,7 @@ MODULE_PREFIX = """\
 
 import sys
 
-from typing import Any, Optional
+from typing import Any
 
 # TODO: 需要根据实际情况动态修改
 from verbose_c.parser.parser.ast.node import *
@@ -302,7 +302,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         else:
             self.print("@memoize")
         node_type = node.type or "Any"
-        self.print(f"def {node.name}(self) -> Optional[{node_type}]:")
+        self.print(f"def {node.name}(self) -> {node_type} | None:")
         with self.indent():
             self.print(f"# {node.name}: {rhs}")
             if node.nullable:

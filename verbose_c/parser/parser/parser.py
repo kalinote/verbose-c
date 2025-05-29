@@ -201,12 +201,14 @@ def ast_dump(node, annotate_fields=True, indent=None, level=0):
                 if not v:
                     value_str = '{}'
                 else:
+                    list_sep = ', ' if indent is None else ',\n'
+                    list_pad = '' if indent is None else next_pad + (' ' * indent)
                     value_str = list_sep.join(
-                        list_pad + (format_node(k, level + 2) if is_ast_node(k) else repr(k)) + ': ' + (format_node(v, level + 2) if is_ast_node(v) else repr(v))
-                        for k, v in v.items()
+                        list_pad + (format_node(key, level + 2) if is_ast_node(key) else repr(key)) + ': ' + (format_node(val, level + 2) if is_ast_node(val) else repr(val))
+                        for key, val in v.items()
                     )
                     if indent is not None:
-                        value_str = '{\n' + value_str + f'\n{next_pad}'+ '}'
+                        value_str = '{\n' + value_str + f'\n{next_pad}' + '}'
                     else:
                         value_str = '{' + value_str + '}'
             elif is_ast_node(v):
@@ -260,35 +262,35 @@ class Parser:
         return tok.__repr__()
 
     @memoize
-    def name(self) -> Token:
+    def name(self) -> Token | None:
         tok = self._tokenizer.peek()
         if tok.type == TokenType.NAME and not tok.is_keyword:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def number(self) -> Token:
+    def number(self) -> Token | None:
         tok = self._tokenizer.peek()
         if tok.type == TokenType.NUMBER:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def string(self) -> Token:
+    def string(self) -> Token | None:
         tok = self._tokenizer.peek()
         if tok.type == TokenType.STRING:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def include_header(self) -> Token:
+    def include_header(self) -> Token | None:
         tok = self._tokenizer.peek()
         if tok.type == TokenType.INCLUDE_HEADER:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def op(self) -> Token:
+    def op(self) -> Token | None:
         # TODO 需要考虑实现方式
         tok = self._tokenizer.peek()
         if tok.type in [
@@ -304,21 +306,21 @@ class Parser:
         return None
 
     @memoize
-    def type_comment(self) -> Token:
+    def type_comment(self) -> Token | None:
         tok = self._tokenizer.peek()
         if tok.type == TokenType.COMMENT:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def soft_keyword(self) -> Token:
+    def soft_keyword(self) -> Token | None:
         tok = self._tokenizer.peek()
         if tok.type == TokenType.NAME and tok.is_keyword:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def expect(self, type: str) -> Token:
+    def expect(self, type: str) -> Token | None:
         # TODO 此处逻辑需要进一步检查
         tok = self._tokenizer.peek()
         if tok and tok.string == type:
@@ -408,7 +410,7 @@ def simple_parser_main(parser_class: Type[Parser]) -> None:
     if verbose:
         dt = t1 - t0
         diag = tokenizer.diagnose()
-        nlines = diag.line
+        nlines = diag.line or 0
         if diag.type == TokenType.END:
             nlines -= 1
         print(f"Total time: {dt:.3f} sec; {nlines} lines", end="")
@@ -421,4 +423,3 @@ def simple_parser_main(parser_class: Type[Parser]) -> None:
         print("Caches sizes:")
         print(f"  token array : {len(tokenizer.tokens):10}")
         print(f"        cache : {len(parser._cache):10}")
-
