@@ -55,7 +55,7 @@ class BoolNode(ASTNode):
     Args:
         value (bool): 布尔值
     """
-    def __init__(self, value: bool, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+    def __init__(self, value: str, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.value: bool = False
         # TODO 暂定，后续使用专用token

@@ -1,5 +1,8 @@
 # 根节点固定为ModuleNode
-start[ModuleNode]: fb=func_block+ {ModuleNode(fb, LOCATIONS)}
+start[ModuleNode]: sl=statement+ { ModuleNode(BlockNode(sl, LOCATIONS), LOCATIONS) }
+
+# 语句定义 (新增)
+statement: function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement
 
 # 包导入
 pack_import[PackImportNode]: "#"? 'include' n=include_name { PackImportNode(n, LOCATIONS) }
@@ -19,7 +22,7 @@ param[list[ParamNode]]: p1=typed_param p2=("," typed_param)* { [p1] + ([item[1] 
 typed_param[ParamNode]: t=NAME n=NAME { ParamNode(TypeNode(NameNode(t.string, LOCATIONS), LOCATIONS), NameNode(n.string), LOCATIONS) }
 
 ## 函数体
-func_block[BlockNode]: b=(function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement)* { BlockNode(b or [], LOCATIONS) }
+func_block[BlockNode]: b=statement* { BlockNode(b or [], LOCATIONS) }
 
 ## 函数返回
 function_ret[ReturnNode]: 'return' r=expr ";"? { ReturnNode(r, LOCATIONS) }
@@ -94,7 +97,7 @@ factor:
 
 atom:
       | function_call_expr
-      | b=("true"|"false") { BoolNode(b, LOCATIONS) }
+      | b=("true"|"false") { BoolNode(b.string, LOCATIONS) }
       | "null" { NullNode(LOCATIONS) }
       | NAME { NameNode(name.string, LOCATIONS) }
       | NUMBER { NumberNode(number.string, LOCATIONS) }
