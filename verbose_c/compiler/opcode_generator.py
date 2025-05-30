@@ -72,7 +72,7 @@ class OpcodeGenerator(VisitorBase):
         const_index = self.add_constant(node.value)
         self.emit(Opcode.LOAD_CONSTANT, const_index)
 
-    def visit_boolNode(self, node: BoolNode):
+    def visit_BoolNode(self, node: BoolNode):
         const_index = self.add_constant(node.value)
         self.emit(Opcode.LOAD_CONSTANT, const_index)
     

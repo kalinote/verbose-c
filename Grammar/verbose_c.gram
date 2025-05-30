@@ -1,5 +1,5 @@
 # 根节点固定为ModuleNode
-start[ModuleNode]: sl=statement+ { ModuleNode(BlockNode(sl, LOCATIONS), LOCATIONS) }
+start[ModuleNode]: sl=statement+ { ModuleNode(sl, LOCATIONS) }
 
 # 语句定义 (新增)
 statement: function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement

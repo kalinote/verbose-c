@@ -1,4 +1,40 @@
-while(true) {
-    do_some_thing();
-    break;
-}
+// Test variable declarations and basic types
+int a = 10;
+bool b = true;
+string c = "hello";
+any d = null;
+int e; // Declaration without initialization
+
+// Test assignments
+e = a + 5; // e should be 15
+
+// Test arithmetic operations
+int sum = a + e;         // 10 + 15 = 25
+int diff = e - a;        // 15 - 10 = 5
+int product = a * 2;     // 10 * 2 = 20
+int quotient = e / 3;    // 15 / 3 = 5 (integer division if applicable)
+
+// Test comparison operations
+bool isEqual = (a == 10);    // true
+bool isNotEqual = (b != false); // true
+bool isLess = (a < e);       // true
+bool isGreater = (e > a);    // true
+bool isLessEq = (a <= 10);   // true
+bool isGreaterEq = (e >= 15); // true
+
+// Test logical operations
+bool andOp = isEqual && isNotEqual; // true && true = true
+bool orOp = (a == 5) || (b == true); // false || true = true
+
+// Test unary operations
+int negA = -a; // -10
+bool notB = !b; // false
+int positiveA = +a; // 10 (if unary plus is supported and distinct)
+
+// Test expressions as statements (results should be popped)
+a + 5;
+"test_string";
+true;
+
+// Another variable declaration to ensure symbol table works
+int final_val = negA + sum; // -10 + 25 = 15
