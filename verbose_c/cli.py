@@ -12,6 +12,8 @@ def parse_args():
         prog="verbose-c",
         description="Verbose-C Compiler"
     )
+    
+    # TODO 临时测试使用，后续完善
     parser.add_argument("filename", help="需要编译的语法文件")
     parser.add_argument("-o", "--output", help="输出文件名")
     parser.add_argument("-v", "--verbose", help="显示详细信息", action="store_true")
@@ -71,7 +73,7 @@ def compile_file(filename, output, verbose, log=None):
                 f.write(" " + str(scc))
                 if len(scc) > 1:
                     f.write(
-                        "  # 间接左递归; 领导者:" + {name for name in scc if grammar.rules[name].leader} + "\n"
+                        f"  # 间接左递归; 领导者: {', '.join(name for name in scc if grammar.rules[name].leader)}\n"
                     )
                 else:
                     name = next(iter(scc))

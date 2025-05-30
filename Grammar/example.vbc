@@ -2,5 +2,3 @@ while(true) {
     do_some_thing();
     break;
 }
-int a;
-// continue;

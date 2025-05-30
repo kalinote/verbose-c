@@ -9,20 +9,17 @@ class Opcode(Enum):
     """
     
     # === 栈操作类 (0x00-0x0F) ===
-    LOAD_CONSTANT       = 0x00  # 加载常量到栈顶
-    LOAD_LOCAL_VAR      = 0x01  # 加载局部变量到栈顶
-    PUSH_NULL           = 0x02  # 推送null值到栈顶
-    PUSH_TRUE           = 0x03  # 推送true值到栈顶
-    PUSH_FALSE          = 0x04  # 推送false值到栈顶
-    POP                 = 0x05  # 弹出栈顶元素
-    DUP                 = 0x06  # 复制栈顶元素
-    SWAP                = 0x07  # 交换栈顶两个元素
+    LOAD_CONSTANT       = 0x01  # 加载常量到栈顶
+    POP                 = 0x02  # 弹出栈顶元素
+    DUP                 = 0x03  # 复制栈顶元素
+    SWAP                = 0x04  # 交换栈顶两个元素
     
     # === 变量操作类 (0x10-0x1F) ===
     STORE_LOCAL_VAR     = 0x10  # 存储到局部变量
-    LOAD_GLOBAL_VAR     = 0x11  # 加载全局变量
-    STORE_GLOBAL_VAR    = 0x12  # 存储到全局变量
-    DECLARE_VAR         = 0x13  # 声明变量
+    LOAD_LOCAL_VAR      = 0x11  # 加载局部变量到栈顶
+    LOAD_GLOBAL_VAR     = 0x12  # 加载全局变量
+    STORE_GLOBAL_VAR    = 0x13  # 存储到全局变量
+    DECLARE_VAR         = 0x14  # 声明变量
     
     # === 算术运算类 (0x20-0x2F) ===
     ADD                 = 0x20  # 加法运算

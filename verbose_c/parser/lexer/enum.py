@@ -126,6 +126,7 @@ class Operator(Enum):
     SUBTRACT = "-"
     MULTIPLY = "*"
     DIVIDE = "/"
+    NOT = "!"
 
     def __str__(self):
         return self.value 

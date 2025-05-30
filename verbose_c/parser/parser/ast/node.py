@@ -1,5 +1,6 @@
 from verbose_c.parser.parser.ast.enum import AttributeType
 from verbose_c.parser.lexer.enum import Operator
+from verbose_c.utils.visitor import VisitorBase
 
 
 class ASTNode:
@@ -16,6 +17,12 @@ class ASTNode:
 
     def __repr__(self) -> str:
         return f"{self._type}({self.__dict__})"
+    
+    def accept(self, visitor: VisitorBase):
+        method_name = f"visit_{self._type}"
+        visitor_method = getattr(visitor, method_name, visitor.generic_visit)
+        return visitor_method(self)
+
     
 # 基本类型
 
@@ -166,9 +173,9 @@ class VarDeclNode(ASTNode):
     变量声明节点
     
     Args:
-       var_type (NameNode): 变量类型
-       name (NameNode): 变量名
-       init_exp (ASTNode| None): 初始化表达式，默认为None
+        var_type (NameNode): 变量类型
+        name (NameNode): 变量名
+        init_exp (ASTNode| None): 初始化表达式，默认为None
     """
     def __init__(self, var_type: TypeNode, name: NameNode, init_exp: ASTNode| None = None, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)

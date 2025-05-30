@@ -30,9 +30,32 @@ class Symbol:
     def __repr__(self) -> str:
         return f"Symbol(name='{self._name}', type={self._type_node.type_name.name if self._type_node else 'None'}, kind='{self._kind}', addr={self._address}, init={self._is_initialized})"
 
+    @property
+    def name(self) -> str:
+        return self._name
+    
+    @property
+    def type_node(self) -> Optional[TypeNode]:
+        return self._type_node
+
+    @property
+    def kind(self) -> SymbolKind:
+        return self._kind
+
+    @property
+    def address(self) -> Optional[int]:
+        return self._address
+
+    @property
+    def is_initialized(self) -> bool:
+        return self._is_initialized
+
+
 class SymbolTable:
     """
     符号表
+    
+    每个作用域都应该有单独的符号表
     
     Args:
         scope_type (ScopeType): 作用域类型

@@ -1,3 +1,4 @@
+# 根节点固定为ModuleNode
 start[ModuleNode]: fb=func_block+ {ModuleNode(fb, LOCATIONS)}
 
 # 包导入
