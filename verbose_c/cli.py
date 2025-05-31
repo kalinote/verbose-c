@@ -60,6 +60,8 @@ def main():
 def compile_source_file(filename, verbose=False, opcode_output=None):
     """
     编译源代码文件到操作码
+    
+    TODO 临时测试使用，后续优化完善
     """
     print(f"编译源代码文件: {filename}")
     
@@ -105,58 +107,63 @@ def compile_source_file(filename, verbose=False, opcode_output=None):
         symbol_table = SymbolTable(ScopeType.GLOBAL)
         
         # 生成操作码
-        print("生成操作码...")
+        print("生成编译日志...")
         opcode_gen = OpcodeGenerator(symbol_table)
         opcode_gen.visit(ast)
         
         # 输出结果
-        print("\n=== 生成的操作码 ===")
-        for i, instruction in enumerate(opcode_gen.bytecode):
-            if len(instruction) == 1:
-                print(f"{i:4d}: {instruction[0].name}")
-            else:
-                print(f"{i:4d}: {instruction[0].name} {instruction[1]}")
-        
-        print(f"\n=== 常量池 ===")
-        for i, constant in enumerate(opcode_gen.constant_pool):
-            print(f"{i:4d}: {constant!r}")
-        
-        print(f"\n=== 标签 ===")
-        for label, pos in opcode_gen.labels.items():
-            print(f"{label}: {pos}")
+        if verbose:
+            print("\n=== 生成的操作码 ===")
+            for i, instruction in enumerate(opcode_gen.bytecode):
+                if len(instruction) == 1:
+                    print(f"{i:4d}: {instruction[0].name}")
+                else:
+                    print(f"{i:4d}: {instruction[0].name} {instruction[1]}")
+            
+            print(f"\n=== 常量池 ===")
+            for i, constant in enumerate(opcode_gen.constant_pool):
+                print(f"{i:4d}: {constant!r}")
+            
+            print(f"\n=== 标签 ===")
+            for label, pos in opcode_gen.labels.items():
+                print(f"{label}: {pos}")
             
         # 如果指定了输出文件，写入操作码
         if opcode_output:
-            write_opcode_to_file(opcode_output, opcode_gen)
-            print(f"\n操作码已输出到: {opcode_output}")
+            with open(opcode_output, 'w', encoding='utf-8') as f:
+                f.write("# Verbose-C 编译日志\n")
+                f.write("# 生成时间: " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
+                
+                f.write("\n=== Token序列 ===\n")
+                for token in tokenizer.tokens:
+                    f.write(f"{token}\n")
+
+                f.write("\n=== AST结构 ===\n")
+                from verbose_c.parser.parser.parser import ast_dump
+                f.write(ast_dump(ast, indent=4))
+                f.write("\n")
+                
+                f.write("\n=== 操作码 ===\n")
+                for i, instruction in enumerate(opcode_gen.bytecode):
+                    if len(instruction) == 1:
+                        f.write(f"{i:4d}: {instruction[0].name}\n")
+                    else:
+                        f.write(f"{i:4d}: {instruction[0].name} {instruction[1]}\n")
+                
+                f.write(f"\n=== 常量池 ===\n")
+                for i, constant in enumerate(opcode_gen.constant_pool):
+                    f.write(f"{i:4d}: {constant!r}\n")
+                
+                f.write(f"\n=== 标签 ===\n")
+                for label, pos in opcode_gen.labels.items():
+                    f.write(f"{label}: {pos}\n")
+            print(f"\n编译日志已输出到: {opcode_output}")
             
     except Exception as e:
         print(f"编译过程中发生错误: {e}")
         if verbose:
             traceback.print_exc()
 
-def write_opcode_to_file(filename, opcode_gen):
-    """
-    将操作码输出到文件
-    """
-    with open(filename, 'w', encoding='utf-8') as f:
-        f.write("# Verbose-C 操作码文件\n")
-        f.write("# 生成时间: " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
-        
-        f.write("=== 操作码 ===\n")
-        for i, instruction in enumerate(opcode_gen.bytecode):
-            if len(instruction) == 1:
-                f.write(f"{i:4d}: {instruction[0].name}\n")
-            else:
-                f.write(f"{i:4d}: {instruction[0].name} {instruction[1]}\n")
-        
-        f.write(f"\n=== 常量池 ===\n")
-        for i, constant in enumerate(opcode_gen.constant_pool):
-            f.write(f"{i:4d}: {constant!r}\n")
-        
-        f.write(f"\n=== 标签 ===\n")
-        for label, pos in opcode_gen.labels.items():
-            f.write(f"{label}: {pos}\n")
 
 def compile_file(filename, output, verbose, log=None):
     """

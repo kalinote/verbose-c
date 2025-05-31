@@ -42,14 +42,14 @@ class OpcodeGenerator(VisitorBase):
             self.constant_pool.append(value)
         return self.constant_pool.index(value)
 
-    def generate_label(self):
+    def generate_label(self, lebel_name="unnamed"):
         """
         生成唯一标签
 
         Returns:
             label (str): 标签
         """
-        label = f"L{self.next_label_id}"
+        label = f"L{self.next_label_id}_{lebel_name}"
         self.next_label_id += 1
         return label
 
@@ -99,6 +99,10 @@ class OpcodeGenerator(VisitorBase):
     def visit_PackImportNode(self, node: PackImportNode):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
         
+    def visit_LabelNode(self, node: LabelNode):
+        lebel = self.generate_label(node.name.name)
+        self.mark_label(lebel)
+        
     # 表达式
     def visit_UnaryOpNode(self, node: UnaryOpNode):
         self.visit(node.expr)
@@ -118,7 +122,7 @@ class OpcodeGenerator(VisitorBase):
         if node.op == Operator.LOGICAL_AND:
             self.visit(node.left)
             
-            end_label = self.generate_label()
+            end_label = self.generate_label("binary_end")
             self.emit(Opcode.DUP)
             self.emit(Opcode.JUMP_IF_FALSE, end_label)
             
@@ -130,7 +134,7 @@ class OpcodeGenerator(VisitorBase):
         elif node.op == Operator.LOGICAL_OR:
             self.visit(node.left)
             
-            end_label = self.generate_label()
+            end_label = self.generate_label("binary_end")
             self.emit(Opcode.DUP)
             self.emit(Opcode.JUMP_IF_TRUE, end_label)
             
@@ -218,10 +222,47 @@ class OpcodeGenerator(VisitorBase):
         self.emit(Opcode.POP)
 
     def visit_IfNode(self, node: IfNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+        self.visit(node.condition)
+        
+        endif_label = self.generate_label("if_end")
+        if node.else_branch:
+            else_label = self.generate_label("else_branch")
+            
+            # 条件为假时跳转到else分支
+            self.emit(Opcode.JUMP_IF_FALSE, else_label)
+            
+            # 条件为真时执行then分支            
+            self.visit(node.then_branch)
+            self.emit(Opcode.JUMP, endif_label)
+
+            self.mark_label(else_label)
+            self.visit(node.else_branch)
+            
+        else:
+            # 条件为假时跳转到语句结束
+            self.emit(Opcode.JUMP_IF_FALSE, endif_label)
+            
+            self.visit(node.then_branch)
+            
+        # 标记语句结束位置
+        self.mark_label(endif_label)
 
     def visit_WhileNode(self, node: WhileNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+        loop_start_label = self.generate_label("while_start")
+        loop_end_label = self.generate_label("while_end")
+        
+        # TODO 增加break和continue的支持
+
+        self.mark_label(loop_start_label)
+        self.visit(node.condition)
+        
+        # 条件不满足则跳出循环
+        self.emit(Opcode.JUMP_IF_FALSE, loop_end_label)
+
+        self.visit(node.body)
+        
+        self.emit(Opcode.JUMP, loop_start_label)
+        self.mark_label(loop_end_label)
 
     def visit_ForNode(self, node: ForNode):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")

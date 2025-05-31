@@ -5,7 +5,7 @@ start[ModuleNode]: sl=statement+ { ModuleNode(sl, LOCATIONS) }
 statement: function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement
 
 # 包导入
-pack_import[PackImportNode]: "#"? 'include' n=include_name { PackImportNode(n, LOCATIONS) }
+pack_import[PackImportNode]: "#" 'include' n=include_name { PackImportNode(n, LOCATIONS) }
 # TODO 结构优化
 
 include_name[NameNode | StringNode]:
@@ -25,10 +25,10 @@ typed_param[ParamNode]: t=NAME n=NAME { ParamNode(TypeNode(NameNode(t.string, LO
 func_block[BlockNode]: b=statement* { BlockNode(b or [], LOCATIONS) }
 
 ## 函数返回
-function_ret[ReturnNode]: 'return' r=expr ";"? { ReturnNode(r, LOCATIONS) }
+function_ret[ReturnNode]: 'return' r=expr ";" { ReturnNode(r, LOCATIONS) }
 
 ## 函数调用
-function_call[CallNode]: f=function_call_expr ";"? {f}
+function_call[CallNode]: f=function_call_expr ";" {f}
 function_call_expr[CallNode]: n=function_name "(" a=func_call_param? ")" { CallNode(n,a or [], {}, LOCATIONS) }
 # TODO 增加链式调用
 
@@ -36,7 +36,7 @@ func_call_param[list[ASTNode]]: e1=expr e2=("," expr)* { [e1] + ([item[1] for it
 
 # 变量相关
 ## 变量声明
-var_decl[VarDeclNode]: t=type_name n=var_name v=( "=" var_value )? ";"? { VarDeclNode(t,n,v[1] if v else None, LOCATIONS) }
+var_decl[VarDeclNode]: t=type_name n=var_name v=( "=" var_value )? ";" { VarDeclNode(t,n,v[1] if v else None, LOCATIONS) }
 # TODO 增加多变量声明支持
 
 type_name[TypeNode]:
@@ -46,11 +46,11 @@ var_name[NameNode]: NAME { NameNode(name.string, LOCATIONS) }
 var_value: expr
 
 ## 变量赋值
-var_assign: n=var_name "=" v=var_value ";"? { AssignmentNode(n,v, LOCATIONS) }
+var_assign: n=var_name "=" v=var_value ";" { AssignmentNode(n,v, LOCATIONS) }
 
 # 表达式
 ## 表达式作为语句
-expression_as_statement[ASTNode]: e=expr ";"? { e }
+expression_as_statement[ASTNode]: e=expr ";" { e }
 
 ## 表达式 - 按运算符优先级组织
 ## 优先级从低到高：逻辑或 -> 逻辑与 -> 相等比较 -> 关系比较 -> 加减 -> 乘除 -> 因子
@@ -93,7 +93,13 @@ multiplicative:
 
 factor:
       | '(' expr ')' { expr }
+      | unary { unary }
       | atom { atom }
+
+unary:
+      | '-' factor { UnaryOpNode(Operator.SUBTRACT, factor, LOCATIONS) }
+      | '+' factor { UnaryOpNode(Operator.ADD, factor, LOCATIONS) }
+      | '!' factor { UnaryOpNode(Operator.NOT, factor, LOCATIONS) }
 
 atom:
       | function_call_expr
