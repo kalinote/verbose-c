@@ -21,10 +21,14 @@ def parse_args():
     parser.add_argument("filename", help="需要编译的文件（.vbc源代码文件或.gram语法文件）")
     parser.add_argument("-o", "--output", help="输出文件名")
     parser.add_argument("-v", "--verbose", help="显示详细信息", action="store_true")
-    parser.add_argument("-l", "--log", help="记录编译过程")
-    parser.add_argument("-t", "--tokenization", help="仅计算文件 token", action="store_true")
-    parser.add_argument("--gen-parser", help="生成解析器模式（用于.gram文件）", action="store_true")
-    parser.add_argument("--opcode", help="输出操作码到指定文件")
+    parser.add_argument("--log", help="记录编译过程")
+    parser.add_argument("-t", "--tokenization", help="输出token序列", action="store_true")
+    parser.add_argument("-a", "--ast", help="输出AST", action="store_true")
+    parser.add_argument("--opcode", help="输出操作码", action="store_true")
+    parser.add_argument("-c", "--const", help="输出常量池", action="store_true")
+    parser.add_argument("-l", "--label", help="输出标签", action="store_true")
+    parser.add_argument("-oa", "--out-all", help="输出所有内容（token, AST, 操作码, 常量池, 标签）", action="store_true")
+    parser.add_argument("-cp", "--compile-parser", help="编译语法文件生成解析器", action="store_true")
     return parser.parse_args()
 
 
@@ -37,31 +41,52 @@ def main():
             return
     
     if args.tokenization:
+        # Tokenization only supported for source files
         from verbose_c.parser.lexer.lexer import Lexer
         with open(args.filename, "r", encoding="utf-8") as f:
             source = f.read()
         lexer = Lexer(args.filename, source)
-        for token in lexer.tokenize():
-            print(token)
+        tokens = list(lexer.tokenize())
+        
+        if args.output:
+            with open(args.output, 'w', encoding='utf-8') as f:
+                for token in tokens:
+                    f.write(f"{token}\n")
+            print(f"Token序列已输出到: {args.output}")
+        else:
+            for token in tokens:
+                print(token)
         return
     
-    # 判断文件类型并选择处理方式
-    file_ext = os.path.splitext(args.filename)[1].lower()
-    
-    if file_ext == '.gram' or args.gen_parser:
-        # 语法文件，生成解析器
+    # Default behavior: compile source code
+    if args.compile_parser:
+        # Compile grammar file to generate parser
         compile_file(args.filename, args.output, args.verbose, args.log)
-    elif file_ext == '.vbc':
-        # 源代码文件，编译到操作码
-        compile_source_file(args.filename, args.verbose, args.opcode)
     else:
-        print(f"错误: 不支持的文件类型 '{file_ext}'，支持的文件类型: .gram, .vbc")
+        # Compile source file to opcode
+        compile_source_file(
+            filename=args.filename,
+            output=args.output,
+            verbose=args.verbose,
+            tokenization=args.tokenization or args.out_all,
+            ast=args.ast or args.out_all,
+            opcode=args.opcode or args.out_all,
+            const=args.const or args.out_all,
+            label=args.label or args.out_all
+        )
         
-def compile_source_file(filename, verbose=False, opcode_output=None):
+def compile_source_file(
+        filename, 
+        output=None,
+        verbose=False,
+        tokenization=False,
+        ast=False,
+        opcode=False,
+        const=False,
+        label=False
+    ):
     """
     编译源代码文件到操作码
-    
-    TODO 临时测试使用，后续优化完善
     """
     print(f"编译源代码文件: {filename}")
     
@@ -91,27 +116,28 @@ def compile_source_file(filename, verbose=False, opcode_output=None):
         
         # 解析生成AST
         print("解析源代码生成AST...")
-        ast = parser.start()
+        ast_node = parser.start()
         
-        if ast is None:
+        if ast_node is None:
             print("错误: 解析失败")
             return
             
-        if verbose:
+        if verbose or ast:
             from verbose_c.parser.parser.parser import ast_dump
-            print("AST结构:")
-            print(ast_dump(ast, indent=2))
-            print()
-        
+            ast_content = ast_dump(ast_node, indent=4)
+            if verbose:
+                print("\nAST结构:")
+                print(ast_content)
+            
         # 创建符号表
         symbol_table = SymbolTable(ScopeType.GLOBAL)
         
         # 生成操作码
-        print("生成编译日志...")
+        print("生成操作码...")
         opcode_gen = OpcodeGenerator(symbol_table)
-        opcode_gen.visit(ast)
+        opcode_gen.visit(ast_node)
         
-        # 输出结果
+        # 输出结果到终端
         if verbose:
             print("\n=== 生成的操作码 ===")
             for i, instruction in enumerate(opcode_gen.bytecode):
@@ -128,36 +154,47 @@ def compile_source_file(filename, verbose=False, opcode_output=None):
             for label, pos in opcode_gen.labels.items():
                 print(f"{label}: {pos}")
             
-        # 如果指定了输出文件，写入操作码
-        if opcode_output:
-            with open(opcode_output, 'w', encoding='utf-8') as f:
+        # 如果指定了输出文件，写入内容
+        if output:
+            with open(output, 'w', encoding='utf-8') as f:
                 f.write("# Verbose-C 编译日志\n")
+                f.write(f"# 源文件: {filename}\n")
                 f.write("# 生成时间: " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
                 
-                f.write("\n=== Token序列 ===\n")
-                for token in tokenizer.tokens:
-                    f.write(f"{token}\n")
-
-                f.write("\n=== AST结构 ===\n")
-                from verbose_c.parser.parser.parser import ast_dump
-                f.write(ast_dump(ast, indent=4))
-                f.write("\n")
+                # 输出token序列
+                if tokenization:
+                    f.write("\n=== Token序列 ===\n")
+                    for token in tokenizer.tokens:
+                        f.write(f"{token}\n")
                 
-                f.write("\n=== 操作码 ===\n")
-                for i, instruction in enumerate(opcode_gen.bytecode):
-                    if len(instruction) == 1:
-                        f.write(f"{i:4d}: {instruction[0].name}\n")
-                    else:
-                        f.write(f"{i:4d}: {instruction[0].name} {instruction[1]}\n")
+                # 输出AST结构
+                if ast:
+                    f.write("\n=== AST结构 ===\n")
+                    f.write(ast_content)
+                    f.write("\n")
                 
-                f.write(f"\n=== 常量池 ===\n")
-                for i, constant in enumerate(opcode_gen.constant_pool):
-                    f.write(f"{i:4d}: {constant!r}\n")
+                # 输出操作码
+                if opcode:
+                    f.write("\n=== 操作码 ===\n")
+                    for i, instruction in enumerate(opcode_gen.bytecode):
+                        if len(instruction) == 1:
+                            f.write(f"{i:4d}: {instruction[0].name}\n")
+                        else:
+                            f.write(f"{i:4d}: {instruction[0].name} {instruction[1]}\n")
                 
-                f.write(f"\n=== 标签 ===\n")
-                for label, pos in opcode_gen.labels.items():
-                    f.write(f"{label}: {pos}\n")
-            print(f"\n编译日志已输出到: {opcode_output}")
+                # 输出常量池
+                if const:
+                    f.write(f"\n=== 常量池 ===\n")
+                    for i, constant in enumerate(opcode_gen.constant_pool):
+                        f.write(f"{i:4d}: {constant!r}\n")
+                
+                # 输出标签
+                if label:
+                    f.write(f"\n=== 标签 ===\n")
+                    for label, pos in opcode_gen.labels.items():
+                        f.write(f"{label}: {pos}\n")
+            
+            print(f"\n编译输出已保存到: {output}")
             
     except Exception as e:
         print(f"编译过程中发生错误: {e}")
