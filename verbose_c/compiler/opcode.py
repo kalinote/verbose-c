@@ -84,3 +84,5 @@ class Opcode(Enum):
             if opcode.value == value:
                 return opcode.name
         return f"UNKNOWN(0x{value:02X})"
+
+Instruction = tuple[Opcode, ...]

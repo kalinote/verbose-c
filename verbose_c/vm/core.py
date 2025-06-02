@@ -1,6 +1,5 @@
-from verbose_c.compiler.opcode import Opcode
+from verbose_c.compiler.opcode import Instruction, Opcode
 from verbose_c.utils.stack import Stack
-
 
 class VBCVirtualMachine:
     """
@@ -16,23 +15,21 @@ class VBCVirtualMachine:
         self._handlers = {}                    # 指令处理器
 
     
-    def _fetch_instruction(self):
+    def _fetch_instruction(self) -> Instruction:
         """
-        获取指令
+        TODO 获取指令
         """
         pass
         
-    def _execute_instruction(self, instruction: tuple):
+    def _execute_instruction(self, instruction: Instruction):
         """
         执行单条指令
         """
         if len(instruction) == 1:
             opcode = instruction[0]
             operand = None
-        elif len(instruction) == 2:
-            opcode, operand = instruction
         else:
-            raise ValueError(f"错误的指令格式: {instruction}, 要求: (opcode,) 或 (opcode, operand)")
+            opcode, operand = instruction
         
     def excute(self, bytecode, constants):
         """
@@ -51,12 +48,13 @@ class VBCVirtualMachine:
             self._pc += 1
 
     # 指令注册和执行
-    def register_instruction(self, opcode):
+    def register_instruction(self, opcode: Opcode):
         def decorator(func):
             self._handlers[opcode] = func
             return func
         return decorator
 
+    ## 栈操作类
     @register_instruction(Opcode.LOAD_CONSTANT)
     def __handle_load_constant(self):
         pass
@@ -73,6 +71,7 @@ class VBCVirtualMachine:
     def __handle_swap(self):
         pass
 
+    ## 变量操作类
     @register_instruction(Opcode.STORE_LOCAL_VAR)
     def __handle_store_local_var(self):
         pass
@@ -91,4 +90,156 @@ class VBCVirtualMachine:
     
     @register_instruction(Opcode.DECLARE_VAR)
     def __handle_declare_var(self):
+        pass
+
+    ## 算术运算类指令
+    @register_instruction(Opcode.ADD)
+    def __handle_add(self):
+        pass
+
+    @register_instruction(Opcode.SUBTRACT)
+    def __handle_subtract(self):
+        pass
+
+    @register_instruction(Opcode.MULTIPLY)
+    def __handle_multiply(self):
+        pass
+
+    @register_instruction(Opcode.DIVIDE)
+    def __handle_divide(self):
+        pass
+
+    @register_instruction(Opcode.MODULO)
+    def __handle_modulo(self):
+        pass
+
+    @register_instruction(Opcode.UNARY_MINUS)
+    def __handle_unary_minus(self):
+        pass
+
+    @register_instruction(Opcode.UNARY_PLUS)
+    def __handle_unary_plus(self):
+        pass
+
+    ## 比较运算类指令
+    @register_instruction(Opcode.EQUAL)
+    def __handle_equal(self):
+        pass
+
+    @register_instruction(Opcode.NOT_EQUAL)
+    def __handle_not_equal(self):
+        pass
+
+    @register_instruction(Opcode.LESS_THAN)
+    def __handle_less_than(self):
+        pass
+
+    @register_instruction(Opcode.LESS_EQUAL)
+    def __handle_less_equal(self):
+        pass
+
+    @register_instruction(Opcode.GREATER_THAN)
+    def __handle_greater_than(self):
+        pass
+
+    @register_instruction(Opcode.GREATER_EQUAL)
+    def __handle_greater_equal(self):
+        pass
+
+    ## 逻辑运算类指令
+    @register_instruction(Opcode.LOGICAL_AND)
+    def __handle_logical_and(self):
+        pass
+
+    @register_instruction(Opcode.LOGICAL_OR)
+    def __handle_logical_or(self):
+        pass
+
+    @register_instruction(Opcode.LOGICAL_NOT)
+    def __handle_logical_not(self):
+        pass
+
+    ## 控制流类指令
+    @register_instruction(Opcode.JUMP)
+    def __handle_jump(self):
+        pass
+
+    @register_instruction(Opcode.JUMP_IF_FALSE)
+    def __handle_jump_if_false(self):
+        pass
+
+    @register_instruction(Opcode.JUMP_IF_TRUE)
+    def __handle_jump_if_true(self):
+        pass
+
+    @register_instruction(Opcode.RETURN)
+    def __handle_return(self):
+        pass
+
+    @register_instruction(Opcode.RETURN_VOID)
+    def __handle_return_void(self):
+        pass
+
+    @register_instruction(Opcode.BREAK)
+    def __handle_break(self):
+        pass
+
+    @register_instruction(Opcode.CONTINUE)
+    def __handle_continue(self):
+        pass
+
+    ## 函数调用类指令
+    @register_instruction(Opcode.CALL_FUNCTION)
+    def __handle_call_function(self):
+        pass
+
+    @register_instruction(Opcode.LOAD_FUNCTION)
+    def __handle_load_function(self):
+        pass
+
+    @register_instruction(Opcode.ENTER_SCOPE)
+    def __handle_enter_scope(self):
+        pass
+
+    @register_instruction(Opcode.EXIT_SCOPE)
+    def __handle_exit_scope(self):
+        pass
+
+    ## 类型转换类指令
+    @register_instruction(Opcode.CAST_TO_INT)
+    def __handle_cast_to_int(self):
+        pass
+
+    @register_instruction(Opcode.CAST_TO_FLOAT)
+    def __handle_cast_to_float(self):
+        pass
+
+    @register_instruction(Opcode.CAST_TO_BOOL)
+    def __handle_cast_to_bool(self):
+        pass
+
+    @register_instruction(Opcode.CAST_TO_STRING)
+    def __handle_cast_to_string(self):
+        pass
+
+    ## 内存管理类指令
+    @register_instruction(Opcode.ALLOC_OBJECT)
+    def __handle_alloc_object(self):
+        pass
+
+    @register_instruction(Opcode.FREE_OBJECT)
+    def __handle_free_object(self):
+        pass
+
+    ## 扩展指令类
+    @register_instruction(Opcode.NOP)
+    def __handle_nop(self):
+        pass
+
+    @register_instruction(Opcode.HALT)
+    def __handle_halt(self):
+        pass
+
+    @register_instruction(Opcode.DEBUG_PRINT)
+    def __handle_debug_print(self):
         pass
