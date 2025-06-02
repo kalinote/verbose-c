@@ -19,7 +19,9 @@ class VBCVirtualMachine:
         """
         TODO 获取指令
         """
-        pass
+        if self._pc >= len(self._bytecode):
+            raise RuntimeError("程序计数器越界")
+        return self._bytecode[self._pc]
         
     def _execute_instruction(self, instruction: Instruction):
         """
@@ -30,6 +32,12 @@ class VBCVirtualMachine:
             operand = None
         else:
             opcode, operand = instruction
+        
+        if opcode in self._handlers:
+            handler = self._handlers[opcode]
+            handler(operand)
+        else:
+            raise RuntimeError(f"未知操作码: {opcode}")
         
     def excute(self, bytecode, constants):
         """
@@ -56,8 +64,16 @@ class VBCVirtualMachine:
 
     ## 栈操作类
     @register_instruction(Opcode.LOAD_CONSTANT)
-    def __handle_load_constant(self):
-        pass
+    def __handle_load_constant(self, operand):
+        if operand is None:
+            raise RuntimeError("LOAD_CONSTANT指令缺少操作数")
+        
+        if operand < 0 or operand >= len(self._constants):
+            raise RuntimeError(f"常量池索引越界: {operand}, 常量池大小: {len(self._constants)}")
+        
+        # 从常量池获取值并压入栈
+        constant_value = self._constants[operand]
+        self._stack.push(constant_value)
 
     @register_instruction(Opcode.POP)
     def __handle_pop(self):
@@ -242,4 +258,7 @@ class VBCVirtualMachine:
 
     @register_instruction(Opcode.DEBUG_PRINT)
     def __handle_debug_print(self):
-        pass
+        if not self._stack.is_empty():
+            print(f"DEBUG: 栈顶值 = {self._stack.peek()}")
+        else:
+            print("DEBUG: 栈为空")

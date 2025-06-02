@@ -38,10 +38,8 @@ class SymbolKind(Enum):
     FUNCTION: 函数
     CLASS: 类
     PARAMETER: 参数
-    CONSTANT: 常量
     """
     VARIABLE = auto()
     FUNCTION = auto()
     CLASS = auto()
     PARAMETER = auto()
-    CONSTANT = auto()
