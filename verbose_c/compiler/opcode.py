@@ -19,7 +19,6 @@ class Opcode(Enum):
     LOAD_LOCAL_VAR      = 0x11  # 加载局部变量到栈顶
     LOAD_GLOBAL_VAR     = 0x12  # 加载全局变量
     STORE_GLOBAL_VAR    = 0x13  # 存储到全局变量
-    DECLARE_VAR         = 0x14  # 声明变量
     
     # === 算术运算类 (0x20-0x2F) ===
     ADD                 = 0x20  # 加法运算

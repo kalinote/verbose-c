@@ -1,18 +1,30 @@
 from verbose_c.compiler.opcode import Instruction, Opcode
 from verbose_c.utils.stack import Stack
 
+# 全局的指令处理器映射
+_vm_handlers = {}
+
+def register_instruction(opcode: Opcode):
+    """指令注册装饰器"""
+    def decorator(func):
+        _vm_handlers[opcode] = func
+        return func
+    return decorator
+
 class VBCVirtualMachine:
     """
     verbose-c 虚拟机核心功能
     """
+    
     def __init__(self):
         self._stack: Stack = Stack()            # 栈
         self._pc = 0                            # 程序计数器
-        self._local_variables = {}              # 局部变量
+        self._local_variables = []              # 局部变量（使用列表按索引访问）
         self._global_variables = {}             # 全局变量
         self._call_stack = []                   # 调用栈
+        self._scope_stack = []                  # 作用域栈，用于嵌套作用域管理
         self._running = False                    # 是否正在运行
-        self._handlers = {}                    # 指令处理器
+        self._handlers = _vm_handlers          # 使用全局的处理器映射
 
     
     def _fetch_instruction(self) -> Instruction:
@@ -35,7 +47,11 @@ class VBCVirtualMachine:
         
         if opcode in self._handlers:
             handler = self._handlers[opcode]
-            handler(operand)
+            # 根据是否有操作数决定如何调用handler
+            if operand is not None:
+                handler(self, operand)
+            else:
+                handler(self)
         else:
             raise RuntimeError(f"未知操作码: {opcode}")
         
@@ -55,18 +71,11 @@ class VBCVirtualMachine:
             self._execute_instruction(instruction)
             self._pc += 1
 
-    # 指令注册和执行
-    def register_instruction(self, opcode: Opcode):
-        def decorator(func):
-            self._handlers[opcode] = func
-            return func
-        return decorator
-
     ## 栈操作类
     @register_instruction(Opcode.LOAD_CONSTANT)
     def __handle_load_constant(self, operand):
         if operand is None:
-            raise RuntimeError("LOAD_CONSTANT指令缺少操作数")
+            raise RuntimeError("LOAD_CONSTANT 指令缺少操作数")
         
         if operand < 0 or operand >= len(self._constants):
             raise RuntimeError(f"常量池索引越界: {operand}, 常量池大小: {len(self._constants)}")
@@ -77,36 +86,80 @@ class VBCVirtualMachine:
 
     @register_instruction(Opcode.POP)
     def __handle_pop(self):
-        pass
+        self._stack.pop()
 
     @register_instruction(Opcode.DUP)
     def __handle_dup(self):
-        pass
+        self._stack.push(self._stack.peek())
 
     @register_instruction(Opcode.SWAP)
     def __handle_swap(self):
-        pass
+        a = self._stack.pop()
+        b = self._stack.pop()
+        self._stack.push(a)
+        self._stack.push(b)
 
     ## 变量操作类
     @register_instruction(Opcode.STORE_LOCAL_VAR)
-    def __handle_store_local_var(self):
-        pass
+    def __handle_store_local_var(self, operand):
+        """存储栈顶值到局部变量"""
+        if operand is None:
+            raise RuntimeError("STORE_LOCAL_VAR 指令缺少地址操作数")
+        
+        if self._stack.is_empty():
+            raise RuntimeError("栈为空，无法存储到局部变量")
+        
+        value = self._stack.pop()
+        
+        # 确保局部变量数组足够大
+        while len(self._local_variables) <= operand:
+            self._local_variables.append(None)
+        
+        self._local_variables[operand] = value
 
     @register_instruction(Opcode.LOAD_LOCAL_VAR)
-    def __handle_load_local_var(self):
-        pass
+    def __handle_load_local_var(self, operand):
+        """加载局部变量值到栈顶"""
+        if operand is None:
+            raise RuntimeError("LOAD_LOCAL_VAR 指令缺少地址操作数")
+        
+        if operand < 0:
+            raise RuntimeError(f"局部变量地址无效: {operand}")
+        
+        # 如果地址超出已分配范围，则视为未初始化
+        if operand >= len(self._local_variables):
+            raise RuntimeError(f"访问未初始化的局部变量: 地址 {operand}")
+        
+        value = self._local_variables[operand]
+        if value is None:
+            raise RuntimeError(f"访问未初始化的局部变量: 地址 {operand}")
+        
+        self._stack.push(value)
 
     @register_instruction(Opcode.LOAD_GLOBAL_VAR)
-    def __handle_load_global_var(self):
-        pass
+    def __handle_load_global_var(self, operand):
+        """加载全局变量值到栈顶"""
+        if operand is None:
+            raise RuntimeError("LOAD_GLOBAL_VAR 指令缺少变量名操作数")
+        
+        if operand not in self._global_variables:
+            raise RuntimeError(f"未定义的全局变量: {operand}")
+        
+        value = self._global_variables[operand]
+        self._stack.push(value)
 
     @register_instruction(Opcode.STORE_GLOBAL_VAR)
-    def __handle_store_global_var(self):
-        pass
+    def __handle_store_global_var(self, operand):
+        """存储栈顶值到全局变量"""
+        if operand is None:
+            raise RuntimeError("STORE_GLOBAL_VAR 指令缺少变量名操作数")
+        
+        if self._stack.is_empty():
+            raise RuntimeError("栈为空，无法存储到全局变量")
+        
+        value = self._stack.pop()
+        self._global_variables[operand] = value
     
-    @register_instruction(Opcode.DECLARE_VAR)
-    def __handle_declare_var(self):
-        pass
 
     ## 算术运算类指令
     @register_instruction(Opcode.ADD)
@@ -215,11 +268,22 @@ class VBCVirtualMachine:
 
     @register_instruction(Opcode.ENTER_SCOPE)
     def __handle_enter_scope(self):
-        pass
+        """进入新作用域"""
+        # 保存当前局部变量状态到作用域栈
+        self._scope_stack.append({
+            'local_vars': self._local_variables.copy(),
+            'local_count': len(self._local_variables)
+        })
 
     @register_instruction(Opcode.EXIT_SCOPE)
     def __handle_exit_scope(self):
-        pass
+        """退出当前作用域"""
+        if not self._scope_stack:
+            raise RuntimeError("没有可退出的作用域")
+        
+        # 恢复上一层作用域的局部变量状态
+        scope_info = self._scope_stack.pop()
+        self._local_variables = scope_info['local_vars']
 
     ## 类型转换类指令
     @register_instruction(Opcode.CAST_TO_INT)
@@ -254,7 +318,8 @@ class VBCVirtualMachine:
 
     @register_instruction(Opcode.HALT)
     def __handle_halt(self):
-        pass
+        """停机指令，结束虚拟机执行"""
+        self._running = False
 
     @register_instruction(Opcode.DEBUG_PRINT)
     def __handle_debug_print(self):
