@@ -1,5 +1,5 @@
 int a = 10;
-bool b = true;
+int b = 15;
 bool isEqual = a == b; // false
 
 // 测试单运算符运算
@@ -27,5 +27,3 @@ if (isEqual) {
 while (a > 0) {
     a = a - 1; // a will decrement from 10 to 0
 }
-
-

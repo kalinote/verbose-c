@@ -1,3 +1,4 @@
+# TODO 改语法定义尚未完成，后续可能需要全部重写
 # 根节点固定为ModuleNode
 start[ModuleNode]: sl=statement+ { ModuleNode(sl, LOCATIONS) }
 

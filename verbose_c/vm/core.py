@@ -29,7 +29,7 @@ class VBCVirtualMachine:
     
     def _fetch_instruction(self) -> Instruction:
         """
-        TODO 获取指令
+        获取指令
         """
         if self._pc >= len(self._bytecode):
             raise RuntimeError("程序计数器越界")
@@ -47,11 +47,48 @@ class VBCVirtualMachine:
         
         if opcode in self._handlers:
             handler = self._handlers[opcode]
-            # 根据是否有操作数决定如何调用handler
-            if operand is not None:
-                handler(self, operand)
-            else:
-                handler(self)
+            try:
+                if operand is not None:
+                    handler(self, operand)
+                else:
+                    handler(self)
+            except Exception as e:
+                stack_info = []
+                temp_stack = []
+                while not self._stack.is_empty():
+                    val = self._stack.pop()
+                    stack_info.append(f"{type(val).__name__}: {repr(val)}")
+                    temp_stack.append(val)
+
+                for val in reversed(temp_stack):
+                    self._stack.push(val)
+                
+                stack_str = " -> ".join(reversed(stack_info)) if stack_info else "空栈"
+                
+                context_start = max(0, self._pc - 3)
+                context_end = min(len(self._bytecode), self._pc + 4)
+                context_instructions = []
+                for i in range(context_start, context_end):
+                    marker = ">>> " if i == self._pc else "    "
+                    instr = self._bytecode[i]
+                    if len(instr) == 1:
+                        context_instructions.append(f"{marker}{i}: {instr[0].name}")
+                    else:
+                        context_instructions.append(f"{marker}{i}: {instr[0].name} {instr[1]}")
+                
+                context_str = "\n".join(context_instructions)
+                
+                error_msg = f"""
+虚拟机执行错误详情:
+    错误: {e}
+    指令位置: {self._pc}
+    当前指令: {opcode.name}{f' {operand}' if operand is not None else ''}
+    栈状态: [{stack_str}]
+    局部变量: {self._local_variables}
+    指令上下文:
+{context_str}
+                """.strip()
+                raise RuntimeError(error_msg) from e
         else:
             raise RuntimeError(f"未知操作码: {opcode}")
         
@@ -164,82 +201,157 @@ class VBCVirtualMachine:
     ## 算术运算类指令
     @register_instruction(Opcode.ADD)
     def __handle_add(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        self._stack.push(l_operand + r_operand)
 
     @register_instruction(Opcode.SUBTRACT)
     def __handle_subtract(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        self._stack.push(l_operand - r_operand)
 
     @register_instruction(Opcode.MULTIPLY)
     def __handle_multiply(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        self._stack.push(l_operand * r_operand)
 
     @register_instruction(Opcode.DIVIDE)
     def __handle_divide(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        self._stack.push(l_operand / r_operand)
 
     @register_instruction(Opcode.MODULO)
     def __handle_modulo(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        self._stack.push(l_operand % r_operand)
 
     @register_instruction(Opcode.UNARY_MINUS)
     def __handle_unary_minus(self):
-        pass
+        n = self._stack.pop()
+        self._stack.push(-n)
 
     @register_instruction(Opcode.UNARY_PLUS)
     def __handle_unary_plus(self):
-        pass
+        n = self._stack.pop()
+        self._stack.push(+n)
 
     ## 比较运算类指令
     @register_instruction(Opcode.EQUAL)
     def __handle_equal(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        
+        # TODO 优化类型验证方法
+        if type(l_operand) != type(r_operand):
+            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
+        
+        result = (l_operand == r_operand)
+        self._stack.push(result)
 
     @register_instruction(Opcode.NOT_EQUAL)
     def __handle_not_equal(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        
+        if type(l_operand) != type(r_operand):
+            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
+        
+        result = (l_operand != r_operand)
+        self._stack.push(result)
 
     @register_instruction(Opcode.LESS_THAN)
     def __handle_less_than(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        
+        if type(l_operand) != type(r_operand):
+            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
+        
+        result = (l_operand < r_operand)
+        self._stack.push(result)
 
     @register_instruction(Opcode.LESS_EQUAL)
     def __handle_less_equal(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        
+        if type(l_operand) != type(r_operand):
+            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
+        
+        result = (l_operand <= r_operand)
+        self._stack.push(result)
 
     @register_instruction(Opcode.GREATER_THAN)
     def __handle_greater_than(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        
+        if type(l_operand) != type(r_operand):
+            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
+        
+        result = (l_operand > r_operand)
+        self._stack.push(result)
 
     @register_instruction(Opcode.GREATER_EQUAL)
     def __handle_greater_equal(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        
+        if type(l_operand) != type(r_operand):
+            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
+        
+        result = (l_operand >= r_operand)
+        self._stack.push(result)
 
     ## 逻辑运算类指令
     @register_instruction(Opcode.LOGICAL_AND)
     def __handle_logical_and(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        result = bool(l_operand) and bool(r_operand)
+        self._stack.push(result)
 
     @register_instruction(Opcode.LOGICAL_OR)
     def __handle_logical_or(self):
-        pass
+        r_operand = self._stack.pop()
+        l_operand = self._stack.pop()
+        result = bool(l_operand) or bool(r_operand)
+        self._stack.push(result)
 
     @register_instruction(Opcode.LOGICAL_NOT)
     def __handle_logical_not(self):
-        pass
+        n = self._stack.pop()
+        result = not n
+        self._stack.push(result)
 
     ## 控制流类指令
     @register_instruction(Opcode.JUMP)
-    def __handle_jump(self):
-        pass
+    def __handle_jump(self, operand):
+        if operand is None:
+            raise RuntimeError("JUMP 指令缺少目标地址")
+        self._pc = operand - 1
 
     @register_instruction(Opcode.JUMP_IF_FALSE)
-    def __handle_jump_if_false(self):
-        pass
+    def __handle_jump_if_false(self, operand):
+        if operand is None:
+            raise RuntimeError("JUMP 指令缺少目标地址")
+        
+        condition = self._stack.pop()
+        if not bool(condition):
+            self._pc = operand - 1
 
     @register_instruction(Opcode.JUMP_IF_TRUE)
-    def __handle_jump_if_true(self):
-        pass
+    def __handle_jump_if_true(self, operand):
+        if operand is None:
+            raise RuntimeError("JUMP 指令缺少目标地址")
+        
+        condition = self._stack.pop()
+        if bool(condition):
+            self._pc = operand - 1
 
     @register_instruction(Opcode.RETURN)
     def __handle_return(self):

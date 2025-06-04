@@ -49,11 +49,8 @@ def build_python_parser_and_generator(
     参数:
         grammar_file (string): 语法文件的路径
         output_file (string): 输出文件的路径
-        verbose_tokenizer (bool, optional): 生成分词器时是否显示额外输出。
-          默认为False。
-        verbose_parser (bool, optional): 生成解析器时是否显示额外输出。
-          默认为False。
-        skip_actions (bool, optional): 是否假装没有任何规则包含动作。
+        verbose_tokenizer (bool, optional): 生成分词器时是否显示额外输出。默认为False。
+        verbose_parser (bool, optional): 生成解析器时是否显示额外输出。默认为False。
     """
     grammar, parser, tokenizer = build_parser(grammar_file, verbose_tokenizer, verbose_parser)
     gen = build_python_generator(

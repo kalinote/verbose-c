@@ -29,6 +29,8 @@ def parse_args():
     parser.add_argument("-l", "--label", help="输出标签", action="store_true")
     parser.add_argument("-oa", "--out-all", help="输出所有内容（token, AST, 操作码, 常量池, 标签）", action="store_true")
     parser.add_argument("-cp", "--compile-parser", help="编译语法文件生成解析器", action="store_true")
+    parser.add_argument("--compile-only", help="只编译不执行源代码", action="store_true")
+    parser.add_argument("--debug-vm", help="开启虚拟机调试模式", action="store_true")
     return parser.parse_args()
 
 
@@ -72,7 +74,9 @@ def main():
             ast=args.ast or args.out_all,
             opcode=args.opcode or args.out_all,
             const=args.const or args.out_all,
-            label=args.label or args.out_all
+            label=args.label or args.out_all,
+            execute=not args.compile_only,
+            debug_vm=args.debug_vm
         )
         
 def compile_source_file(
@@ -83,7 +87,9 @@ def compile_source_file(
         ast=False,
         opcode=False,
         const=False,
-        label=False
+        label=False,
+        execute=True,
+        debug_vm=False
     ):
     """
     编译源代码文件到操作码
@@ -138,21 +144,24 @@ def compile_source_file(
         opcode_gen.visit(ast_node)
         
         # 输出结果到终端
-        if verbose:
-            print("\n=== 生成的操作码 ===")
-            for i, instruction in enumerate(opcode_gen.bytecode):
-                if len(instruction) == 1:
-                    print(f"{i:4d}: {instruction[0].name}")
-                else:
-                    print(f"{i:4d}: {instruction[0].name} {instruction[1]}")
+        if verbose or opcode or const or label:
+            if opcode or verbose:
+                print("\n=== 生成的操作码 ===")
+                for i, instruction in enumerate(opcode_gen.bytecode):
+                    if len(instruction) == 1:
+                        print(f"{i:4d}: {instruction[0].name}")
+                    else:
+                        print(f"{i:4d}: {instruction[0].name} {instruction[1]}")
             
-            print(f"\n=== 常量池 ===")
-            for i, constant in enumerate(opcode_gen.constant_pool):
-                print(f"{i:4d}: {constant!r}")
+            if const or verbose:
+                print(f"\n=== 常量池 ===")
+                for i, constant in enumerate(opcode_gen.constant_pool):
+                    print(f"{i:4d}: {constant!r}")
             
-            print(f"\n=== 标签 ===")
-            for label, pos in opcode_gen.labels.items():
-                print(f"{label}: {pos}")
+            if label or verbose:
+                print(f"\n=== 标签 ===")
+                for label, pos in opcode_gen.labels.items():
+                    print(f"{label}: {pos}")
             
         # 如果指定了输出文件，写入内容
         if output:
@@ -195,6 +204,22 @@ def compile_source_file(
                         f.write(f"{label}: {pos}\n")
             
             print(f"\n编译输出已保存到: {output}")
+        
+        # 执行字节码
+        if execute:
+            print("\n执行字节码...")
+            try:
+                from verbose_c.vm.core import VBCVirtualMachine
+                
+                vm = VBCVirtualMachine()
+                vm.excute(opcode_gen.bytecode, opcode_gen.constant_pool)
+                
+                print("程序执行完成")
+                
+            except Exception as vm_error:
+                print(f"虚拟机执行错误: {vm_error}")
+                if verbose:
+                    traceback.print_exc()
             
     except Exception as e:
         print(f"编译过程中发生错误: {e}")

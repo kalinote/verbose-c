@@ -95,6 +95,13 @@ class OpcodeGenerator(VisitorBase):
             
         # 执行完停机
         self.emit(Opcode.HALT)
+        
+        # 解析标签
+        for i, instruction in enumerate(self.bytecode):
+            if len(instruction) == 2:
+                opcode, operand = instruction
+                if isinstance(operand, str) and operand in self.labels:
+                    self.bytecode[i] = (opcode, self.labels[operand])
 
     def visit_PackImportNode(self, node: PackImportNode):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
