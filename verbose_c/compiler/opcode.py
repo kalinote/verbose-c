@@ -27,7 +27,6 @@ class Opcode(Enum):
     DIVIDE              = 0x23  # 除法运算
     MODULO              = 0x24  # 取模运算
     UNARY_MINUS         = 0x25  # 一元负号
-    UNARY_PLUS          = 0x26  # 一元正号
     
     # === 比较运算类 (0x30-0x3F) ===
     EQUAL               = 0x30  # 等于比较
@@ -38,18 +37,12 @@ class Opcode(Enum):
     GREATER_EQUAL       = 0x35  # 大于等于比较
     
     # === 逻辑运算类 (0x40-0x4F) ===
-    LOGICAL_AND         = 0x40  # 逻辑与运算
-    LOGICAL_OR          = 0x41  # 逻辑或运算
-    LOGICAL_NOT         = 0x42  # 逻辑非运算
+    LOGICAL_NOT         = 0x40  # 逻辑非运算
     
     # === 控制流类 (0x50-0x5F) ===
     JUMP                = 0x50  # 无条件跳转
     JUMP_IF_FALSE       = 0x51  # 条件跳转（假时跳转）
-    JUMP_IF_TRUE        = 0x52  # 条件跳转（真时跳转）
-    RETURN              = 0x53  # 函数返回
-    RETURN_VOID         = 0x54  # 无返回值的函数返回
-    BREAK               = 0x55  # 跳出循环
-    CONTINUE            = 0x56  # 继续循环
+    RETURN              = 0x52  # 函数返回
     
     # === 函数调用类 (0x60-0x6F) ===
     CALL_FUNCTION       = 0x60  # 调用函数
@@ -58,10 +51,7 @@ class Opcode(Enum):
     EXIT_SCOPE          = 0x63  # 退出当前作用域
     
     # === 类型转换类 (0x70-0x7F) ===
-    CAST_TO_INT         = 0x70  # 转换为整数
-    CAST_TO_FLOAT       = 0x71  # 转换为浮点数
-    CAST_TO_BOOL        = 0x72  # 转换为布尔值
-    CAST_TO_STRING      = 0x73  # 转换为字符串
+    CAST                = 0x70  # 转换为整数
     
     # === 内存管理类 (0x80-0x8F) ===
     ALLOC_OBJECT        = 0x80  # 分配对象内存
