@@ -43,3 +43,13 @@ class SymbolKind(Enum):
     FUNCTION = auto()
     CLASS = auto()
     PARAMETER = auto()
+
+class LoopType(Enum):
+    """
+    循环种类
+    
+    FOR: for 循环
+    WHILE: while 循环
+    """
+    FOR = auto()
+    WHILE = auto()
