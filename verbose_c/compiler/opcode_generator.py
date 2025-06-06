@@ -170,11 +170,17 @@ class OpcodeGenerator(VisitorBase):
         elif node.op == Operator.LOGICAL_OR:
             self.visit(node.left)
             
-            end_label = self.generate_label("binary_end")
+            else_label = self.generate_label("logical_or_else")
+            end_label = self.generate_label("logical_or_end")
+            
             self.emit(Opcode.DUP)
-            self.emit(Opcode.JUMP_IF_TRUE, end_label)
+            self.emit(Opcode.LOGICAL_NOT)
+            self.emit(Opcode.JUMP_IF_FALSE, else_label)
             
             self.emit(Opcode.POP)
+            self.emit(Opcode.JUMP, end_label)
+            
+            self.mark_label(else_label)
             self.visit(node.right)
             
             self.mark_label(end_label)
