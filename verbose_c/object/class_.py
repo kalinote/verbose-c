@@ -1,5 +1,3 @@
-
-from ast import List
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.object import VBCObject
 
@@ -15,3 +13,13 @@ class VBCClass(VBCObject):
         self._methods: dict[str, VBCObject] = {}         # 方法字典
         self._fields: dict[str, VBCObject] = {}          # 字段字典
 
+    def create_instance(self):
+        """
+        TODO 实例化类
+        """
+        pass
+
+    def lookup_method(self):
+        """
+        TODO 查找方法
+        """

@@ -1,5 +1,6 @@
 from verbose_c.compiler.opcode import Instruction, Opcode
 from verbose_c.utils.stack import Stack
+from verbose_c.object.function import VBCFunction, CallFrame
 
 # 全局的指令处理器映射
 _vm_handlers = {}
@@ -234,11 +235,6 @@ class VBCVirtualMachine:
         n = self._stack.pop()
         self._stack.push(-n)
 
-    @register_instruction(Opcode.UNARY_PLUS)
-    def __handle_unary_plus(self):
-        n = self._stack.pop()
-        self._stack.push(+n)
-
     ## 比较运算类指令
     @register_instruction(Opcode.EQUAL)
     def __handle_equal(self):
@@ -308,20 +304,6 @@ class VBCVirtualMachine:
         self._stack.push(result)
 
     ## 逻辑运算类指令
-    @register_instruction(Opcode.LOGICAL_AND)
-    def __handle_logical_and(self):
-        r_operand = self._stack.pop()
-        l_operand = self._stack.pop()
-        result = bool(l_operand) and bool(r_operand)
-        self._stack.push(result)
-
-    @register_instruction(Opcode.LOGICAL_OR)
-    def __handle_logical_or(self):
-        r_operand = self._stack.pop()
-        l_operand = self._stack.pop()
-        result = bool(l_operand) or bool(r_operand)
-        self._stack.push(result)
-
     @register_instruction(Opcode.LOGICAL_NOT)
     def __handle_logical_not(self):
         n = self._stack.pop()
@@ -344,35 +326,79 @@ class VBCVirtualMachine:
         if not bool(condition):
             self._pc = operand - 1
 
-    @register_instruction(Opcode.JUMP_IF_TRUE)
-    def __handle_jump_if_true(self, operand):
-        if operand is None:
-            raise RuntimeError("JUMP 指令缺少目标地址")
-        
-        condition = self._stack.pop()
-        if bool(condition):
-            self._pc = operand - 1
-
     @register_instruction(Opcode.RETURN)
     def __handle_return(self):
-        pass
-
-    @register_instruction(Opcode.RETURN_VOID)
-    def __handle_return_void(self):
-        pass
-
-    @register_instruction(Opcode.BREAK)
-    def __handle_break(self):
-        pass
-
-    @register_instruction(Opcode.CONTINUE)
-    def __handle_continue(self):
-        pass
+        if self._stack.is_empty():
+            raise RuntimeError("RETURN 指令执行时栈为空，缺少返回值")
+        
+        return_value = self._stack.peek()
+        
+        # 主程序返回，结束运行
+        # TODO 需要进一步设计和完善
+        if not self._call_stack:
+            self._running = False
+            return
+        
+        self._stack.pop()
+        
+        # 恢复调用者的上下文
+        call_frame: CallFrame = self._call_stack.pop()
+        self._local_variables = call_frame.local_vars
+        self._pc = call_frame.return_pc
+        
+        self._stack.push(return_value)
 
     ## 函数调用类指令
     @register_instruction(Opcode.CALL_FUNCTION)
-    def __handle_call_function(self):
-        pass
+    def __handle_call_function(self, operand):
+        if operand is None:
+            raise RuntimeError("CALL_FUNCTION 指令缺少参数数量操作数")
+        
+        num_args = operand
+        
+        if self._stack.size() < num_args + 1:
+            raise RuntimeError(f"栈中元素不足以进行函数调用，需要 {num_args + 1} 个元素，但只有 {self._stack.size()} 个")
+        
+        function_obj = self._stack.pop()
+        
+        args = []
+        for _ in range(num_args):
+            args.append(self._stack.pop())
+        
+        args.reverse()
+        
+        # 解析函数对象
+        if isinstance(function_obj, VBCFunction):
+            func = function_obj
+        elif isinstance(function_obj, str):
+            # 字符串形式的函数名，从全局变量中查找
+            if function_obj not in self._global_variables:
+                raise RuntimeError(f"未定义的函数: {function_obj}")
+            
+            func_value = self._global_variables[function_obj]
+            if not isinstance(func_value, VBCFunction):
+                raise RuntimeError(f"'{function_obj}' 不是一个函数对象")
+            func = func_value
+        else:
+            raise RuntimeError(f"无效的函数对象类型: {type(function_obj)}")
+        
+        if len(args) != func.param_count:
+            raise RuntimeError(f"函数 '{func.name}' 期望 {func.param_count} 个参数，但提供了 {len(args)} 个")
+        
+        call_frame = CallFrame(
+            return_pc=self._pc,
+            local_vars=self._local_variables.copy(),
+            function_name=func.name
+        )
+        self._call_stack.append(call_frame)
+
+        self._local_variables = args.copy()
+        
+        additional_locals = func.local_count - func.param_count
+        if additional_locals > 0:
+            self._local_variables.extend([None] * additional_locals)
+        
+        self._pc = func.start_pc - 1
 
     @register_instruction(Opcode.LOAD_FUNCTION)
     def __handle_load_function(self):
@@ -398,20 +424,8 @@ class VBCVirtualMachine:
         self._local_variables = scope_info['local_vars']
 
     ## 类型转换类指令
-    @register_instruction(Opcode.CAST_TO_INT)
+    @register_instruction(Opcode.CAST)
     def __handle_cast_to_int(self):
-        pass
-
-    @register_instruction(Opcode.CAST_TO_FLOAT)
-    def __handle_cast_to_float(self):
-        pass
-
-    @register_instruction(Opcode.CAST_TO_BOOL)
-    def __handle_cast_to_bool(self):
-        pass
-
-    @register_instruction(Opcode.CAST_TO_STRING)
-    def __handle_cast_to_string(self):
         pass
 
     ## 内存管理类指令

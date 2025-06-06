@@ -359,15 +359,18 @@ class OpcodeGenerator(VisitorBase):
         self.loop_stack.pop()
 
     def visit_ReturnNode(self, node: ReturnNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+        if node.value:
+            self.visit(node.value)  # 计算返回值并将其放在栈顶
+        else:
+            # 如果没有显式返回值 (e.g., return;)，则加载 None 到栈顶
+            # 这确保了函数总是有东西可以从栈上返回（即使是None）
+            # 虚拟机的 RETURN 指令处理器将负责处理这个值
+            const_index = self.add_constant(None)
+            self.emit(Opcode.LOAD_CONSTANT, const_index)
+        
+        self.emit(Opcode.RETURN)    # 发出返回指令
 
     def visit_ContinueNode(self, node: ContinueNode):
-        """
-        实现continue语句：跳转到当前循环的continue标签
-        
-        对于while循环：跳转到循环开始（条件检查）
-        对于for循环：跳转到更新表达式
-        """
         if not self.loop_stack:
             raise Exception(f"continue语句只能在循环内使用, 在行: {node.start_line}, 列: {node.start_column}")
         
@@ -377,11 +380,6 @@ class OpcodeGenerator(VisitorBase):
         self.emit(Opcode.JUMP, target_label)
 
     def visit_BreakNode(self, node: BreakNode):
-        """
-        实现break语句：跳转到当前循环的结束标签
-        
-        对于所有类型的循环：跳转到循环结束位置
-        """
         if not self.loop_stack:
             raise Exception(f"break语句只能在循环内使用, 在行: {node.start_line}, 列: {node.start_column}")
         
@@ -397,7 +395,16 @@ class OpcodeGenerator(VisitorBase):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
 
     def visit_CallNode(self, node: CallNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+        if node.kwargs:
+            raise NotImplementedError(f"关键字参数在函数调用中暂未实现, 在行: {node.start_line}, 列: {node.start_column}")
+        
+        for arg_expr in node.args:
+            self.visit(arg_expr)
+        
+        self.visit(node.name) 
+        
+        num_args = len(node.args)
+        self.emit(Opcode.CALL_FUNCTION, num_args)
 
     def visit_ClassNode(self, node: ClassNode):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
