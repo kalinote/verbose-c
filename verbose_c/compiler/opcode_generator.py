@@ -146,7 +146,8 @@ class OpcodeGenerator(VisitorBase):
         if node.op == Operator.SUBTRACT:
             self.emit(Opcode.UNARY_MINUS)
         elif node.op == Operator.ADD:
-            self.emit(Opcode.UNARY_PLUS)
+            # TODO 检查这里的逻辑
+            pass
         elif node.op == Operator.NOT:
             self.emit(Opcode.LOGICAL_NOT)  
         else:
