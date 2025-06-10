@@ -1,8 +1,10 @@
 from verbose_c.compiler.enum import LoopType, SymbolKind
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.compiler.symbol import SymbolTable
+from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
+from verbose_c.object.t_string import VBCString
 from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
 
@@ -120,11 +122,13 @@ class OpcodeGenerator(VisitorBase):
             raise ValueError(f"不支持的目标数据类型: {target_type}")
 
     def visit_BoolNode(self, node: BoolNode):
-        const_index = self.add_constant(node.value)
+        vbc_bool = VBCBool(node.value)
+        const_index = self.add_constant(vbc_bool)
         self.emit(Opcode.LOAD_CONSTANT, const_index)
     
     def visit_StringNode(self, node: StringNode):
-        const_index = self.add_constant(node.value)
+        vbc_str = VBCString(node.value)
+        const_index = self.add_constant(vbc_str)
         self.emit(Opcode.LOAD_CONSTANT, const_index)
     
     def visit_NullNode(self, node: NullNode): 
