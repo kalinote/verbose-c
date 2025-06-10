@@ -107,8 +107,8 @@ class OpcodeGenerator(VisitorBase):
             # 默认int类型
             target_type = VBCObjectType.INT
 
-        if not (isinstance(node.value, int) and target_type in VBCInteger.bit_width.keys()) or \
-            (isinstance(node.value, float) and target_type in VBCFloat.bit_width.keys()):
+        if not ((isinstance(node.value, int) and target_type in VBCInteger.bit_width.keys()) or \
+            (isinstance(node.value, float) and target_type in VBCFloat.bit_width.keys())):
             raise TypeError(f"NumberNode 的值类型({type(node.value).__name__})与预期类型({target_type})不匹配, 在行: {node.start_line}, 列: {node.start_column}")
 
         # TODO 处理float和double类型
@@ -117,7 +117,9 @@ class OpcodeGenerator(VisitorBase):
             const_index = self.add_constant(vbc_int)
             self.emit(Opcode.LOAD_CONSTANT, const_index)
         elif target_type in VBCFloat.bit_width.keys():
-            raise NotImplementedError("尚未实现对浮点数的处理")
+            vbc_float = VBCFloat(node.value, target_type)
+            const_index = self.add_constant(vbc_float)
+            self.emit(Opcode.LOAD_CONSTANT, const_index)
         else:
             raise ValueError(f"不支持的目标数据类型: {target_type}")
 
@@ -268,7 +270,7 @@ class OpcodeGenerator(VisitorBase):
             case "double":
                 declared_type = VBCObjectType.DOUBLE
             case "super float":
-                declared_type = VBCObjectType.NFLOAT
+                declared_type = VBCObjectType.NLFLOAT
             case "string":
                 declared_type = VBCObjectType.STRING
             case _:

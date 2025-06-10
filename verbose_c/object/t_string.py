@@ -14,7 +14,7 @@ class VBCString(VBCObject):
         if isinstance(other, VBCString):
             return self.value == other.value
         
-        raise TypeError(f'无法比较 {self.__class__.__name__} 和 {other.__class__.__name__}')
+        return False
 
     def __hash__(self):
         return hash(self.value)

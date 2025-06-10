@@ -12,3 +12,13 @@ class VBCBool(VBCObject):
     def __str__(self):
         return super().__str__() + f"(value={self.value})"
 
+    def __eq__(self, other):
+        from verbose_c.object.t_float import VBCFloat
+        from verbose_c.object.t_integer import VBCInteger
+        if isinstance(other, VBCBool):
+            return self.value == other.value
+        elif isinstance(other, VBCInteger) or isinstance(other, VBCFloat):
+            return self.value == bool(other.value)
+
+        return False
+

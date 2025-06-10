@@ -1,2 +1,5 @@
-int a = 10;
-super int b = 1234567890;
+string s = "hello";
+bool t = true;
+bool f = false;
+float pi = 3.14159;
+double e = 2.718281828459045;

@@ -42,7 +42,8 @@ class VBCInteger(VBCObject):
             return self.value == other.value
         elif isinstance(other, (int, float)):
             return self.value == other
-        return TypeError(f"无法比较 {self.__class__.__name__} 和 {type(other).__name__}")
+        
+        return False
 
     def __hash__(self):
         return hash(str(self._object_type.value) + str(self.value))
