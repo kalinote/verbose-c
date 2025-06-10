@@ -1,6 +1,8 @@
 from verbose_c.compiler.enum import LoopType, SymbolKind
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.compiler.symbol import SymbolTable
+from verbose_c.object.t_float import VBCFloat
+from verbose_c.object.t_integer import VBCInteger
 from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
 
@@ -98,8 +100,24 @@ class OpcodeGenerator(VisitorBase):
             self.emit(Opcode.LOAD_GLOBAL_VAR, node.name)
     
     def visit_NumberNode(self, node: NumberNode):
-        const_index = self.add_constant(node.value)
-        self.emit(Opcode.LOAD_CONSTANT, const_index)
+        target_type = getattr(node, "inferred_type", None)
+        if target_type is None:
+            # 默认int类型
+            target_type = VBCObjectType.INT
+
+        if not (isinstance(node.value, int) and target_type in VBCInteger.bit_width.keys()) or \
+            (isinstance(node.value, float) and target_type in VBCFloat.bit_width.keys()):
+            raise TypeError(f"NumberNode 的值类型({type(node.value).__name__})与预期类型({target_type})不匹配, 在行: {node.start_line}, 列: {node.start_column}")
+
+        # TODO 处理float和double类型
+        if target_type in VBCInteger.bit_width.keys():
+            vbc_int = VBCInteger(node.value, target_type)
+            const_index = self.add_constant(vbc_int)
+            self.emit(Opcode.LOAD_CONSTANT, const_index)
+        elif target_type in VBCFloat.bit_width.keys():
+            raise NotImplementedError("尚未实现对浮点数的处理")
+        else:
+            raise ValueError(f"不支持的目标数据类型: {target_type}")
 
     def visit_BoolNode(self, node: BoolNode):
         const_index = self.add_constant(node.value)
@@ -226,6 +244,36 @@ class OpcodeGenerator(VisitorBase):
 
 
     def visit_VarDeclNode(self, node: VarDeclNode):
+        declared_type: VBCObjectType | None = None
+        type_name_str = node.var_type.type_name.name
+        
+        # TODO 优化这里的实现，可能使用dict会好一些?
+        match type_name_str:
+            case "char":
+                declared_type = VBCObjectType.CHAR
+            case "int":
+                declared_type = VBCObjectType.INT
+            case "long":
+                declared_type = VBCObjectType.LONG
+            case "long long":
+                declared_type = VBCObjectType.LONGLONG
+            case "super int":
+                declared_type = VBCObjectType.NLINT
+            case "float":
+                declared_type = VBCObjectType.FLOAT
+            case "double":
+                declared_type = VBCObjectType.DOUBLE
+            case "super float":
+                declared_type = VBCObjectType.NFLOAT
+            case "string":
+                declared_type = VBCObjectType.STRING
+            case _:
+                # TODO 完善对自定义类型的处理
+                declared_type = VBCObjectType.CUSTOM
+
+        if node.init_exp and declared_type is not None:
+            setattr(node.init_exp, 'inferred_type', declared_type)
+        
         symbol = self.symbol_table.add_symbol(
             node.name.name,
             node.var_type,
@@ -240,10 +288,6 @@ class OpcodeGenerator(VisitorBase):
             const_index = self.add_constant(None)
             self.emit(Opcode.LOAD_CONSTANT, const_index)
             self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)
-
-    def visit_VariableNode(self, node: VariableNode):
-        """暂未使用"""
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
 
     def visit_AssignmentNode(self, node: AssignmentNode):
         self.visit(node.value)

@@ -31,6 +31,7 @@ def parse_args():
     parser.add_argument("-cp", "--compile-parser", help="编译语法文件生成解析器", action="store_true")
     parser.add_argument("--compile-only", help="只编译不执行源代码", action="store_true")
     parser.add_argument("--debug-vm", help="开启虚拟机调试模式", action="store_true")
+    parser.add_argument("-rp", "--refresh-parser", help="重新生成解析器", action="store_true")
     return parser.parse_args()
 
 
@@ -76,7 +77,8 @@ def main():
             const=args.const or args.out_all,
             label=args.label or args.out_all,
             execute=not args.compile_only,
-            debug_vm=args.debug_vm
+            debug_vm=args.debug_vm,
+            refresh_parser=args.refresh_parser
         )
         
 def compile_source_file(
@@ -89,7 +91,8 @@ def compile_source_file(
         const=False,
         label=False,
         execute=True,
-        debug_vm=False
+        debug_vm=False,
+        refresh_parser=False
     ):
     """
     编译源代码文件到操作码
@@ -98,8 +101,8 @@ def compile_source_file(
     
     # 确保解析器存在
     parser_path = "parser.py"
-    if not os.path.exists(parser_path):
-        print("解析器不存在，正在生成解析器...")
+    if refresh_parser or not os.path.exists(parser_path):
+        print("正在生成解析器...")
         grammar_file = "Grammar/verbose_c.gram"
         if not os.path.exists(grammar_file):
             print(f"错误: 语法文件 '{grammar_file}' 不存在")
@@ -125,7 +128,7 @@ def compile_source_file(
         ast_node = parser.start()
         
         if ast_node is None:
-            print("错误: 解析失败")
+            print("错误: 解析失败: AST结果为None")
             return
             
         if verbose or ast:
@@ -156,7 +159,7 @@ def compile_source_file(
             if const or verbose:
                 print(f"\n=== 常量池 ===")
                 for i, constant in enumerate(opcode_gen.constant_pool):
-                    print(f"{i:4d}: {constant!r}")
+                    print(f"{i:4d}: {constant}")
             
             if label or verbose:
                 print(f"\n=== 标签 ===")
@@ -195,7 +198,7 @@ def compile_source_file(
                 if const:
                     f.write(f"\n=== 常量池 ===\n")
                     for i, constant in enumerate(opcode_gen.constant_pool):
-                        f.write(f"{i:4d}: {constant!r}\n")
+                        f.write(f"{i:4d}: {constant}\n")
                 
                 # 输出标签
                 if label:

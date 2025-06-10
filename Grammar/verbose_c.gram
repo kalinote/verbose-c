@@ -37,12 +37,13 @@ func_call_param[list[ASTNode]]: e1=expr e2=("," expr)* { [e1] + ([item[1] for it
 
 # 变量相关
 ## 变量声明
-var_decl[VarDeclNode]: t=type_name n=var_name v=( "=" var_value )? ";" { VarDeclNode(t,n,v[1] if v else None, LOCATIONS) }
+var_decl[VarDeclNode]:
+     | t=type_name n=var_name v=( "=" var_value )? ";" { VarDeclNode(t,n,v[1] if v else None, LOCATIONS) }
 # TODO 增加多变量声明支持
 
 type_name[TypeNode]:
-      | sk=SOFT_KEYWORD { TypeNode(NameNode(sk.string, LOCATIONS), LOCATIONS) }
-      | n=NAME { TypeNode(NameNode(n.string), LOCATIONS) }
+      | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(NAME) { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), LOCATIONS) }
+      | t=(SOFT_KEYWORD | NAME) { TypeNode(NameNode(t.string, LOCATIONS), LOCATIONS) }
 var_name[NameNode]: NAME { NameNode(name.string, LOCATIONS) }
 var_value: expr
 

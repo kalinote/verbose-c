@@ -4,11 +4,16 @@ class VBCObjectType(Enum):
     """
     类与对象类型
     """
+    CUSTOM = auto()
     CLASS = auto()
+    CHAR = auto()
     INT = auto()
     LONG = auto()
     LONGLONG = auto()
     NLINT = auto()
+    FLOAT = auto()
+    DOUBLE = auto()
+    NLFLOAT = auto()
     LIST = auto()
     MAP = auto()
     MODULE = auto()

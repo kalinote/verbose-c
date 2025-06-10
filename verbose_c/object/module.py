@@ -13,4 +13,5 @@ class VBCModule(VBCObject):
         self._functions = {}     # 模块中的方法
         self._variables = {}     # 模块中的变量
         
-    
+    def __str__(self):
+        return super().__str__() + f"(name={self._name})"

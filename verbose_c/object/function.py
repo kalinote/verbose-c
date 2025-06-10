@@ -28,6 +28,8 @@ class VBCFunction(VBCObject):
     def __repr__(self):
         return f"VBCFunction(name='{self.name}', params={self.param_count}, start_pc={self.start_pc})"
 
+    def __str__(self):
+        return super().__str__() + f"(name={self.name})"
 
 class CallFrame:
     """

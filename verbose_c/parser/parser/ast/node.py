@@ -1,3 +1,4 @@
+from verbose_c.object.enum import VBCObjectType
 from verbose_c.parser.parser.ast.enum import AttributeType
 from verbose_c.parser.lexer.enum import Operator
 from verbose_c.utils.visitor import VisitorBase
@@ -44,9 +45,10 @@ class NumberNode(ASTNode):
     Args:
         value (str | int): 数字值，可以是整数或浮点数字符串或整数类型。如果字符串包含小数点或科学计数法，则解析为浮点数，否则解析为整数。
     """
-    def __init__(self, value: str | int, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+    def __init__(self, value: str | int, inferred_type: VBCObjectType | None = None, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.value: int | float = float(value) if '.' in str(value) or 'e' in str(value).lower() else int(value)
+        self.inferred_type: VBCObjectType | None = inferred_type
         
 class BoolNode(ASTNode):
     """
@@ -194,17 +196,6 @@ class VarDeclNode(ASTNode):
         self.name: NameNode = name
         self.init_exp: ASTNode| None = init_exp
 
-class VariableNode(ASTNode):
-    """
-    [暂未使用]变量节点
-    
-    Args:
-        name (ASTNode): 变量值节点
-    """
-    def __init__(self, name: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
-        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.name: ASTNode = name
-
 class AssignmentNode(ASTNode):
     """
     赋值节点
@@ -265,10 +256,10 @@ class ForNode(ASTNode):
     遍历循环语句节点
     
     Args:
-       init (ASTNode): 初始化表达式
-       condition (ASTNode): 循环条件
-       update (ASTNode): 更新表达式
-       body (BlockNode): 循环体
+        init (ASTNode): 初始化表达式
+        condition (ASTNode): 循环条件
+        update (ASTNode): 更新表达式
+        body (BlockNode): 循环体
     """
     def __init__(self, init: ASTNode, condition: ASTNode, update: ASTNode, body: BlockNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)

@@ -14,7 +14,10 @@ class VBCInstance(VBCObject):
         self.fields: dict[str, VBCObject] = {}
 
     def __repr__(self) -> str:
-        return f"<instance of {self.klass._name}>" # _name 假设是 VBCClass 的类名属性
+        return f"<instance of {self.klass._name}>"
+
+    def __str__(self):
+        return super().__str__() + f"(instance of {self.klass._name})"
 
     def get_attribute(self, name: str) -> 'VBCObject | None':
         """

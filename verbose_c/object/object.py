@@ -1,12 +1,5 @@
 
 from verbose_c.object.enum import VBCObjectType
-
-class VBCObjectHeader:
-    """
-    对象头类
-    """
-    def __init__(self, object_type: VBCObjectType):
-        self._object_type: VBCObjectType = object_type
         
 class VBCObject:
     """
@@ -15,4 +8,13 @@ class VBCObject:
     def __init__(self, object_type: VBCObjectType):
         if not isinstance(object_type, VBCObjectType):
             raise TypeError(f"对象类型必须是 {VBCObjectType}")
-        self._object_header = VBCObjectHeader(object_type)
+        self._object_type = object_type
+
+    def __str__(self):
+        return f"{self.__class__.__name__}->{self._object_type}"
+
+    def __eq__(self, value):
+        NotImplementedError("子类必须实现此方法")
+
+    def __hash__(self):
+        NotImplementedError("子类必须实现此方法")
