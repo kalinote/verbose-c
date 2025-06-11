@@ -36,18 +36,15 @@ import sys
 
 from typing import Any
 
-# TODO: 需要根据实际情况动态修改
+# TODO: 可能需要根据实际情况动态修改
 from verbose_c.parser.parser.ast.node import *
 from verbose_c.parser.parser.parser import memoize, memoize_left_rec, logger, Parser
 from verbose_c.parser.lexer.enum import Operator
-
 """
-MODULE_SUFFIX = """
 
+MODULE_SUFFIX = """
 if __name__ == '__main__':
-    # TODO: 需要根据实际情况动态修改
-    from verbose_c.parser.parser.parser import simple_parser_main
-    simple_parser_main({class_name})
+    print("通过实例化 {class_name} 使用")
 """
 
 

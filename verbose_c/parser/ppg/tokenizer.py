@@ -20,24 +20,19 @@ class Tokenizer:
     _tokens: List[tokenize.TokenInfo]
 
     def __init__(
-        self, tokengen: Iterator[tokenize.TokenInfo], *, path: str = "", verbose: bool = False
+        self, tokengen: Iterator[tokenize.TokenInfo], *, path: str = ""
     ):
         self._tokengen = tokengen
         self._tokens = []
         self._index = 0
-        self._verbose = verbose
         self._lines: Dict[int, str] = {}
         self._path = path
-        if verbose:
-            self.report(False, False)
 
     def getnext(self) -> tokenize.TokenInfo:
         """Return the next token and updates the index."""
         cached = not self._index == len(self._tokens)
         tok = self.peek()
         self._index += 1
-        if self._verbose:
-            self.report(cached, False)
         return tok
 
     def peek(self) -> tokenize.TokenInfo:
@@ -101,8 +96,6 @@ class Tokenizer:
         assert 0 <= index <= len(self._tokens), (index, len(self._tokens))
         old_index = self._index
         self._index = index
-        if self._verbose:
-            self.report(True, index < old_index)
 
     def report(self, cached: bool, back: bool) -> None:
         if back:

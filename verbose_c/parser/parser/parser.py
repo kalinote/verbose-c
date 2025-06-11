@@ -24,8 +24,6 @@ def logger(method: F) -> F:
     method_name = method.__name__
 
     def logger_wrapper(self: P, *args: object) -> F:
-        if not self._verbose:
-            return method(self, *args)
         argsr = ",".join(repr(arg) for arg in args)
         fill = "  " * self._level
         print(f"{fill}{method_name}({argsr}) .... (looking at {self.showpeek()})")
@@ -46,29 +44,21 @@ def memoize(method: F) -> F:
     def memoize_wrapper(self: P, *args: object) -> F:
         mark = self._mark()
         key = mark, method_name, args
-        # Fast path: cache hit, and not verbose.
-        if key in self._cache and not self._verbose:
+        
+        if key in self._cache:
+            # 命中缓存
             tree, endmark = self._cache[key]
             self._reset(endmark)
             return tree
-        # Slow path: no cache hit, or verbose.
-        verbose = self._verbose
-        argsr = ",".join(repr(arg) for arg in args)
-        fill = "  " * self._level
+        
         if key not in self._cache:
-            if verbose:
-                print(f"{fill}{method_name}({argsr}) ... (looking at {self.showpeek()})")
             self._level += 1
             tree = method(self, *args)
             self._level -= 1
-            if verbose:
-                print(f"{fill}... {method_name}({argsr}) -> {tree!s:.200}")
             endmark = self._mark()
             self._cache[key] = tree, endmark
         else:
             tree, endmark = self._cache[key]
-            if verbose:
-                print(f"{fill}{method_name}({argsr}) -> {tree!s:.200}")
             self._reset(endmark)
         return tree
 
@@ -83,17 +73,14 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
     def memoize_left_rec_wrapper(self: P) -> Optional[T]:
         mark = self._mark()
         key = mark, method_name, ()
-        # Fast path: cache hit, and not verbose.
-        if key in self._cache and not self._verbose:
+        
+        if key in self._cache:
+            # 命中缓存
             tree, endmark = self._cache[key]
             self._reset(endmark)
             return tree
-        # Slow path: no cache hit, or verbose.
-        verbose = self._verbose
-        fill = "  " * self._level
+
         if key not in self._cache:
-            if verbose:
-                print(f"{fill}{method_name} ... (looking at {self.showpeek()})")
             self._level += 1
 
             # For left-recursive rules we manipulate the cache and
@@ -108,8 +95,6 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
             self._cache[key] = None, mark
             lastresult, lastmark = None, mark
             depth = 0
-            if verbose:
-                print(f"{fill}Recursive {method_name} at {mark} depth {depth}")
 
             while True:
                 self._reset(mark)
@@ -120,17 +105,9 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
                     self.in_recursive_rule -= 1
                 endmark = self._mark()
                 depth += 1
-                if verbose:
-                    print(
-                        f"{fill}Recursive {method_name} at {mark} depth {depth}: {result!s:.200} to {endmark}"
-                    )
                 if not result:
-                    if verbose:
-                        print(f"{fill}Fail with {lastresult!s:.200} to {lastmark}")
                     break
                 if endmark <= lastmark:
-                    if verbose:
-                        print(f"{fill}Bailing with {lastresult!s:.200} to {lastmark}")
                     break
                 self._cache[key] = lastresult, lastmark = result, endmark
 
@@ -138,8 +115,6 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
             tree = lastresult
 
             self._level -= 1
-            if verbose:
-                print(f"{fill}{method_name}() -> {tree!s:.200} [cached]")
             if tree:
                 endmark = self._mark()
             else:
@@ -148,8 +123,6 @@ def memoize_left_rec(method: Callable[[P], Optional[T]]) -> Callable[[P], Option
             self._cache[key] = tree, endmark
         else:
             tree, endmark = self._cache[key]
-            if verbose:
-                print(f"{fill}{method_name}() -> {tree!s:.200} [fresh]")
             if tree:
                 self._reset(endmark)
         return tree
@@ -230,9 +203,8 @@ def ast_dump(node, annotate_fields=True, indent=None, level=0):
 class Parser:
     """Parsing base class."""
 
-    def __init__(self, tokenizer: Tokenizer, *, verbose: bool = False):
+    def __init__(self, tokenizer: Tokenizer):
         self._tokenizer = tokenizer
-        self._verbose = verbose
         self._level = 0
         self._cache: Dict[Tuple[Mark, str, Tuple[Any, ...]], Tuple[Any, Mark]] = {}
 
@@ -347,79 +319,3 @@ class Parser:
     def make_syntax_error(self, message: str, filename: str = "<unknown>") -> SyntaxError:
         tok = self._tokenizer.diagnose()
         return SyntaxError(f"{message} at {filename}:col {tok.column} line {tok.line}")
-
-
-def simple_parser_main(parser_class: Type[Parser]) -> None:
-    argparser = argparse.ArgumentParser()
-    argparser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Print timing stats; repeat for more debug output",
-    )
-    argparser.add_argument(
-        "-q", "--quiet", action="store_true", help="Don't print the parsed program"
-    )
-    argparser.add_argument("-r", "--run", action="store_true", help="Run the parsed program")
-    argparser.add_argument("filename", help="Input file ('-' to use stdin)")
-
-    args = argparser.parse_args()
-    verbose = args.verbose
-    verbose_tokenizer = verbose >= 3
-    verbose_parser = verbose == 2 or verbose >= 4
-
-    t0 = time.time()
-
-    filename = args.filename
-    if filename == "" or filename == "-":
-        filename = "<stdin>"
-        file = sys.stdin
-    else:
-        file = open(args.filename)
-    try:
-        tokenizer = Tokenizer(filename, file.read(), verbose=verbose_tokenizer)
-        parser = parser_class(tokenizer, verbose=verbose_parser)
-        tree = parser.start()
-        try:
-            if file.isatty():
-                endpos = 0
-            else:
-                endpos = file.tell()
-        except IOError:
-            endpos = 0
-    finally:
-        if file is not sys.stdin:
-            file.close()
-
-    t1 = time.time()
-
-    if not tree:
-        err = parser.make_syntax_error(filename)
-        traceback.print_exception(err.__class__, err, None)
-        sys.exit(1)
-
-    tok = parser._tokenizer.peek()
-    if tok.type != TokenType.END:
-        err = parser.make_syntax_error(f"unexpected token '{tok.string}'", filename)
-        traceback.print_exception(err.__class__, err, None)
-        sys.exit(1)
-
-    print(ast_dump(tree, indent=4))
-    
-    if verbose:
-        dt = t1 - t0
-        diag = tokenizer.diagnose()
-        nlines = diag.line or 0
-        if diag.type == TokenType.END:
-            nlines -= 1
-        print(f"Total time: {dt:.3f} sec; {nlines} lines", end="")
-        if endpos:
-            print(f" ({endpos} bytes)", end="")
-        if dt:
-            print(f"; {nlines / dt:.0f} lines/sec")
-        else:
-            print()
-        print("Caches sizes:")
-        print(f"  token array : {len(tokenizer.tokens):10}")
-        print(f"        cache : {len(parser._cache):10}")

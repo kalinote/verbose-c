@@ -14,11 +14,11 @@ TokenDefinitions = tuple[dict[int, str], dict[str, int], set[str]]
 
 
 def build_parser(
-    grammar_file: str, verbose_tokenizer: bool = False, verbose_parser: bool = False
+    grammar_file: str
 ) -> tuple[Grammar, Parser, Tokenizer]:
     with open(grammar_file, encoding="utf-8") as file:
-        tokenizer = Tokenizer(tokenize.generate_tokens(file.readline), verbose=verbose_tokenizer)
-        parser = GrammarParser(tokenizer, verbose=verbose_parser)
+        tokenizer = Tokenizer(tokenize.generate_tokens(file.readline))
+        parser = GrammarParser(tokenizer)
         grammar = parser.start()
 
         if not grammar:
@@ -40,19 +40,15 @@ def build_python_generator(
 
 def build_python_parser_and_generator(
     grammar_file: str,
-    output_file: str,
-    verbose_tokenizer: bool = False,
-    verbose_parser: bool = False,
+    output_file: str
 ) -> tuple[Grammar, Parser, Tokenizer, ParserGenerator]:
     """为给定的语法生成规则、Python解析器、分词器和解析器生成器
 
     参数:
         grammar_file (string): 语法文件的路径
         output_file (string): 输出文件的路径
-        verbose_tokenizer (bool, optional): 生成分词器时是否显示额外输出。默认为False。
-        verbose_parser (bool, optional): 生成解析器时是否显示额外输出。默认为False。
     """
-    grammar, parser, tokenizer = build_parser(grammar_file, verbose_tokenizer, verbose_parser)
+    grammar, parser, tokenizer = build_parser(grammar_file)
     gen = build_python_generator(
         grammar,
         grammar_file,

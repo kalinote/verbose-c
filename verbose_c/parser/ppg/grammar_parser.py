@@ -444,9 +444,3 @@ class GeneratedParser(Parser):
 
     KEYWORDS = ()
     SOFT_KEYWORDS = ("memo",)
-
-
-if __name__ == "__main__":
-    from verbose_c.parser.ppg.parser import simple_parser_main
-
-    simple_parser_main(GeneratedParser)

@@ -1,1 +1,2 @@
 nuitka==2.7.3
+coverage==7.8.2

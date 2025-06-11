@@ -20,7 +20,6 @@ def parse_args():
     
     parser.add_argument("filename", help="需要编译的文件（.vbc源代码文件或.gram语法文件）")
     parser.add_argument("--log", help="输出日志文件名")
-    parser.add_argument("-v", "--verbose", help="显示详细信息", action="store_true")
     parser.add_argument("--log-parser-gen", help="记录语法分析器生成日志")
     parser.add_argument("-t", "--tokenization", help="输出token序列", action="store_true")
     parser.add_argument("-a", "--ast", help="输出AST", action="store_true")
@@ -64,13 +63,12 @@ def main():
     # Default behavior: compile source code
     if args.compile_parser:
         # Compile grammar file to generate parser
-        compile_file(args.filename, args.log, args.verbose, args.log_parser_gen)
+        compile_file(args.filename, args.log, args.log_parser_gen)
     else:
         # Compile source file to opcode
         compile_source_file(
             filename=args.filename,
             log=args.log,
-            verbose=args.verbose,
             tokenization=args.tokenization or args.out_all,
             ast=args.ast or args.out_all,
             opcode=args.opcode or args.out_all,
@@ -85,7 +83,6 @@ def main():
 def compile_source_file(
         filename, 
         log=None,
-        verbose=False,
         tokenization=False,
         ast=False,
         opcode=False,
@@ -109,7 +106,7 @@ def compile_source_file(
         if not os.path.exists(grammar_file):
             print(f"错误: 语法文件 '{grammar_file}' 不存在")
             return
-        compile_file(grammar_file, parser_path, verbose, log_parser_gen)
+        compile_file(grammar_file, parser_path, log_parser_gen)
         
     try:
         # 动态导入生成的解析器
@@ -122,8 +119,8 @@ def compile_source_file(
             source_code = f.read()
         
         # 创建tokenizer和parser
-        tokenizer = Tokenizer(filename, source_code, verbose=verbose)
-        parser = parser_module.GeneratedParser(tokenizer, verbose=verbose)
+        tokenizer = Tokenizer(filename, source_code)
+        parser = parser_module.GeneratedParser(tokenizer)
         
         # 解析生成AST
         print("解析源代码生成AST...")
@@ -133,12 +130,9 @@ def compile_source_file(
             print("错误: 解析失败: AST结果为None")
             return
             
-        if verbose or ast:
+        if ast:
             from verbose_c.parser.parser.parser import ast_dump
             ast_content = ast_dump(ast_node, indent=4)
-            if verbose:
-                print("\nAST结构:")
-                print(ast_content)
             
         # 创建符号表
         symbol_table = SymbolTable(ScopeType.GLOBAL)
@@ -149,8 +143,8 @@ def compile_source_file(
         opcode_gen.visit(ast_node)
         
         # 输出结果到终端
-        if verbose or opcode or const or label:
-            if opcode or verbose:
+        if opcode or const or label:
+            if opcode:
                 print("\n=== 生成的操作码 ===")
                 for i, instruction in enumerate(opcode_gen.bytecode):
                     if len(instruction) == 1:
@@ -158,12 +152,12 @@ def compile_source_file(
                     else:
                         print(f"{i:4d}: {instruction[0].name} {instruction[1]}")
             
-            if const or verbose:
+            if const:
                 print(f"\n=== 常量池 ===")
                 for i, constant in enumerate(opcode_gen.constant_pool):
                     print(f"{i:4d}: {constant}")
             
-            if label or verbose:
+            if label:
                 print(f"\n=== 标签 ===")
                 for label, pos in opcode_gen.labels.items():
                     print(f"{label}: {pos}")
@@ -185,8 +179,7 @@ def compile_source_file(
                 
             except Exception as vm_error:
                 print(f"虚拟机执行错误: {vm_error}")
-                if verbose:
-                    traceback.print_exc()
+                traceback.print_exc()
             
         # 如果指定了输出文件，写入内容
         if log:
@@ -238,16 +231,15 @@ def compile_source_file(
             
     except Exception as e:
         print(f"编译过程中发生错误: {e}")
-        if verbose:
-            traceback.print_exc()
+        traceback.print_exc()
 
 
-def compile_file(filename, log, verbose, log_parser_gen=None):
+def compile_file(filename, log, log_parser_gen=None):
     """
     编译语法文件生成解析器
     """
     t0 = time.time()
-    grammar, parser, tokenizer, gen = generate_python_code(filename, log, verbose)
+    grammar, parser, tokenizer, gen = generate_python_code(filename, log)
     t1 = time.time()
     
     validate_grammar(grammar)
@@ -301,21 +293,12 @@ def compile_file(filename, log, verbose, log_parser_gen=None):
             
         print(f"日志已输出到 {log_parser_gen}")
     
-def generate_python_code(filename, output, verbose=False):
-    try:
-        grammar, parser, tokenizer, gen = build_python_parser_and_generator(
-            filename,
-            output,
-            verbose,
-            verbose
-        )
-        return grammar, parser, tokenizer, gen
-    except Exception as err:
-        if verbose:
-            raise
-        traceback.print_exception(err.__class__, err, None)
-        sys.stderr.write("使用 -v 参数查看完整错误跟踪信息\n")
-        sys.exit(1)
+def generate_python_code(filename, output):
+    grammar, parser, tokenizer, gen = build_python_parser_and_generator(
+        filename,
+        output
+    )
+    return grammar, parser, tokenizer, gen
 
 if __name__ == "__main__":
     main()

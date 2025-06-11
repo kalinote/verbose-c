@@ -7,13 +7,12 @@ from verbose_c.parser.lexer.lexer import Lexer
 Mark = int
 
 class Tokenizer:
-    def __init__(self, filename: str, source: str, verbose: bool = False) -> None:
+    def __init__(self, filename: str, source: str) -> None:
         self.lexer: Lexer = Lexer(filename, source)
         self.tokens: List[Token] = self.lexer.tokenize()
         self._total_tokens: int = len(self.tokens)
         self._index: int = 0
         self._marks: List[int] = []
-        self._verbose: bool = verbose
 
     def getnext(self) -> Token:
         """
