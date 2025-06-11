@@ -51,8 +51,6 @@ class VBCFloat(VBCObject):
         from verbose_c.object.t_bool import VBCBool
         if isinstance(other, VBCFloat) or isinstance(other, VBCInteger):
             return VBCBool(self.value == other.value)
-        elif isinstance(other, (int, float)):
-            return VBCBool(self.value == other)
         
         return VBCBool(False)
 
@@ -66,8 +64,6 @@ class VBCFloat(VBCObject):
         from verbose_c.object.t_bool import VBCBool
         if isinstance(other, (VBCFloat, VBCInteger)):
             return VBCBool(self.value < other.value)
-        elif isinstance(other, (int, float)):
-            return VBCBool(self.value < other)
         raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '<' 运算符")
 
     def __le__(self, other):
@@ -75,8 +71,6 @@ class VBCFloat(VBCObject):
         from verbose_c.object.t_bool import VBCBool
         if isinstance(other, (VBCFloat, VBCInteger)):
             return VBCBool(self.value <= other.value)
-        elif isinstance(other, (int, float)):
-            return VBCBool(self.value <= other)
         raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '<=' 运算符")
 
     def __gt__(self, other):
@@ -84,8 +78,6 @@ class VBCFloat(VBCObject):
         from verbose_c.object.t_bool import VBCBool
         if isinstance(other, (VBCFloat, VBCInteger)):
             return VBCBool(self.value > other.value)
-        elif isinstance(other, (int, float)):
-            return VBCBool(self.value > other)
         raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '>' 运算符")
 
     def __ge__(self, other):
@@ -93,8 +85,6 @@ class VBCFloat(VBCObject):
         from verbose_c.object.t_bool import VBCBool
         if isinstance(other, (VBCFloat, VBCInteger)):
             return VBCBool(self.value >= other.value)
-        elif isinstance(other, (int, float)):
-            return VBCBool(self.value >= other)
         raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '>=' 运算符")
 
     def __bool__(self):

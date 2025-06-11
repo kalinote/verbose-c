@@ -105,8 +105,13 @@ class OpcodeGenerator(VisitorBase):
     def visit_NumberNode(self, node: NumberNode):
         target_type = getattr(node, "inferred_type", None)
         if target_type is None:
-            # 默认int类型
-            target_type = VBCObjectType.INT
+            # TODO 自动类型推断可能需要进一步完善？
+            if isinstance(node.value, int):
+                target_type = VBCObjectType.INT
+            elif isinstance(node.value, float):
+                target_type = VBCObjectType.FLOAT
+            else:
+                raise TypeError(f"未知的 NumberNode 值类型: {type(node.value).__name__}")
 
         if not ((isinstance(node.value, int) and target_type in VBCInteger.bit_width.keys()) or \
             (isinstance(node.value, float) and target_type in VBCFloat.bit_width.keys())):
@@ -196,17 +201,19 @@ class OpcodeGenerator(VisitorBase):
         elif node.op == Operator.LOGICAL_OR:
             self.visit(node.left)
             
-            else_label = self.generate_label("logical_or_else")
+            next_instr_label = self.generate_label("logical_or_next")
             end_label = self.generate_label("logical_or_end")
             
             self.emit(Opcode.DUP)
-            self.emit(Opcode.LOGICAL_NOT)
-            self.emit(Opcode.JUMP_IF_FALSE, else_label)
+            # 如果左操作数为假，则跳转到下一指令，计算右操作数
+            self.emit(Opcode.JUMP_IF_FALSE, next_instr_label)
             
-            self.emit(Opcode.POP)
+            # 如果左操作数为真，则直接跳转到结尾，结果就是左操作数
             self.emit(Opcode.JUMP, end_label)
             
-            self.mark_label(else_label)
+            self.mark_label(next_instr_label)
+            # 弹出为假的左操作数，并计算右操作数
+            self.emit(Opcode.POP)
             self.visit(node.right)
             
             self.mark_label(end_label)

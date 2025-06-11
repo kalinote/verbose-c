@@ -18,15 +18,16 @@ class VBCVirtualMachine:
     verbose-c 虚拟机核心功能
     """
     
-    def __init__(self):
+    def __init__(self, debug_log_collector: list = None):
         self._stack: Stack = Stack()            # 栈
         self._pc = 0                            # 程序计数器
         self._local_variables = []              # 局部变量（使用列表按索引访问）
         self._global_variables = {}             # 全局变量
         self._call_stack = []                   # 调用栈
         self._scope_stack = []                  # 作用域栈，用于嵌套作用域管理
-        self._running = False                    # 是否正在运行
-        self._handlers = _vm_handlers          # 使用全局的处理器映射
+        self._running = False                   # 是否正在运行
+        self._handlers = _vm_handlers           # 使用全局的处理器映射
+        self._debug_log_collector = debug_log_collector # 调试日志收集器
 
     
     def _fetch_instruction(self) -> Instruction:
@@ -86,7 +87,7 @@ class VBCVirtualMachine:
     指令位置: {self._pc}
     当前指令: {opcode.name}{f' {operand}' if operand is not None else ''}
     栈状态: [{stack_str}]
-    局部变量: {self._local_variables}
+    局部变量: {[str(item) for item in self._local_variables]}
     指令上下文:
 {context_str}
                 """.strip()
@@ -105,8 +106,19 @@ class VBCVirtualMachine:
         
         while self._running and self._pc < len(bytecode):
             # 取码、译码、执行
-            
             instruction = self._fetch_instruction()
+
+            if self._debug_log_collector is not None:
+                # 记录执行日志
+                stack_str = " -> ".join(str(item) for item in self._stack._items)
+                log_entry = f"PC: {self._pc:04d} | OP: {instruction[0].name:<15}"
+                if len(instruction) > 1:
+                    log_entry += f" {instruction[1]:<5}"
+                else:
+                    log_entry += "      "
+                log_entry += f"| STACK: [{stack_str}]"
+                self._debug_log_collector.append(log_entry)
+
             self._execute_instruction(instruction)
             self._pc += 1
 

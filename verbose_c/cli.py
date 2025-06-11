@@ -19,9 +19,9 @@ def parse_args():
     )
     
     parser.add_argument("filename", help="需要编译的文件（.vbc源代码文件或.gram语法文件）")
-    parser.add_argument("-o", "--output", help="输出文件名")
+    parser.add_argument("--log", help="输出日志文件名")
     parser.add_argument("-v", "--verbose", help="显示详细信息", action="store_true")
-    parser.add_argument("--log", help="记录编译过程")
+    parser.add_argument("--log-parser-gen", help="记录语法分析器生成日志")
     parser.add_argument("-t", "--tokenization", help="输出token序列", action="store_true")
     parser.add_argument("-a", "--ast", help="输出AST", action="store_true")
     parser.add_argument("--opcode", help="输出操作码", action="store_true")
@@ -51,11 +51,11 @@ def main():
         lexer = Lexer(args.filename, source)
         tokens = list(lexer.tokenize())
         
-        if args.output:
-            with open(args.output, 'w', encoding='utf-8') as f:
+        if args.log:
+            with open(args.log, 'w', encoding='utf-8') as f:
                 for token in tokens:
                     f.write(f"{token}\n")
-            print(f"Token序列已输出到: {args.output}")
+            print(f"Token序列已输出到: {args.log}")
         else:
             for token in tokens:
                 print(token)
@@ -64,12 +64,12 @@ def main():
     # Default behavior: compile source code
     if args.compile_parser:
         # Compile grammar file to generate parser
-        compile_file(args.filename, args.output, args.verbose, args.log)
+        compile_file(args.filename, args.log, args.verbose, args.log_parser_gen)
     else:
         # Compile source file to opcode
         compile_source_file(
             filename=args.filename,
-            output=args.output,
+            log=args.log,
             verbose=args.verbose,
             tokenization=args.tokenization or args.out_all,
             ast=args.ast or args.out_all,
@@ -77,13 +77,14 @@ def main():
             const=args.const or args.out_all,
             label=args.label or args.out_all,
             execute=not args.compile_only,
-            debug_vm=args.debug_vm,
-            refresh_parser=args.refresh_parser
+            debug_vm=args.debug_vm or args.out_all,
+            refresh_parser=args.refresh_parser,
+            log_parser_gen=args.log_parser_gen
         )
         
 def compile_source_file(
         filename, 
-        output=None,
+        log=None,
         verbose=False,
         tokenization=False,
         ast=False,
@@ -92,7 +93,8 @@ def compile_source_file(
         label=False,
         execute=True,
         debug_vm=False,
-        refresh_parser=False
+        refresh_parser=False,
+        log_parser_gen=None
     ):
     """
     编译源代码文件到操作码
@@ -107,7 +109,7 @@ def compile_source_file(
         if not os.path.exists(grammar_file):
             print(f"错误: 语法文件 '{grammar_file}' 不存在")
             return
-        compile_file(grammar_file, parser_path, verbose)
+        compile_file(grammar_file, parser_path, verbose, log_parser_gen)
         
     try:
         # 动态导入生成的解析器
@@ -165,10 +167,30 @@ def compile_source_file(
                 print(f"\n=== 标签 ===")
                 for label, pos in opcode_gen.labels.items():
                     print(f"{label}: {pos}")
+
+        # 准备执行字节码
+        vm_debug_logs = []
+        if execute:
+            print("\n执行字节码...")
+            try:
+                from verbose_c.vm.core import VBCVirtualMachine
+                
+                # 如果开启了VM调试模式且指定了输出文件，则创建日志收集器
+                log_collector = vm_debug_logs if debug_vm and log else None
+                
+                vm = VBCVirtualMachine(debug_log_collector=log_collector)
+                vm.excute(opcode_gen.bytecode, opcode_gen.constant_pool)
+                
+                print("程序执行完成")
+                
+            except Exception as vm_error:
+                print(f"虚拟机执行错误: {vm_error}")
+                if verbose:
+                    traceback.print_exc()
             
         # 如果指定了输出文件，写入内容
-        if output:
-            with open(output, 'w', encoding='utf-8') as f:
+        if log:
+            with open(log, 'w', encoding='utf-8') as f:
                 f.write("# Verbose-C 编译日志\n")
                 f.write(f"# 源文件: {filename}\n")
                 f.write("# 生成时间: " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
@@ -205,24 +227,14 @@ def compile_source_file(
                     f.write(f"\n=== 标签 ===\n")
                     for label, pos in opcode_gen.labels.items():
                         f.write(f"{label}: {pos}\n")
+
+                # 输出虚拟机调试日志
+                if debug_vm:
+                    f.write("\n=== 虚拟机执行日志 ===\n")
+                    for log_entry in vm_debug_logs:
+                        f.write(log_entry + "\n")
             
-            print(f"\n编译输出已保存到: {output}")
-        
-        # 执行字节码
-        if execute:
-            print("\n执行字节码...")
-            try:
-                from verbose_c.vm.core import VBCVirtualMachine
-                
-                vm = VBCVirtualMachine()
-                vm.excute(opcode_gen.bytecode, opcode_gen.constant_pool)
-                
-                print("程序执行完成")
-                
-            except Exception as vm_error:
-                print(f"虚拟机执行错误: {vm_error}")
-                if verbose:
-                    traceback.print_exc()
+            print(f"\n编译输出已保存到: {log}")
             
     except Exception as e:
         print(f"编译过程中发生错误: {e}")
@@ -230,64 +242,64 @@ def compile_source_file(
             traceback.print_exc()
 
 
-def compile_file(filename, output, verbose, log=None):
+def compile_file(filename, log, verbose, log_parser_gen=None):
     """
     编译语法文件生成解析器
     """
     t0 = time.time()
-    grammar, parser, tokenizer, gen = generate_python_code(filename, output, verbose)
+    grammar, parser, tokenizer, gen = generate_python_code(filename, log, verbose)
     t1 = time.time()
     
     validate_grammar(grammar)
     
-    if log:
-        if os.path.exists(log):
-            os.remove(log)
+    if log_parser_gen:
+        if os.path.exists(log_parser_gen):
+            os.remove(log_parser_gen)
 
-        with open(log, "w", encoding="utf-8") as f:
-            f.write("原始语法:\n")
+        with open(log_parser_gen, "w", encoding="utf-8") as f:
+            f.write("# Verbose-C 语法分析器生成日志\n")
+            f.write(f"# 源文件: {filename}\n")
+            f.write("# 生成时间: " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
+            
+            f.write("\n=== 原始语法结构 ===\n")
             for line in repr(grammar).splitlines():
-                f.write(" " + line + "\n")
+                f.write("    " + line + "\n")
                 
-            f.write("--------------------------------\n")
-            f.write("干净语法:\n")
+            f.write("\n=== 干净语法代码 ===\n")
             for line in str(grammar).splitlines():
-                f.write(" " + line + "\n")
+                f.write("    " + line + "\n")
             
-            f.write("--------------------------------\n")
-            f.write("首项图:\n")
+            f.write("\n=== 首项图 ===\n")
             for src, dsts in gen.first_graph.items():
-                f.write(f"  {src} -> {', '.join(dsts)}\n")
+                f.write(f"    {src} -> {', '.join(dsts)}\n")
             
-            f.write("--------------------------------\n")
-            f.write("首项强连通分量:\n")
+            f.write("\n=== 首项强连通分量 ===\n")
             for scc in gen.first_sccs:
-                f.write(" " + str(scc))
+                f.write("    " + str(scc))
                 if len(scc) > 1:
                     f.write(
-                        f"  # 间接左递归; 领导者: {', '.join(name for name in scc if grammar.rules[name].leader)}\n"
+                        f"    # 间接左递归; 领导者: {', '.join(name for name in scc if grammar.rules[name].leader)}\n"
                     )
                 else:
                     name = next(iter(scc))
                     if name in gen.first_graph[name]:
-                        f.write("  # 左递归\n")
+                        f.write("    # 左递归\n")
                     else:
                         f.write("\n")
             
-            f.write("--------------------------------\n")
             dt = t1 - t0
             diag = tokenizer.diagnose()
             nlines = diag.end[0]
-            f.write(f"总耗时: {dt:.3f} 秒; 共 {nlines} 行")
+            f.write(f"\n\n总耗时: {dt:.3f} 秒; 共 {nlines} 行")
             if dt:
                 f.write(f"; {nlines / dt:.0f} 行/s\n")
             else:
                 f.write("\n")
             f.write("缓存大小:\n")
-            f.write(f"  token array : {len(tokenizer._tokens):10}\n")
+            f.write(f"    token array : {len(tokenizer._tokens):10}\n")
             f.write(f"        cache : {len(parser._cache):10}\n")
             
-        print(f"日志已输出到 {log}")
+        print(f"日志已输出到 {log_parser_gen}")
     
 def generate_python_code(filename, output, verbose=False):
     try:

@@ -1,5 +1,66 @@
-string s = "hello";
+// 变量声明和初始化
+int a = 10;
+int b = 20;
+float c = 3.14;
+string hello = "hello";
+string world = " world";
 bool t = true;
 bool f = false;
-float pi = 3.14159;
-double e = 2.718281828459045;
+
+// 算术运算
+int add_result = a + b;
+int sub_result = b - a;
+int mul_result = a * b;
+float div_result = b / a; // 应该得到浮点数 2.0
+
+// 字符串拼接
+string greeting = hello + world;
+
+// 比较运算
+bool r1 = a < b;  // true
+bool r2 = a > b;  // false
+bool r3 = a == 10; // true
+bool r4 = c != 3.14; // false
+
+// 逻辑运算
+bool and_result = r1 && r3; // true
+bool or_result = r2 || r4;  // false
+bool not_result = !f;     // true
+
+// 表达式作为语句 (结果会被POP)
+a + b;
+
+// if-else 语句
+int if_val = 0;
+if (a < b) {
+    if_val = 1;
+} else {
+    if_val = 2;
+}
+
+if (a > b) {
+    if_val = 3;
+}
+
+// while 循环
+int i = 0;
+int while_sum = 0;
+while (i < 5) {
+    while_sum = while_sum + i;
+    i = i + 1;
+    if (i == 3) {
+        continue; // 跳过 i=3 的那次循环的剩余部分
+    }
+}
+
+// for 循环
+int for_sum = 0;
+for (int j = 0; j < 10; j = j + 1) {
+    if (j == 5) {
+        break; // 在 j=5 时跳出循环
+    }
+    for_sum = for_sum + j;
+}
+
+// 赋值
+a = 100;
