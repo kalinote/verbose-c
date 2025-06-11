@@ -4,6 +4,7 @@ from verbose_c.compiler.symbol import SymbolTable
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
+from verbose_c.object.t_null import VBCNull
 from verbose_c.object.t_string import VBCString
 from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
@@ -48,7 +49,7 @@ class OpcodeGenerator(VisitorBase):
         self.labels = {}
         self.constant_pool = []
         self.next_label_id = 0
-        self.loop_stack = []  # 循环标签栈，支持嵌套循环和将来的多层跳出
+        self.loop_stack: list[LoopContext] = []  # 循环标签栈，后续支持嵌套循环和多层跳出
 
     # 工具方法
     def emit(self, opcode: Opcode, operand=None):
@@ -134,7 +135,7 @@ class OpcodeGenerator(VisitorBase):
         self.emit(Opcode.LOAD_CONSTANT, const_index)
     
     def visit_NullNode(self, node: NullNode): 
-        const_index = self.add_constant(None)
+        const_index = self.add_constant(VBCNull())
         self.emit(Opcode.LOAD_CONSTANT, const_index)
 
     def visit_TypeNode(self, node: TypeNode):
@@ -170,7 +171,7 @@ class OpcodeGenerator(VisitorBase):
         if node.op == Operator.SUBTRACT:
             self.emit(Opcode.UNARY_MINUS)
         elif node.op == Operator.ADD:
-            # TODO 检查这里的逻辑
+            # TODO 检查这条分支是否有必要？ (+a 就是 a)
             pass
         elif node.op == Operator.NOT:
             self.emit(Opcode.LOGICAL_NOT)  
@@ -290,8 +291,8 @@ class OpcodeGenerator(VisitorBase):
             self.visit(node.init_exp)
             self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)  # 存储初始化值到变量
         else:
-            # 没有初始化，设置默认值None
-            const_index = self.add_constant(None)
+            # 没有初始化，设置默认值null
+            const_index = self.add_constant(VBCNull())
             self.emit(Opcode.LOAD_CONSTANT, const_index)
             self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)
 
@@ -419,10 +420,8 @@ class OpcodeGenerator(VisitorBase):
         if node.value:
             self.visit(node.value)  # 计算返回值并将其放在栈顶
         else:
-            # 如果没有显式返回值 (e.g., return;)，则加载 None 到栈顶
-            # 这确保了函数总是有东西可以从栈上返回（即使是None）
-            # 虚拟机的 RETURN 指令处理器将负责处理这个值
-            const_index = self.add_constant(None)
+            # 如果没有显示的返回值，则返回null
+            const_index = self.add_constant(VBCNull())
             self.emit(Opcode.LOAD_CONSTANT, const_index)
         
         self.emit(Opcode.RETURN)    # 发出返回指令

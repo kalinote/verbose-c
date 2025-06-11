@@ -18,3 +18,6 @@ class VBCObject:
 
     def __hash__(self):
         NotImplementedError("子类必须实现此方法")
+
+    def __bool__(self):
+        return True

@@ -15,6 +15,7 @@ class VBCObjectType(Enum):
     DOUBLE = auto()
     NLFLOAT = auto()
     BOOL = auto()
+    NULL = auto()
     LIST = auto()
     MAP = auto()
     MODULE = auto()

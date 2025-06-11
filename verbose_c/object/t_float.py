@@ -1,5 +1,6 @@
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.object import VBCObject
+from verbose_c.utils.algorithm import hash_
 
 
 class VBCFloat(VBCObject):
@@ -47,15 +48,60 @@ class VBCFloat(VBCObject):
 
     def __eq__(self, other):
         from verbose_c.object.t_integer import VBCInteger
+        from verbose_c.object.t_bool import VBCBool
         if isinstance(other, VBCFloat) or isinstance(other, VBCInteger):
-            return self.value == other.value
+            return VBCBool(self.value == other.value)
         elif isinstance(other, (int, float)):
-            return self.value == other
+            return VBCBool(self.value == other)
         
-        return False
+        return VBCBool(False)
+
+    def __ne__(self, other):
+        from verbose_c.object.t_bool import VBCBool
+        eq_result = self.__eq__(other)
+        return VBCBool(not eq_result.value)
+
+    def __lt__(self, other):
+        from verbose_c.object.t_integer import VBCInteger
+        from verbose_c.object.t_bool import VBCBool
+        if isinstance(other, (VBCFloat, VBCInteger)):
+            return VBCBool(self.value < other.value)
+        elif isinstance(other, (int, float)):
+            return VBCBool(self.value < other)
+        raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '<' 运算符")
+
+    def __le__(self, other):
+        from verbose_c.object.t_integer import VBCInteger
+        from verbose_c.object.t_bool import VBCBool
+        if isinstance(other, (VBCFloat, VBCInteger)):
+            return VBCBool(self.value <= other.value)
+        elif isinstance(other, (int, float)):
+            return VBCBool(self.value <= other)
+        raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '<=' 运算符")
+
+    def __gt__(self, other):
+        from verbose_c.object.t_integer import VBCInteger
+        from verbose_c.object.t_bool import VBCBool
+        if isinstance(other, (VBCFloat, VBCInteger)):
+            return VBCBool(self.value > other.value)
+        elif isinstance(other, (int, float)):
+            return VBCBool(self.value > other)
+        raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '>' 运算符")
+
+    def __ge__(self, other):
+        from verbose_c.object.t_integer import VBCInteger
+        from verbose_c.object.t_bool import VBCBool
+        if isinstance(other, (VBCFloat, VBCInteger)):
+            return VBCBool(self.value >= other.value)
+        elif isinstance(other, (int, float)):
+            return VBCBool(self.value >= other)
+        raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '>=' 运算符")
+
+    def __bool__(self):
+        return self.value != 0.0
 
     def __hash__(self):
-        return hash(str(self._object_type.value) + str(self.value))
+        return hash_(str(self._object_type.value) + str(self.value))
 
     @staticmethod
     def _create_with_promotion(value: float, initial_type: VBCObjectType):

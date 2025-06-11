@@ -1,6 +1,7 @@
 from verbose_c.compiler.opcode import Instruction, Opcode
 from verbose_c.utils.stack import Stack
 from verbose_c.object.function import VBCFunction, CallFrame
+from verbose_c.object.t_bool import VBCBool
 
 # 全局的指令处理器映射
 _vm_handlers = {}
@@ -240,75 +241,44 @@ class VBCVirtualMachine:
     def __handle_equal(self):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
-        
-        # TODO 优化类型验证方法
-        if type(l_operand) != type(r_operand):
-            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
-        
-        result = (l_operand == r_operand)
-        self._stack.push(result)
+        self._stack.push(l_operand == r_operand)
 
     @register_instruction(Opcode.NOT_EQUAL)
     def __handle_not_equal(self):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
-        
-        if type(l_operand) != type(r_operand):
-            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
-        
-        result = (l_operand != r_operand)
-        self._stack.push(result)
+        self._stack.push(l_operand != r_operand)
 
     @register_instruction(Opcode.LESS_THAN)
     def __handle_less_than(self):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
-        
-        if type(l_operand) != type(r_operand):
-            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
-        
-        result = (l_operand < r_operand)
-        self._stack.push(result)
+        self._stack.push(l_operand < r_operand)
 
     @register_instruction(Opcode.LESS_EQUAL)
     def __handle_less_equal(self):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
-        
-        if type(l_operand) != type(r_operand):
-            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
-        
-        result = (l_operand <= r_operand)
-        self._stack.push(result)
+        self._stack.push(l_operand <= r_operand)
 
     @register_instruction(Opcode.GREATER_THAN)
     def __handle_greater_than(self):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
-        
-        if type(l_operand) != type(r_operand):
-            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
-        
-        result = (l_operand > r_operand)
-        self._stack.push(result)
+        self._stack.push(l_operand > r_operand)
 
     @register_instruction(Opcode.GREATER_EQUAL)
     def __handle_greater_equal(self):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
-        
-        if type(l_operand) != type(r_operand):
-            raise TypeError(f"无法比较不同类型的值: {type(l_operand)} 和 {type(r_operand)}")
-        
-        result = (l_operand >= r_operand)
-        self._stack.push(result)
+        self._stack.push(l_operand >= r_operand)
 
     ## 逻辑运算类指令
     @register_instruction(Opcode.LOGICAL_NOT)
     def __handle_logical_not(self):
-        n = self._stack.pop()
-        result = not n
-        self._stack.push(result)
+        operand = self._stack.pop()
+        py_result = not operand
+        self._stack.push(VBCBool(py_result))
 
     ## 控制流类指令
     @register_instruction(Opcode.JUMP)
