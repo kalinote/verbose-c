@@ -22,7 +22,7 @@ class VBCVirtualMachine:
         self._stack: Stack = Stack()            # 栈
         self._pc = 0                            # 程序计数器
         self._local_variables = []              # 局部变量（使用列表按索引访问）
-        self._global_variables = {}             # 全局变量
+        self._global_variables = {}             # 全局变量 # TODO 考虑一下这里要不要和局部变量保持一致
         self._call_stack = []                   # 调用栈
         self._scope_stack = []                  # 作用域栈，用于嵌套作用域管理
         self._running = False                   # 是否正在运行
@@ -66,7 +66,7 @@ class VBCVirtualMachine:
                 for val in reversed(temp_stack):
                     self._stack.push(val)
                 
-                stack_str = " -> ".join(reversed(stack_info)) if stack_info else "空栈"
+                stack_str = "\n        " + ",\n        ".join(reversed(stack_info)) + "\n    " if stack_info else "空栈"
                 
                 context_start = max(0, self._pc - 3)
                 context_end = min(len(self._bytecode), self._pc + 4)
@@ -162,7 +162,6 @@ class VBCVirtualMachine:
         
         value = self._stack.pop()
         
-        # 确保局部变量数组足够大
         while len(self._local_variables) <= operand:
             self._local_variables.append(None)
         
@@ -209,6 +208,7 @@ class VBCVirtualMachine:
             raise RuntimeError("栈为空，无法存储到全局变量")
         
         value = self._stack.pop()
+        
         self._global_variables[operand] = value
     
 
@@ -311,76 +311,68 @@ class VBCVirtualMachine:
     @register_instruction(Opcode.RETURN)
     def __handle_return(self):
         if self._stack.is_empty():
-            raise RuntimeError("RETURN 指令执行时栈为空，缺少返回值")
+            raise RuntimeError("RETURN 指令缺少返回值")
+
+        return_value = self._stack.pop()
         
-        return_value = self._stack.peek()
-        
-        # 主程序返回，结束运行
-        # TODO 需要进一步设计和完善
         if not self._call_stack:
+            # 主函数返回，最后栈里面为返回值，程序结束
             self._running = False
+            self._stack.push(return_value)
             return
-        
-        self._stack.pop()
-        
-        # 恢复调用者的上下文
+
+        # 恢复调用前的上下文
         call_frame: CallFrame = self._call_stack.pop()
-        self._local_variables = call_frame.local_vars
         self._pc = call_frame.return_pc
+        self._local_variables = call_frame.local_vars
+        self._bytecode = call_frame.bytecode
+        self._constants = call_frame.constants
         
+        # 返回值入栈
         self._stack.push(return_value)
 
     ## 函数调用类指令
     @register_instruction(Opcode.CALL_FUNCTION)
     def __handle_call_function(self, operand):
         if operand is None:
-            raise RuntimeError("CALL_FUNCTION 指令缺少参数数量操作数")
+            raise ValueError("CALL_FUNCTION 指令缺少参数数量")
         
-        num_args = operand
+        # 参数数量 + 函数对象
+        if self._stack.size() < operand + 1:
+            raise RuntimeError(f"栈层数错误, 需要 {operand + 2} 个元素, 实际只有 {self._stack.size}")
+
+        # 从栈顶向下数第 operand 个位置是函数对象，在此之前都是参数
+        function_obj = self._stack.peek(operand)
         
-        if self._stack.size() < num_args + 1:
-            raise RuntimeError(f"栈中元素不足以进行函数调用，需要 {num_args + 1} 个元素，但只有 {self._stack.size()} 个")
+        if not isinstance(function_obj, VBCFunction):
+            raise RuntimeError(f"调用的对象不是一个函数: {type(function_obj)}")
         
-        function_obj = self._stack.pop()
+        if operand != function_obj.param_count:
+            raise RuntimeError(f"函数 '{function_obj.name}' 期望 {function_obj.param_count} 个参数，但提供了 {operand} 个")
         
-        args = []
-        for _ in range(num_args):
-            args.append(self._stack.pop())
-        
-        args.reverse()
-        
-        # 解析函数对象
-        if isinstance(function_obj, VBCFunction):
-            func = function_obj
-        elif isinstance(function_obj, str):
-            # 字符串形式的函数名，从全局变量中查找
-            if function_obj not in self._global_variables:
-                raise RuntimeError(f"未定义的函数: {function_obj}")
-            
-            func_value = self._global_variables[function_obj]
-            if not isinstance(func_value, VBCFunction):
-                raise RuntimeError(f"'{function_obj}' 不是一个函数对象")
-            func = func_value
-        else:
-            raise RuntimeError(f"无效的函数对象类型: {type(function_obj)}")
-        
-        if len(args) != func.param_count:
-            raise RuntimeError(f"函数 '{func.name}' 期望 {func.param_count} 个参数，但提供了 {len(args)} 个")
-        
+        # 保存现场
         call_frame = CallFrame(
             return_pc=self._pc,
-            local_vars=self._local_variables.copy(),
-            function_name=func.name
+            local_vars=self._local_variables,
+            bytecode=self._bytecode,
+            constants=self._constants,
+            function_name=function_obj.name
         )
         self._call_stack.append(call_frame)
 
-        self._local_variables = args.copy()
+        # 切换到函数的执行上下文
+        self._bytecode = function_obj.bytecode
+        self._constants = function_obj.constants
+
+        self._local_variables = [None] * function_obj.local_count
         
-        additional_locals = func.local_count - func.param_count
-        if additional_locals > 0:
-            self._local_variables.extend([None] * additional_locals)
+        # 处理参数以及弹出函数对象
+        for i in range(operand):
+            self._local_variables[operand - 1 - i] = self._stack.pop()
+        self._stack.pop()
         
-        self._pc = func.start_pc - 1
+        # 执行完这个命令pc会在循环内+1
+        self._pc = -1
 
     @register_instruction(Opcode.LOAD_FUNCTION)
     def __handle_load_function(self):

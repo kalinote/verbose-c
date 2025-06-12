@@ -1,6 +1,7 @@
-from verbose_c.compiler.enum import LoopType, SymbolKind
+from verbose_c.compiler.enum import LoopType, ScopeType, SymbolKind
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.compiler.symbol import SymbolTable
+from verbose_c.object.function import VBCFunction
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
@@ -50,6 +51,7 @@ class OpcodeGenerator(VisitorBase):
         self.constant_pool = []
         self.next_label_id = 0
         self.loop_stack: list[LoopContext] = []  # 循环标签栈，后续支持嵌套循环和多层跳出
+        self.function_compilation_results = {} # 存储函数编译结果
 
     # 工具方法
     def emit(self, opcode: Opcode, operand=None):
@@ -452,19 +454,84 @@ class OpcodeGenerator(VisitorBase):
         self.emit(Opcode.JUMP, target_label)
 
     def visit_ParamNode(self, node: ParamNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+        raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
 
     def visit_FunctionNode(self, node: FunctionNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+        from verbose_c.compiler.compiler import Compiler
+        self.symbol_table.add_symbol(
+            name=node.name.name,
+            type_node=node.return_type,
+            kind=SymbolKind.FUNCTION
+        )
+        
+        function_symbol_table = SymbolTable(scope_type=ScopeType.FUNCTION, parent=self.symbol_table)
+        
+        # 将参数作为变量注册到函数的符号表中
+        for param_node in node.args:
+            function_symbol_table.add_symbol(
+                name=param_node.name.name,
+                type_node=param_node.var_type,
+                kind=SymbolKind.PARAMETER
+            )
+            
+        # 创建单独的编译环境
+        function_compiler = Compiler(
+            target_ast=node.body,
+            optimize_level=0,
+            symbol_table=function_symbol_table,
+            scope_type=ScopeType.FUNCTION,
+        )
+        
+        function_compiler.compile()
+        function_op_generator = function_compiler._opcode_generator
+
+        # 检查一下编译后的操作码，如果最后没有显式的return，则添加一个return null;
+        if not function_op_generator.bytecode or function_op_generator.bytecode[-1][0] != Opcode.RETURN:
+            const_index = function_op_generator.add_constant(VBCNull())
+            function_op_generator.emit(Opcode.LOAD_CONSTANT, const_index)
+            function_op_generator.emit(Opcode.RETURN)
+
+        # 将跳转标签解析为地址
+        for i, instruction in enumerate(function_op_generator.bytecode):
+            if len(instruction) == 2:
+                opcode, operand = instruction
+                if isinstance(operand, str) and operand in function_op_generator.labels:
+                    function_op_generator.bytecode[i] = (opcode, function_op_generator.labels[operand])
+        
+        # 收集函数编译结果
+        self.function_compilation_results[node.name.name] = {
+            'bytecode': function_op_generator.bytecode,
+            'constants': function_op_generator.constant_pool,
+            'labels': function_op_generator.labels
+        }
+
+        function_bytecode = function_op_generator.bytecode
+        function_constants = function_op_generator.constant_pool
+        
+        param_count = len(node.args)
+        local_count = function_symbol_table._next_local_address
+
+        vbc_function = VBCFunction(
+            name=node.name.name,
+            bytecode=function_bytecode,
+            constants=function_constants,
+            param_count=param_count,
+            local_count=local_count
+        )
+        
+        const_index = self.add_constant(vbc_function)
+        self.emit(Opcode.LOAD_CONSTANT, const_index)
+        self.emit(Opcode.STORE_GLOBAL_VAR, node.name.name)
 
     def visit_CallNode(self, node: CallNode):
         if node.kwargs:
             raise NotImplementedError(f"关键字参数在函数调用中暂未实现, 在行: {node.start_line}, 列: {node.start_column}")
         
+        # 约定：先加载函数对象，再加载参数
+        self.visit(node.name)
+        
         for arg_expr in node.args:
             self.visit(arg_expr)
-        
-        self.visit(node.name) 
         
         num_args = len(node.args)
         self.emit(Opcode.CALL_FUNCTION, num_args)

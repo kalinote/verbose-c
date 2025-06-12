@@ -56,10 +56,6 @@ class SymbolTable:
     符号表
     
     每个作用域都应该有单独的符号表
-    
-    Args:
-        scope_type (ScopeType): 作用域类型
-        parent (Optional[SymbolTable]): 父作用域的符号表，用于支持嵌套作用域查找
     """
     def __init__(self, scope_type: ScopeType, parent: Optional['SymbolTable'] = None):
         self._scope_type: ScopeType = scope_type

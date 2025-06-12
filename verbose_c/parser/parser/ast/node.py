@@ -314,16 +314,16 @@ class FunctionNode(ASTNode):
     函数定义节点
     
     Args:
-        return_type (ASTNode): 返回类型节点
-        name (ASTNode): 函数名节点
+        return_type (TypeNode): 返回类型节点
+        name (NameNode): 函数名节点
         args (list[ASTNode]): 参数列表节点
         kwargs (Optional[dict[str, ASTNode]]): 关键字参数字典节点
         body (BlockNode): 函数体节点
     """
-    def __init__(self, return_type: ASTNode, name: ASTNode, args: list[ParamNode], kwargs: dict[str, ParamNode], body: BlockNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+    def __init__(self, return_type: TypeNode, name: NameNode, args: list[ParamNode], kwargs: dict[str, ParamNode], body: BlockNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.return_type: ASTNode = return_type
-        self.name: ASTNode = name
+        self.return_type: TypeNode = return_type
+        self.name: NameNode = name
         self.args: list[ParamNode] = args or []
         self.kwargs: dict[str, ParamNode] = kwargs or {}        # TODO 暂未使用
         self.body: BlockNode = body

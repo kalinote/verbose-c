@@ -21,3 +21,6 @@ class VBCObject:
 
     def __bool__(self):
         return True
+
+    def __repr__(self):
+        return self.__str__()

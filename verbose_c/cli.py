@@ -161,6 +161,29 @@ def compile_source_file(
                 print(f"\n=== 标签 ===")
                 for label, pos in opcode_gen.labels.items():
                     print(f"{label}: {pos}")
+            
+            # 输出每个函数的编译结果
+            if opcode_gen.function_compilation_results:
+                print("\n" + "="*15 + " 函数编译结果 " + "="*15)
+                for func_name, result in opcode_gen.function_compilation_results.items():
+                    print(f"\n--- 函数: {func_name} ---")
+                    if result.get('bytecode'):
+                        print("  操作码:")
+                        for i, instruction in enumerate(result['bytecode']):
+                            if len(instruction) == 1:
+                                print(f"    {i:4d}: {instruction[0].name}")
+                            else:
+                                print(f"    {i:4d}: {instruction[0].name} {instruction[1]}")
+                    if result.get('constants'):
+                        print("  常量池:")
+                        for i, constant in enumerate(result['constants']):
+                            print(f"    {i:4d}: {constant}")
+                    if result.get('labels'):
+                        print("  标签:")
+                        for label, pos in result['labels'].items():
+                            print(f"    {label}: {pos}")
+                print("\n" + "="*40)
+
 
         # 准备执行字节码
         vm_debug_logs = []
@@ -221,9 +244,31 @@ def compile_source_file(
                     for label, pos in opcode_gen.labels.items():
                         f.write(f"{label}: {pos}\n")
 
-                # 输出虚拟机调试日志
+                # 输出每个函数的编译结果
+                if opcode and opcode_gen.function_compilation_results:
+                    f.write("\n\n" + "="*15 + " 函数编译结果 " + "="*15 + "\n")
+                    for func_name, result in opcode_gen.function_compilation_results.items():
+                        f.write(f"\n--- 函数: {func_name} ---\n")
+                        if result.get('bytecode'):
+                            f.write("  操作码:\n")
+                            for i, instruction in enumerate(result['bytecode']):
+                                if len(instruction) == 1:
+                                    f.write(f"    {i:4d}: {instruction[0].name}\n")
+                                else:
+                                    f.write(f"    {i:4d}: {instruction[0].name} {instruction[1]}\n")
+                        if const and result.get('constants'):
+                            f.write("  常量池:\n")
+                            for i, constant in enumerate(result['constants']):
+                                f.write(f"    {i:4d}: {constant}\n")
+                        if label and result.get('labels'):
+                            f.write("  标签:\n")
+                            for label, pos in result['labels'].items():
+                                f.write(f"    {label}: {pos}\n")
+                    f.write("\n" + "="*40 + "\n")
+
+                # 输出虚拟机执行流程
                 if debug_vm:
-                    f.write("\n=== 虚拟机执行日志 ===\n")
+                    f.write("\n=== 虚拟机执行记录 ===\n")
                     for log_entry in vm_debug_logs:
                         f.write(log_entry + "\n")
             

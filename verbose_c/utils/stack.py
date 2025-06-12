@@ -27,14 +27,14 @@ class Stack:
         """
         return len(self._items) == 0
     
-    def peek(self):
+    def peek(self, index: int = 0):
         """
-        查看栈顶元素但不弹出
+        查看栈中指定深度的元素（从栈顶开始，0为栈顶）
         """
-        if not self.is_empty():
-            return self._items[-1]
+        if self.size() > index:
+            return self._items[-1 - index]
         else:
-            raise IndexError("peek from empty stack")
+            raise IndexError("peek index out of range")
 
     def size(self):
         """

@@ -11,16 +11,18 @@ class Compiler:
     """
     编译器
     """
-    def __init__(self, target_ast: ASTNode, optimize_level: int=0):
+    def __init__(self, target_ast: ASTNode, optimize_level: int=0, scope_type: ScopeType=ScopeType.GLOBAL, symbol_table: SymbolTable | None = None):
         self._target_ast = target_ast
         
-        # 编译优化等级，数字越大等级越高，设置成100万直接所有代码给优化成O(1)
+        # 编译优化等级
         self._optimize_level = optimize_level
         
-        # 全局符号表
-        self._symbol_table = SymbolTable(ScopeType.GLOBAL)
+        self._scope_type=scope_type
         
-        # TODO 完善操作码生成、符号表管理等
+        # 符号表
+        self._symbol_table = symbol_table or SymbolTable(scope_type=self._scope_type)
+        
+        # 操作码生成器
         self._opcode_generator = OpcodeGenerator(self._symbol_table)
 
         self._bytecode = []

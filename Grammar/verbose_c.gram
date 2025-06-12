@@ -20,7 +20,7 @@ function[FunctionNode]: a=type_name b=function_name "(" c=param? ")" "{" fb=func
 
 function_name[NameNode]: NAME { NameNode(name.string, LOCATIONS) }
 param[list[ParamNode]]: p1=typed_param p2=("," typed_param)* { [p1] + ([item[1] for item in p2] if p2 else []) }
-typed_param[ParamNode]: t=NAME n=NAME { ParamNode(TypeNode(NameNode(t.string, LOCATIONS), LOCATIONS), NameNode(n.string), LOCATIONS) }
+typed_param[ParamNode]: t=type_name n=NAME { ParamNode(t, NameNode(n.string), LOCATIONS) }
 
 ## 函数体
 func_block[BlockNode]: b=statement* { BlockNode(b or [], LOCATIONS) }
