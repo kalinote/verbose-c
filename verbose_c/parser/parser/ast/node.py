@@ -201,12 +201,12 @@ class AssignmentNode(ASTNode):
     赋值节点
     
     Args:
-        name (NameNode): 变量名节点
+        target (ASTNode): 赋值的目标，可以是 NameNode 或 GetPropertyNode
         value (ASTNode): 赋值表达式节点
     """
-    def __init__(self, name: NameNode, value: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+    def __init__(self, target: ASTNode, value: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.name: NameNode = name
+        self.target: ASTNode = target
         self.value: ASTNode = value
         
 class ExprStmtNode(ASTNode):
@@ -371,3 +371,43 @@ class AttributeNode(ASTNode):
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.name: NameNode = name
         self.attr_type: AttributeType = attr_type
+
+class NewInstanceNode(ASTNode):
+    """
+    创建新实例节点
+    
+    Args:
+        class_call (CallNode): 对类构造函数的调用节点
+    """
+    def __init__(self, class_call: CallNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.class_call: CallNode = class_call
+
+class GetPropertyNode(ASTNode):
+    """
+    属性获取节点, 表示 '.' 操作
+
+    Args:
+        obj (ASTNode): 属性所属的对象表达式
+        property_name (NameNode): 要获取的属性的名称
+    """
+    def __init__(self, obj: ASTNode, property_name: NameNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.obj: ASTNode = obj
+        self.property_name: NameNode = property_name
+
+class SetPropertyNode(ASTNode):
+    """
+    属性设置/赋值节点
+
+    Args:
+        obj (ASTNode): 属性所属的对象表达式
+        property_name (NameNode): 要设置的属性的名称
+        value (ASTNode): 要赋给属性的值表达式
+    """
+    def __init__(self, obj: ASTNode, property_name: NameNode, value: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.obj: ASTNode = obj
+        self.property_name: NameNode = property_name
+        self.value: ASTNode = value
+

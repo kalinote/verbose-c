@@ -1,9 +1,9 @@
-# TODO 改语法定义尚未完成，仅用于早期测试，后续可能需要全部重写
+# TODO 该语法定义尚未完成，仅用于早期测试，后续可能需要全部重写
 # 根节点固定为ModuleNode
 start[ModuleNode]: sl=statement+ { ModuleNode(sl, LOCATIONS) }
 
 # 语句定义 (新增)
-statement: function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement
+statement: class_definition | function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement
 
 # 包导入
 pack_import[PackImportNode]: "#" 'include' n=include_name { PackImportNode(n, LOCATIONS) }
@@ -151,3 +151,6 @@ for_statement[ForNode]:
 ## 类定义
 class_definition:
       | "class" NAME "{" "}" { ClassNode(NAME, [], BlockNode([], LOCATIONS), LOCATIONS) }
+
+class_body[BlockNode]:
+      | m=(var_decl | function)* {BlockNode(m or [], LOCATIONS)}
