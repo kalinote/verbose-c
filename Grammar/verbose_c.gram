@@ -140,9 +140,14 @@ loop_body_statement: break_statement | continue_statement | function_ret | pack_
 loop_block[BlockNode]: b=loop_body_statement* { BlockNode(b or [], LOCATIONS) }
 
 ### while语句块
-while_statement:
+while_statement[WhileNode]:
       | 'while' "(" c=expr ")" "{" b=loop_block "}" { WhileNode(c, b, LOCATIONS) }
 
 ### for语句块
-for_statement:
+for_statement[ForNode]:
       | 'for' "(" i=expr ";" c=expr ";" u=expr ")" "{" b=loop_block "}" { ForNode(i, c, u, b, LOCATIONS) }
+
+# 类与对象
+## 类定义
+class_definition:
+      | "class" NAME "{" "}" { ClassNode(NAME, [], BlockNode([], LOCATIONS), LOCATIONS) }
