@@ -16,6 +16,9 @@ class VBCClass(VBCObject):
 
     def __str__(self):
         return super().__str__() + f"(name={self._name})"
+    
+    def __repr__(self):
+        return f"<Class {self._name}>"
 
     def create_instance(self) -> VBCInstance:
         """

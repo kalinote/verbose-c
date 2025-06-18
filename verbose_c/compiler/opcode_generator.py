@@ -306,18 +306,30 @@ class OpcodeGenerator(VisitorBase):
             self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)
 
     def visit_AssignmentNode(self, node: AssignmentNode):
-        self.visit(node.value)
+        if isinstance(node.target, NameNode):
+            self.visit(node.value)
 
-        symbol = self.symbol_table.lookup(node.name.name)
-        if symbol is None:
-            raise ValueError(f"未定义的变量: {node.name.name}")
+            symbol = self.symbol_table.lookup(node.name.name)
+            if symbol is None:
+                raise ValueError(f"未定义的变量: {node.name.name}")
 
-        if symbol.address is not None:
-            self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+            if symbol.address is not None:
+                self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+            else:
+                # TODO 这里的逻辑应该还需要进一步确认
+                self.emit(Opcode.STORE_GLOBAL_VAR, node.name.name)
+        
+        elif isinstance(node.target, GetPropertyNode):
+            # 处理对象属性赋值，比如 obj.prop = value 的语法
+            self.visit(node.value)
+            self.visit(node.target.obj)
+
+            property_name = self.add_constant(VBCString(node.target.property_name.name))
+            self.emit(Opcode.LOAD_CONSTANT, property_name)
+
+            self.emit(Opcode.SET_PROPERTY)
         else:
-            # TODO 这里的逻辑应该还需要进一步确认
-            self.emit(Opcode.STORE_GLOBAL_VAR, node.name.name)
-
+            raise RuntimeError(f"不支持的赋值目标类型: {type(node.target).__name__}")
 
     def visit_ExprStmtNode(self, node: ExprStmtNode):
         self.visit(node.expr)
@@ -541,3 +553,14 @@ class OpcodeGenerator(VisitorBase):
 
     def visit_AttributeNode(self, node: AttributeNode):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+
+    def visit_GetPropertyNode(self, node: GetPropertyNode):
+        self.visit(node.obj)
+        
+        property_name = self.add_constant(VBCString(node.property_name.name))
+        self.emit(Opcode.LOAD_CONSTANT, property_name)
+        
+        self.emit(Opcode.GET_PROPERTY)
+
+    def visit_SetPropertyNode(self, node: SetPropertyNode):
+        raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")

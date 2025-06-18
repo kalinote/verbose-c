@@ -15,7 +15,7 @@ class VBCInstance(VBCObject):
         self.fields: dict[str, VBCObject] = {}
 
     def __repr__(self) -> str:
-        return self.__str__()
+        return f"<Instance of {self.class_._name}>"
 
     def __str__(self):
         return super().__str__() + f"(instance of {self.class_._name})"

@@ -23,4 +23,5 @@ class VBCObject:
         return True
 
     def __repr__(self):
-        return self.__str__()
+        return f"<VBCObject at {id(self):#x}>"
+

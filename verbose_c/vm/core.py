@@ -1,4 +1,6 @@
 from verbose_c.compiler.opcode import Instruction, Opcode
+from verbose_c.object.instance import VBCInstance
+from verbose_c.object.t_string import VBCString
 from verbose_c.utils.stack import Stack
 from verbose_c.object.function import VBCFunction, CallFrame
 from verbose_c.object.t_bool import VBCBool
@@ -410,6 +412,28 @@ class VBCVirtualMachine:
     @register_instruction(Opcode.FREE_OBJECT)
     def __handle_free_object(self):
         pass
+
+    ## 对象与类操作类
+    @register_instruction(Opcode.GET_PROPERTY)
+    def __handle_get_property(self):
+        pass
+    
+    @register_instruction(Opcode.SET_PROPERTY)
+    def __handle_set_property(self):
+        property_name = self._stack.pop()
+        instance = self._stack.pop()
+        value = self._stack.pop()
+
+        if not isinstance(property_name, VBCString):
+            raise TypeError(f"SET_PROPERTY 指令: 属性名期望 {type(VBCString)} 得到 {type(property_name).__name__}")       
+        property_name_str = property_name.value
+        
+        if not isinstance(instance, VBCInstance):
+            raise TypeError(f"SET_PROPERTY 指令: 实例期望 {type(VBCInstance).__name__} 得到 {type(instance).__name__}")
+
+        instance.set_attribute(property_name_str, value)
+        # 结果入栈
+        self._stack.push(value)
 
     ## 扩展指令类
     @register_instruction(Opcode.NOP)

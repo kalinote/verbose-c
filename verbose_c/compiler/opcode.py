@@ -57,10 +57,14 @@ class Opcode(Enum):
     ALLOC_OBJECT        = 0x80  # 分配对象内存
     FREE_OBJECT         = 0x81  # 释放对象内存
     
-    # === 扩展指令类 (0x90-0xFF) ===
-    NOP                 = 0x90  # 空操作
-    HALT                = 0x91  # 停机指令
-    DEBUG_PRINT         = 0x92  # 调试输出
+    # === 对象与类操作类 (0x90-0x9F) ===
+    GET_PROPERTY        = 0x90  # 获取对象属性
+    SET_PROPERTY        = 0x91  # 设置对象属性
+    
+    # === 扩展指令类 (0xA0-0xFF) ===
+    NOP                 = 0xA0  # 空操作
+    HALT                = 0xA1  # 停机指令
+    DEBUG_PRINT         = 0xA2  # 调试输出
     
     def __str__(self):
         """返回操作码的字符串表示"""
