@@ -10,6 +10,7 @@ from verbose_c.parser.parser.ast.node import ASTNode
 from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.tokenizer import Mark, Tokenizer
 from verbose_c.parser.lexer.token import Token
+from verbose_c.parser.ppg.error_collector import ErrorCollector
 
 T = TypeVar("T")
 P = TypeVar("P", bound="Parser")
@@ -42,6 +43,8 @@ def memoize(method: F) -> F:
     method_name = method.__name__
 
     def memoize_wrapper(self: P, *args: object) -> F:
+        self.error_collector.enter_rule(method_name)
+        
         mark = self._mark()
         key = mark, method_name, args
         
@@ -49,6 +52,7 @@ def memoize(method: F) -> F:
             # 命中缓存
             tree, endmark = self._cache[key]
             self._reset(endmark)
+            self.error_collector.exit_rule(method_name)
             return tree
         
         if key not in self._cache:
@@ -60,6 +64,7 @@ def memoize(method: F) -> F:
         else:
             tree, endmark = self._cache[key]
             self._reset(endmark)
+        self.error_collector.exit_rule(method_name)
         return tree
 
     memoize_wrapper.__wrapped__ = method  # type: ignore
@@ -208,6 +213,8 @@ class Parser:
         self._level = 0
         self._cache: Dict[Tuple[Mark, str, Tuple[Any, ...]], Tuple[Any, Mark]] = {}
 
+        self.error_collector = ErrorCollector(tokenizer)
+
         # Integer tracking wether we are in a left recursive rule or not. Can be useful
         # for error reporting.
         self.in_recursive_rule = 0
@@ -295,8 +302,19 @@ class Parser:
     def expect(self, type: str) -> Token | None:
         # TODO 此处逻辑需要进一步检查
         tok = self._tokenizer.peek()
+        mark = self._mark()
+        self.error_collector.record_expectation(mark, type)
+        
         if tok and tok.string == type:
             return self._tokenizer.getnext()
+        
+        if mark >= self.error_collector.furthest_position:
+            self.error_collector.add_error(
+                mark, 
+                f"期望 '{type}'，但遇到了 '{tok.string if tok else 'EOF'}'",
+                {type}
+            )
+        
         return None
 
     def expect_forced(self, res: Any, expectation: str) -> Token:
@@ -319,3 +337,10 @@ class Parser:
     def make_syntax_error(self, message: str, filename: str = "<unknown>") -> SyntaxError:
         tok = self._tokenizer.diagnose()
         return SyntaxError(f"{message} at {filename}:col {tok.column} line {tok.line}")
+
+    # 错误处理相关
+    def get_error_report(self) -> str:
+        return self.error_collector.format_error_report()
+
+    def has_errors(self) -> bool:
+        return len(self.error_collector.errors) > 0

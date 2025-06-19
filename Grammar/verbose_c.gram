@@ -150,7 +150,7 @@ for_statement[ForNode]:
 # 类与对象
 ## 类定义
 class_definition:
-      | "class" NAME "{" "}" { ClassNode(NAME, [], BlockNode([], LOCATIONS), LOCATIONS) }
+      | "class" NAME "{" cb=class_body "}" { ClassNode(NAME, [], cb, LOCATIONS) }
 
 class_body[BlockNode]:
       | m=(var_decl | function)* {BlockNode(m or [], LOCATIONS)}

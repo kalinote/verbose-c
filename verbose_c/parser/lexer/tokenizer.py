@@ -13,6 +13,7 @@ class Tokenizer:
         self._total_tokens: int = len(self.tokens)
         self._index: int = 0
         self._marks: List[int] = []
+        self._source_lines = source.splitlines()
 
     def getnext(self) -> Token:
         """
@@ -59,3 +60,7 @@ class Tokenizer:
                 return tok
         return self.tokens[-1]
 
+    def get_line_source(self, line: int) -> str:
+        if 1 <= line <= len(self._source_lines):
+            return self._source_lines[line - 1]
+        return ""

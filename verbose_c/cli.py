@@ -127,7 +127,16 @@ def compile_source_file(
         ast_node = parser.start()
         
         if ast_node is None:
-            print("错误: 解析失败: AST结果为None")
+            print("错误: 解析失败")
+            if parser.has_errors():
+                print("\n" + parser.get_error_report())
+            else:
+                print("AST结果为None，但没有收集到具体错误信息")
+                print(f"当前token位置: {tokenizer._index}")
+                print(f"总token数量: {len(tokenizer.tokens)}")
+                if tokenizer._index < len(tokenizer.tokens):
+                    current_token = tokenizer.tokens[tokenizer._index]
+                    print(f"当前token: {current_token}")
             return
             
         if ast:

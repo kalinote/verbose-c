@@ -1,38 +1,37 @@
-// --- 函数功能测试 ---
+// --- 类功能测试 ---
 
-// 1. 定义一个简单的无参函数
-int get_answer() {
-    return 42;
-}
+// 1. 定义一个简单的 Point 类
+class Point {
+    // 带有初始值的字段
+    int x = 10;
+    int y = 20;
 
-// 2. 定义一个带参数的函数
-int add(int x, int y) {
-    return x + y;
-}
-
-// 3. 定义一个递归函数 (阶乘)
-int factorial(int n) {
-    if (n <= 1) {
-        return 1;
+    // 一个简单的方法，返回 x 和 y 的和
+    int sum() {
+        return this.x + this.y;
     }
-    // 递归调用
-    return n * factorial(n - 1);
 }
 
-// 4. 定义一个无显示返回的函数
-int print_hello() {
-    string s = "Hello, World!\n";
-}
+// 2. 实例化 Point 类
+// 注意：当前实现中，实例化是通过直接调用类名完成的，
+// 并且构造函数是自动合成的。
+Point p = Point();
 
-// --- 函数调用测试 ---
+// 3. 获取实例属性 (GetProperty)
+// 读取 p.x 的初始值 (10)
+int initial_x = p.x;
 
-// 调用无参函数
-int answer = get_answer();
+// 4. 设置实例属性 (SetProperty)
+// 修改 p.y 的值
+p.y = 50;
 
-// 调用带参函数
-int sum_result = add(100, 20);
+// 5. 再次获取属性以验证修改
+int modified_y = p.y;
 
-// 调用递归函数
-int fact_of_5 = factorial(5);
+// 6. 调用实例方法
+// 应该计算 10 + 50
+int result = p.sum();
 
-print_hello();
+// 最终, result 应该等于 60
+// initial_x 应该等于 10
+// modified_y 应该等于 50

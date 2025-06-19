@@ -436,6 +436,24 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
                 self.print_action(action, locations, unreachable, is_gather, is_loop, has_invalid)
 
             self.print("self._reset(mark)")
+            
+            if not is_loop:
+                self.print("# 记录解析失败信息")
+                self.print("if mark >= self.error_collector.furthest_position:")
+                with self.indent():
+                    expected_tokens = []
+                    for item in node.items:
+                        if isinstance(item.item, StringLeaf):
+                            expected_tokens.append(f"{item.item.value}")
+                        elif isinstance(item.item, NameLeaf):
+                            expected_tokens.append(f"'{item.item.value}'")
+                    
+                    if expected_tokens:
+                        expected_set_str = "{" + ", ".join(expected_tokens) + "}"
+                        self.print(f"self.error_collector.add_error(mark, '无法匹配规则', {expected_set_str})")
+                    else:
+                        self.print("self.error_collector.add_error(mark, '无法匹配规则')")
+            
             # Skip remaining alternatives if a cut was reached.
             if has_cut:
                 self.print("if cut:")
