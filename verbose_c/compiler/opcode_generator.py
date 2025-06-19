@@ -1,6 +1,7 @@
 from verbose_c.compiler.enum import LoopType, ScopeType, SymbolKind
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.compiler.symbol import SymbolTable
+from verbose_c.object.class_ import VBCClass
 from verbose_c.object.function import VBCFunction
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_float import VBCFloat
@@ -146,7 +147,7 @@ class OpcodeGenerator(VisitorBase):
         self.emit(Opcode.LOAD_CONSTANT, const_index)
 
     def visit_TypeNode(self, node: TypeNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+        raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
 
     def visit_ModuleNode(self, node: ModuleNode):
         
@@ -489,13 +490,14 @@ class OpcodeGenerator(VisitorBase):
         # 创建单独的编译环境
         function_compiler = Compiler(
             target_ast=node.body,
+            # TODO 根据主编译器优化等级进行优化
             optimize_level=0,
             symbol_table=function_symbol_table,
             scope_type=ScopeType.FUNCTION,
         )
         
         function_compiler.compile()
-        function_op_generator = function_compiler._opcode_generator
+        function_op_generator = function_compiler.opcode_generator
 
         # 检查一下编译后的操作码，如果最后没有显式的return，则添加一个return null;
         if not function_op_generator.bytecode or function_op_generator.bytecode[-1][0] != Opcode.RETURN:
@@ -549,7 +551,185 @@ class OpcodeGenerator(VisitorBase):
         self.emit(Opcode.CALL_FUNCTION, num_args)
 
     def visit_ClassNode(self, node: ClassNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
+        from verbose_c.compiler.compiler import Compiler
+        class_name = node.name.name
+        
+        # TODO 类继承处理
+        super_classes = []
+        class_symbol_table = SymbolTable(scope_type=ScopeType.CLASS, parent=self.symbol_table)
+        vbc_class = VBCClass(name=class_name, super_class=[])
+        
+        user_init_node: FunctionNode | None = None
+        for statement in node.body.statements:
+            if isinstance(statement, FunctionNode) and statement.name.name == "__init__":
+                user_init_node = statement
+                break
+
+        field_init_statements = []
+        
+        for statement in node.body.statements:
+            if isinstance(statement, FunctionNode):
+                method_name = statement.name.name
+                
+                if method_name == "__init__":
+                    continue
+                
+                class_symbol_table.add_symbol(
+                    name=method_name,
+                    type_node=statement.return_type,
+                    kind=SymbolKind.FUNCTION
+                )
+                
+                method_symbol_table = SymbolTable(scope_type=ScopeType.FUNCTION, parent=class_symbol_table)
+                method_symbol_table.add_symbol(
+                    name="this",
+                    type_node=TypeNode(type_name=NameNode(class_name)),
+                    kind=SymbolKind.PARAMETER
+                )
+
+                for param_node in statement.args:
+                    method_symbol_table.add_symbol(
+                        name=param_node.name.name,
+                        type_node=param_node.var_type,
+                        kind=SymbolKind.PARAMETER
+                    )
+                
+                # 编译方法
+                method_compiler = Compiler(
+                    target_ast=statement.body,
+                    # TODO 根据主编译器的优化等级进行设置
+                    optimize_level=0,
+                    symbol_table=method_symbol_table,
+                    scope_type=ScopeType.FUNCTION,
+                )
+                
+                method_compiler.compile()
+                method_op_generator = method_compiler.opcode_generator
+
+                # 检查一下编译后的操作码，如果最后没有显式的return，则添加一个return null;
+                if not method_op_generator.bytecode or method_op_generator.bytecode[-1][0] != Opcode.RETURN:
+                    const_index = method_op_generator.add_constant(VBCNull())
+                    method_op_generator.emit(Opcode.LOAD_CONSTANT, const_index)
+                    method_op_generator.emit(Opcode.RETURN)
+
+                # 将跳转标签解析为地址
+                for i, instruction in enumerate(method_op_generator.bytecode):
+                    if len(instruction) == 2:
+                        opcode, operand = instruction
+                        if isinstance(operand, str) and operand in method_op_generator.labels:
+                            method_op_generator.bytecode[i] = (opcode, method_op_generator.labels[operand])
+                
+                # 收集函数编译结果
+                self.function_compilation_results[f"{class_name}.{method_name}"] = {
+                    'bytecode': method_op_generator.bytecode,
+                    'constants': method_op_generator.constant_pool,
+                    'labels': method_op_generator.labels
+                }
+
+                function_bytecode = method_op_generator.bytecode
+                function_constants = method_op_generator.constant_pool
+                
+                param_count = len(statement.args)
+                local_count = method_symbol_table._next_local_address
+
+                vbc_method = VBCFunction(
+                    name=method_name,
+                    bytecode=function_bytecode,
+                    constants=function_constants,
+                    param_count=param_count,
+                    local_count=local_count
+                )
+                
+                vbc_class._methods[method_name] = vbc_method
+                
+            elif isinstance(statement, VarDeclNode):
+                field_name = statement.name.name
+                class_symbol_table.add_symbol(
+                    name=field_name,
+                    type_node=statement.var_type,
+                    kind=SymbolKind.VARIABLE
+                )
+
+                vbc_class._fields[field_name] = VBCNull()
+                if statement.init_exp:
+                    this_node = NameNode("this")
+                    assignment_node = AssignmentNode(
+                        target=GetPropertyNode(obj=this_node, property_name=statement.name),
+                        value=statement.init_exp
+                    )
+                    field_init_statements.append(assignment_node)
+
+        final_init_body_statements = []
+        final_init_args = []
+        
+        if user_init_node:
+            final_init_args = user_init_node.args
+            final_init_body_statements = field_init_statements + user_init_node.body.statements
+        else:
+            final_init_args = []
+            final_init_body_statements = field_init_statements
+
+        final_init_method_node = FunctionNode(
+            return_type=TypeNode(NameNode("void")),
+            name=NameNode("__init__"),
+            args=final_init_args,
+            kwargs={},
+            body=BlockNode(final_init_body_statements)
+        )
+
+        init_method_symbol_table = SymbolTable(scope_type=ScopeType.FUNCTION, parent=class_symbol_table)
+        init_method_symbol_table.add_symbol(
+            name="this",
+            type_node=TypeNode(type_name=NameNode(class_name)),
+            kind=SymbolKind.PARAMETER
+        )
+        for param_node in final_init_args:
+            init_method_symbol_table.add_symbol(
+                name=param_node.name.name,
+                type_node=param_node.var_type,
+                kind=SymbolKind.PARAMETER
+            )
+        
+        init_compiler = Compiler(
+            target_ast=final_init_method_node.body,
+            optimize_level=0,
+            symbol_table=init_method_symbol_table,
+            scope_type=ScopeType.FUNCTION,
+        )
+        init_compiler.compile()
+        init_op_generator = init_compiler.opcode_generator
+
+        if not init_op_generator.bytecode or init_op_generator.bytecode[-1][0] != Opcode.RETURN:
+            const_index = init_op_generator.add_constant(VBCNull())
+            init_op_generator.emit(Opcode.LOAD_CONSTANT, const_index)
+            init_op_generator.emit(Opcode.RETURN)
+
+        for i, instruction in enumerate(init_op_generator.bytecode):
+            if len(instruction) == 2:
+                opcode, operand = instruction
+                if isinstance(operand, str) and operand in init_op_generator.labels:
+                    init_op_generator.bytecode[i] = (opcode, init_op_generator.labels[operand])
+
+        vbc_init_method = VBCFunction(
+            name="__init__",
+            bytecode=init_op_generator.bytecode,
+            constants=init_op_generator.constant_pool,
+            param_count=len(final_init_args),
+            local_count=init_method_symbol_table._next_local_address
+        )
+        
+        vbc_class._methods["__init__"] = vbc_init_method
+
+        class_index = self.add_constant(vbc_class)
+        self.emit(Opcode.LOAD_CONSTANT, class_index)
+        
+        self.symbol_table.add_symbol(
+            name=class_name,
+            type_node=None,
+            kind=SymbolKind.CLASS
+        )
+        
+        self.emit(Opcode.STORE_GLOBAL_VAR, class_name)
 
     def visit_AttributeNode(self, node: AttributeNode):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")

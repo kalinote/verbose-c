@@ -350,13 +350,13 @@ class ClassNode(ASTNode):
 
     Args:
         name (NameNode): 类名称
-        base_classes (list[NameNode]): 父类名称
+        base_classes (str): 父类名称
         body (BlockNode): 类主体，包括类属性和类方法
     """
-    def __init__(self, name: NameNode, body: BlockNode, base_classes: list["ClassNode"], start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
+    def __init__(self, name: NameNode, body: BlockNode, base_classes: str, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.name: NameNode = name
-        self.base_classes: list["ClassNode"] = base_classes or []
+        self.base_classes: str = base_classes or []
         self.body: BlockNode = body
 
 class AttributeNode(ASTNode):

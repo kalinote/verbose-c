@@ -7,7 +7,7 @@ class VBCClass(VBCObject):
     """
     verbose-c 类类
     """
-    def __init__(self, name: str, super_class: list["VBCClass"] = []):
+    def __init__(self, name: str, super_class: list["VBCClass"] = [], methods: dict[str, VBCObject] = {}, fields: dict[str, VBCObject] = {}):
         super().__init__(VBCObjectType.CLASS)
         self._name: str = name                                  # 类名
         self._super_class: list["VBCClass"] = super_class       # 父类名列表

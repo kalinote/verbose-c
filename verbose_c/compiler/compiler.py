@@ -36,6 +36,10 @@ class Compiler:
     @property
     def constant_pool(self):
         return self._constant_pool
+    
+    @property
+    def opcode_generator(self):
+        return self._opcode_generator
 
     def compile(self):
         """
