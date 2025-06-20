@@ -401,11 +401,7 @@ class VBCVirtualMachine:
     @register_instruction(Opcode.ENTER_SCOPE)
     def __handle_enter_scope(self):
         """进入新作用域"""
-        # 保存当前局部变量状态到作用域栈
-        self._scope_stack.append({
-            'local_vars': self._local_variables.copy(),
-            'local_count': len(self._local_variables)
-        })
+        self._scope_stack.append(len(self._local_variables))
 
     @register_instruction(Opcode.EXIT_SCOPE)
     def __handle_exit_scope(self):
@@ -413,9 +409,10 @@ class VBCVirtualMachine:
         if not self._scope_stack:
             raise RuntimeError("没有可退出的作用域")
         
-        # 恢复上一层作用域的局部变量状态
-        scope_info = self._scope_stack.pop()
-        self._local_variables = scope_info['local_vars']
+        previous_count = self._scope_stack.pop()
+        num_to_pop = len(self._local_variables) - previous_count
+        if num_to_pop > 0:
+            del self._local_variables[previous_count:]
 
     ## 类型转换类指令
     @register_instruction(Opcode.CAST)

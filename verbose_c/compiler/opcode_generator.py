@@ -253,12 +253,20 @@ class OpcodeGenerator(VisitorBase):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
 
     def visit_BlockNode(self, node: BlockNode):
-        # TODO 作用域切换
-        # TODO 进一步完善和优化
+        original_symbol_table = self.symbol_table
+        block_symbol_table = SymbolTable(scope_type=ScopeType.BLOCK, parent=original_symbol_table)
+        block_symbol_table._next_local_address = original_symbol_table._next_local_address
+        self.symbol_table = block_symbol_table
+        
+        self.emit(Opcode.ENTER_SCOPE)
         
         for statement in node.statements:
             self.visit(statement)
 
+        self.emit(Opcode.EXIT_SCOPE)
+        
+        original_symbol_table._next_local_address = self.symbol_table._next_local_address
+        self.symbol_table = original_symbol_table
 
     def visit_VarDeclNode(self, node: VarDeclNode):
         declared_type: VBCObjectType | None = None
@@ -310,15 +318,15 @@ class OpcodeGenerator(VisitorBase):
         if isinstance(node.target, NameNode):
             self.visit(node.value)
 
-            symbol = self.symbol_table.lookup(node.name.name)
+            symbol = self.symbol_table.lookup(node.target.name)
             if symbol is None:
-                raise ValueError(f"未定义的变量: {node.name.name}")
+                raise ValueError(f"未定义的变量: {node.target.name}")
 
             if symbol.address is not None:
                 self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)
             else:
                 # TODO 这里的逻辑应该还需要进一步确认
-                self.emit(Opcode.STORE_GLOBAL_VAR, node.name.name)
+                self.emit(Opcode.STORE_GLOBAL_VAR, node.target.name)
         
         elif isinstance(node.target, GetPropertyNode):
             # 处理对象属性赋值，比如 obj.prop = value 的语法

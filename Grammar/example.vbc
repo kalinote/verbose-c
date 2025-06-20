@@ -1,37 +1,37 @@
-// --- 类功能测试 ---
+// --- 作用域功能测试 ---
 
-// 1. 定义一个简单的 Point 类
-class Point {
-    // 带有初始值的字段
-    int x = 10;
-    int y = 20;
+// 1. 定义一个全局变量
+int global_var = 1;
 
-    // 一个简单的方法，返回 x 和 y 的和
-    int sum() {
-        return this.x + this.y;
-    }
+// 2. 进入第一个独立的块作用域
+{
+    // 在块内定义一个局部变量
+    int block_var = 10;
+    
+    // 在块内访问并修改全局变量
+    global_var = global_var + block_var; // global_var 的值现在应该是 1 + 10 = 11
 }
 
-// 2. 实例化 Point 类
-// 注意：当前实现中，实例化是通过直接调用类名完成的，
-// 并且构造函数是自动合成的。
-Point p = new Point();
+// 此时，block_var 应该已经被销毁
 
-// 3. 获取实例属性 (GetProperty)
-// 读取 p.x 的初始值 (10)
-int initial_x = p.x;
+// 3. 进入第二个独立的块作用域
+{
+    // 定义一个同名的局部变量。
+    // 如果作用域被正确销毁，这里不应该发生“重复定义”错误。
+    int block_var = 20; 
+    
+    // 再次修改全局变量
+    global_var = global_var + block_var; // global_var 的值现在应该是 11 + 20 = 31
+    
+    // 4. 创建一个嵌套的块作用域
+    {
+        int nested_var = 5;
+        global_var = global_var + nested_var; // global_var 的值现在应该是 31 + 5 = 36
+    }
+    
+    // 在这里，nested_var 应该已经被销毁
+}
 
-// 4. 设置实例属性 (SetProperty)
-// 修改 p.y 的值
-p.y = 50;
-
-// 5. 再次获取属性以验证修改
-int modified_y = p.y;
-
-// 6. 调用实例方法
-// 应该计算 10 + 50
-int result = p.sum();
-
-// 最终, result 应该等于 60
-// initial_x 应该等于 10
-// modified_y 应该等于 50
+// 在程序的最后，所有在块内定义的变量 (block_var, nested_var) 都应该已不存在。
+// global_var 的最终值应该是 36。
+// 如果这段代码能够顺利执行而不报错，就说明我们的作用域实现是基本正确的。
