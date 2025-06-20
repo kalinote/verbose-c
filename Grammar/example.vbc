@@ -15,7 +15,7 @@ class Point {
 // 2. 实例化 Point 类
 // 注意：当前实现中，实例化是通过直接调用类名完成的，
 // 并且构造函数是自动合成的。
-Point p = Point();
+Point p = new Point();
 
 // 3. 获取实例属性 (GetProperty)
 // 读取 p.x 的初始值 (10)

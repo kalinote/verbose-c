@@ -60,6 +60,7 @@ class Opcode(Enum):
     # === 对象与类操作类 (0x90-0x9F) ===
     GET_PROPERTY        = 0x90  # 获取对象属性
     SET_PROPERTY        = 0x91  # 设置对象属性
+    NEW_INSTANCE        = 0x92  # 创建新实例
     
     # === 扩展指令类 (0xA0-0xFF) ===
     NOP                 = 0xA0  # 空操作

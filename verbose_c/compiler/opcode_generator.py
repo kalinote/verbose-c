@@ -734,6 +734,23 @@ class OpcodeGenerator(VisitorBase):
     def visit_AttributeNode(self, node: AttributeNode):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
 
+    def visit_NewInstanceNode(self, node: NewInstanceNode):
+        call_node = node.class_call
+        
+        if not isinstance(call_node, CallNode):
+            raise TypeError(f"期望类调用, 得到 {type(call_node).__name__}")
+
+        if call_node.kwargs:
+            raise NotImplementedError(f"关键字参数在构造函数调用中暂未实现, 在行: {node.start_line}, 列: {node.start_column}")
+
+        self.visit(call_node.name)
+        
+        for arg_expr in call_node.args:
+            self.visit(arg_expr)
+        
+        num_args = len(call_node.args)
+        self.emit(Opcode.NEW_INSTANCE, num_args)
+
     def visit_GetPropertyNode(self, node: GetPropertyNode):
         self.visit(node.obj)
         

@@ -22,6 +22,24 @@ class VBCFunction(VBCObject):
     def __str__(self):
         return super().__str__() + f"(name={self.name})"
 
+class VBCBoundMethod(VBCObject):
+    """
+    绑定方法对象，将一个实例和该实例的一个方法绑定在一起。
+    """
+    def __init__(self, instance, method):
+        from verbose_c.object.instance import VBCInstance
+        super().__init__(VBCObjectType.FUNCTION)
+        if not isinstance(instance, VBCInstance):
+            raise TypeError("VBCBoundMethod 的 instance 必须是 VBCInstance 类型")
+        if not isinstance(method, VBCFunction):
+            raise TypeError("VBCBoundMethod 的 method 必须是 VBCFunction 类型")
+            
+        self.instance = instance
+        self.method = method
+
+    def __repr__(self):
+        return f"<BoundMethod {self.method.name} of {self.instance}>"
+
 class CallFrame:
     """
     调用栈帧，保存函数调用的执行上下文

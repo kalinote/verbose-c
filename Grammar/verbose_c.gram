@@ -28,10 +28,6 @@ func_block[BlockNode]: b=statement* { BlockNode(b or [], LOCATIONS) }
 ## 函数返回
 function_ret[ReturnNode]: 'return' r=expr ";" { ReturnNode(r, LOCATIONS) }
 
-## 函数调用
-function_call[CallNode]: f=function_call_expr ";" {f}
-function_call_expr[CallNode]: n=function_name "(" a=func_call_param? ")" { CallNode(n,a or [], {}, LOCATIONS) }
-# TODO 增加链式调用
 
 func_call_param[list[ASTNode]]: e1=expr e2=("," expr)* { [e1] + ([item[1] for item in e2] if e2 else []) }
 
@@ -39,7 +35,6 @@ func_call_param[list[ASTNode]]: e1=expr e2=("," expr)* { [e1] + ([item[1] for it
 ## 变量声明
 var_decl[VarDeclNode]:
      | t=type_name n=var_name v=( "=" var_value )? ";" { VarDeclNode(t,n,v[1] if v else None, LOCATIONS) }
-# TODO 增加多变量声明支持
 
 type_name[TypeNode]:
       | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(NAME) { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), LOCATIONS) }
@@ -48,7 +43,7 @@ var_name[NameNode]: NAME { NameNode(name.string, LOCATIONS) }
 var_value: expr
 
 ## 变量赋值
-var_assign: n=var_name "=" v=var_value ";" { AssignmentNode(n,v, LOCATIONS) }
+var_assign: n=member_expr "=" v=var_value ";" { AssignmentNode(n,v, LOCATIONS) }
 
 # 表达式
 ## 表达式作为语句
@@ -96,15 +91,20 @@ multiplicative:
 factor:
       | '(' expr ')' { expr }
       | unary { unary }
-      | atom { atom }
+      | new_instance { new_instance }
+      | member_expr { member_expr }
 
 unary:
       | '-' factor { UnaryOpNode(Operator.SUBTRACT, factor, LOCATIONS) }
       | '+' factor { UnaryOpNode(Operator.ADD, factor, LOCATIONS) }
       | '!' factor { UnaryOpNode(Operator.NOT, factor, LOCATIONS) }
 
+member_expr:
+      | member_expr '.' property=NAME { GetPropertyNode(member_expr, NameNode(property.string, LOCATIONS), LOCATIONS) }
+      | member_expr '(' args=func_call_param? ')' { CallNode(member_expr, args or [], {}, LOCATIONS) }
+      | atom
+
 atom:
-      | function_call_expr
       | b=("true"|"false") { BoolNode(b.string, LOCATIONS) }
       | "null" { NullNode(LOCATIONS) }
       | NAME { NameNode(name.string, LOCATIONS) }
@@ -150,7 +150,11 @@ for_statement[ForNode]:
 # 类与对象
 ## 类定义
 class_definition:
-      | "class" NAME "{" cb=class_body "}" { ClassNode(NAME, [], cb, LOCATIONS) }
+      | "class" n=NAME "{" cb=class_body "}" { ClassNode(NameNode(n.string, LOCATIONS), cb, [], LOCATIONS) }
 
 class_body[BlockNode]:
       | m=(var_decl | function)* {BlockNode(m or [], LOCATIONS)}
+
+## 实例化
+new_instance[NewInstanceNode]:
+      | 'new' c=member_expr { NewInstanceNode(c, LOCATIONS) }

@@ -1,8 +1,9 @@
 from verbose_c.compiler.opcode import Instruction, Opcode
+from verbose_c.object.class_ import VBCClass
 from verbose_c.object.instance import VBCInstance
 from verbose_c.object.t_string import VBCString
 from verbose_c.utils.stack import Stack
-from verbose_c.object.function import VBCFunction, CallFrame
+from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame
 from verbose_c.object.t_bool import VBCBool
 
 # 全局的指令处理器映射
@@ -325,55 +326,72 @@ class VBCVirtualMachine:
 
         # 恢复调用前的上下文
         call_frame: CallFrame = self._call_stack.pop()
+        
+        if getattr(call_frame, 'is_constructor_call', False):
+            instance = self._local_variables[0]
+            self._stack.push(instance)
+        else:
+            self._stack.push(return_value)
+
         self._pc = call_frame.return_pc
         self._local_variables = call_frame.local_vars
         self._bytecode = call_frame.bytecode
         self._constants = call_frame.constants
-        
-        # 返回值入栈
-        self._stack.push(return_value)
 
     ## 函数调用类指令
     @register_instruction(Opcode.CALL_FUNCTION)
-    def __handle_call_function(self, operand):
-        if operand is None:
+    def __handle_call_function(self, num_args):
+        if num_args is None:
             raise ValueError("CALL_FUNCTION 指令缺少参数数量")
         
-        # 参数数量 + 函数对象
-        if self._stack.size() < operand + 1:
-            raise RuntimeError(f"栈层数错误, 需要 {operand + 2} 个元素, 实际只有 {self._stack.size}")
+        if self._stack.size() < num_args + 1:
+            raise RuntimeError(f"栈层数错误, 需要 {num_args + 1} 个元素, 实际只有 {self._stack.size()}")
 
-        # 从栈顶向下数第 operand 个位置是函数对象，在此之前都是参数
-        function_obj = self._stack.peek(operand)
-        
-        if not isinstance(function_obj, VBCFunction):
-            raise RuntimeError(f"调用的对象不是一个函数: {type(function_obj)}")
-        
-        if operand != function_obj.param_count:
-            raise RuntimeError(f"函数 '{function_obj.name}' 期望 {function_obj.param_count} 个参数，但提供了 {operand} 个")
-        
-        # 保存现场
-        call_frame = CallFrame(
-            return_pc=self._pc,
-            local_vars=self._local_variables,
-            bytecode=self._bytecode,
-            constants=self._constants,
-            function_name=function_obj.name
-        )
-        self._call_stack.append(call_frame)
+        callable_obj = self._stack.peek(num_args)
 
-        # 切换到函数的执行上下文
-        self._bytecode = function_obj.bytecode
-        self._constants = function_obj.constants
+        if isinstance(callable_obj, VBCFunction):
+            if num_args != callable_obj.param_count:
+                raise RuntimeError(f"函数 '{callable_obj.name}' 期望 {callable_obj.param_count} 个参数，但提供了 {num_args} 个")
+            
+            args = [self._stack.pop() for _ in range(num_args)]
+            args.reverse()
+            self._stack.pop()
 
-        self._local_variables = [None] * function_obj.local_count
+            call_frame = CallFrame(return_pc=self._pc, local_vars=self._local_variables, bytecode=self._bytecode, constants=self._constants, function_name=callable_obj.name)
+            self._call_stack.append(call_frame)
+
+            self._bytecode = callable_obj.bytecode
+            self._constants = callable_obj.constants
+            self._local_variables = [None] * callable_obj.local_count
+            for i, arg in enumerate(args):
+                self._local_variables[i] = arg
+
+        elif isinstance(callable_obj, VBCBoundMethod):
+            method = callable_obj.method
+            instance = callable_obj.instance
+
+            if num_args != method.param_count:
+                raise RuntimeError(f"方法 '{method.name}' 期望 {method.param_count} 个参数，但提供了 {num_args} 个")
+
+            args = [self._stack.pop() for _ in range(num_args)]
+            args.reverse()
+            self._stack.pop()
+
+            call_frame = CallFrame(return_pc=self._pc, local_vars=self._local_variables, bytecode=self._bytecode, constants=self._constants, function_name=method.name)
+            self._call_stack.append(call_frame)
+
+            self._bytecode = method.bytecode
+            self._constants = method.constants
+            self._local_variables = [None] * method.local_count
+            
+            self._local_variables[0] = instance
+            for i, arg in enumerate(args):
+                self._local_variables[i + 1] = arg
         
-        # 处理参数以及弹出函数对象
-        for i in range(operand):
-            self._local_variables[operand - 1 - i] = self._stack.pop()
-        self._stack.pop()
-        
-        # 执行完这个命令pc会在循环内+1
+        else:
+            raise RuntimeError(f"调用的对象不是一个函数或方法: {type(callable_obj)}")
+
+        # 将PC设置为-1，因为循环会自动+1，从而从0开始执行新函数
         self._pc = -1
 
     @register_instruction(Opcode.LOAD_FUNCTION)
@@ -416,7 +434,29 @@ class VBCVirtualMachine:
     ## 对象与类操作类
     @register_instruction(Opcode.GET_PROPERTY)
     def __handle_get_property(self):
-        pass
+        property_name_obj = self._stack.pop()
+        instance_obj = self._stack.pop()
+
+        if not isinstance(property_name_obj, VBCString):
+            raise TypeError(f"GET_PROPERTY 指令: 属性名期望 {type(VBCString)} 得到 {type(property_name_obj).__name__}")
+        
+        property_name = property_name_obj.value
+
+        if not isinstance(instance_obj, VBCInstance):
+            raise TypeError(f"GET_PROPERTY 指令: 实例期望 {type(VBCInstance).__name__} 得到 {type(instance_obj).__name__}")
+
+        # 使用实例的 get_attribute 方法查找属性或方法
+        attribute = instance_obj.get_attribute(property_name)
+        
+        if attribute is None:
+            raise AttributeError(f"对象 '{instance_obj.class_._name}' 没有属性 '{property_name}'")
+
+        # 如果获取到的是一个方法，则创建一个绑定方法对象
+        if isinstance(attribute, VBCFunction):
+            bound_method = VBCBoundMethod(instance_obj, attribute)
+            self._stack.push(bound_method)
+        else:
+            self._stack.push(attribute)
     
     @register_instruction(Opcode.SET_PROPERTY)
     def __handle_set_property(self):
@@ -434,6 +474,56 @@ class VBCVirtualMachine:
         instance.set_attribute(property_name_str, value)
         # 结果入栈
         self._stack.push(value)
+
+    @register_instruction(Opcode.NEW_INSTANCE)
+    def __handle_new_instance(self, num_args):
+        """处理对象实例化和构造函数调用"""
+        if num_args is None:
+            raise ValueError("NEW_INSTANCE 指令缺少参数数量")
+
+        if self._stack.size() < num_args + 1:
+            raise RuntimeError(f"栈层数错误, 需要 {num_args + 1} 个元素, 实际只有 {self._stack.size()}")
+
+        class_obj = self._stack.peek(num_args)
+        if not isinstance(class_obj, VBCClass):
+            raise TypeError(f"new 操作的目标不是一个类: {type(class_obj).__name__}")
+
+        instance = class_obj.create_instance()
+        init_method = class_obj.lookup_method("__init__")
+        
+        args = [self._stack.pop() for _ in range(num_args)]
+        args.reverse()
+        self._stack.pop()
+
+        if not init_method or not isinstance(init_method, VBCFunction):
+            if num_args > 0:
+                raise RuntimeError(f"类 '{class_obj._name}' 的默认构造函数不接受参数")
+            self._stack.push(instance)
+            return
+
+        if num_args != init_method.param_count:
+            raise RuntimeError(f"构造函数 '{class_obj._name}.__init__' 期望 {init_method.param_count} 个参数，但提供了 {num_args} 个")
+
+        call_frame = CallFrame(
+            return_pc=self._pc,
+            local_vars=self._local_variables,
+            bytecode=self._bytecode,
+            constants=self._constants,
+            function_name=init_method.name
+        )
+        
+        setattr(call_frame, 'is_constructor_call', True)
+        self._call_stack.append(call_frame)
+
+        self._bytecode = init_method.bytecode
+        self._constants = init_method.constants
+        self._local_variables = [None] * init_method.local_count
+
+        self._local_variables[0] = instance
+        for i, arg in enumerate(args):
+            self._local_variables[i + 1] = arg
+
+        self._pc = -1
 
     ## 扩展指令类
     @register_instruction(Opcode.NOP)
