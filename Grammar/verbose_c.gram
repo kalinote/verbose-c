@@ -1,163 +1,119 @@
-# TODO 该语法定义尚未完成，仅用于早期测试，后续可能需要全部重写
-# 根节点固定为ModuleNode
-start[ModuleNode]: sl=statement+ { ModuleNode(sl, LOCATIONS) }
+# 根节点，固定为ModuleNode
+start[ModuleNode]: sl=statement* END { ModuleNode(sl, LOCATIONS) }
 
-# 语句定义 (新增)
-statement: independent_block | class_definition | function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement
+# 基本语句
+statement:
+    | independent_block
+    | class_definition
+    | function_ret
+    | pack_import
+    | function
+    | var_decl
+    | var_assign
+    | if_statement
+    | while_statement
+    | for_statement
+    | break_statement
+    | continue_statement
+    | expression_as_statement
 
 # 包导入
 pack_import[PackImportNode]: "#" 'include' n=include_name { PackImportNode(n, LOCATIONS) }
-# TODO 结构优化
-
 include_name[NameNode | StringNode]:
-      | i=INCLUDE_HEADER { NameNode(i.string, LOCATIONS) }
-      | s=STRING { StringNode(s.string, LOCATIONS) }
-      | n=NAME { NameNode(n.string, LOCATIONS) }
+    | i=INCLUDE_HEADER { NameNode(i.string, LOCATIONS) }
+    | s=STRING { StringNode(s.string, LOCATIONS) }
+    | n=NAME { NameNode(n.string, LOCATIONS) }
 
-# 函数相关
-## 函数定义
-function[FunctionNode]: a=type_name b=function_name "(" c=param? ")" "{" fb=func_block "}" {FunctionNode(a, b, c or [], {}, fb, LOCATIONS)}
+# 函数
+function[FunctionNode]: t=type_name n=NAME '(' p=params? ')' '{' b=func_block '}' { FunctionNode(t, NameNode(n.string, LOCATIONS), p or [], {}, b, LOCATIONS) }
+params[list[ParamNode]]: head=typed_param tail=(',' typed_param)* { [head] + [t[1] for t in tail] }
+typed_param[ParamNode]: t=type_name n=NAME { ParamNode(t, NameNode(n.string, LOCATIONS), LOCATIONS) }
 
-function_name[NameNode]: NAME { NameNode(name.string, LOCATIONS) }
-param[list[ParamNode]]: p1=typed_param p2=("," typed_param)* { [p1] + ([item[1] for item in p2] if p2 else []) }
-typed_param[ParamNode]: t=type_name n=NAME { ParamNode(t, NameNode(n.string), LOCATIONS) }
-
-## 独立代码块
+# 代码块
 independent_block[BlockNode]: "{" b=func_block "}" { b }
+func_block[BlockNode]: s=statement* { BlockNode(s or [], LOCATIONS) }
 
-## 函数体
-func_block[BlockNode]: b=statement* { BlockNode(b or [], LOCATIONS) }
+# 返回、中断、继续
+function_ret[ReturnNode]: 'return' r=expr? ';' { ReturnNode(r, LOCATIONS) }
+break_statement[BreakNode]: "break" ";" { BreakNode(LOCATIONS) }
+continue_statement[ContinueNode]: "continue" ";" { ContinueNode(LOCATIONS) }
 
-## 函数返回
-function_ret[ReturnNode]: 'return' r=expr ";" { ReturnNode(r, LOCATIONS) }
-
-
-func_call_param[list[ASTNode]]: e1=expr e2=("," expr)* { [e1] + ([item[1] for item in e2] if e2 else []) }
-
-# 变量相关
-## 变量声明
-var_decl[VarDeclNode]:
-     | t=type_name n=var_name v=( "=" var_value )? ";" { VarDeclNode(t,n,v[1] if v else None, LOCATIONS) }
-
+# 变量
+var_decl[VarDeclNode]: t=type_name n=NAME v=('=' expr)? ';' { VarDeclNode(t, NameNode(n.string, LOCATIONS), v[1] if v else None, LOCATIONS) }
+# for循环中使用的变量声明
+for_var_decl[VarDeclNode]: t=type_name n=NAME v=('=' expr)? { VarDeclNode(t, NameNode(n.string, LOCATIONS), v[1] if v else None, LOCATIONS) }
+var_assign[AssignmentNode]: n=member_expr '=' v=expr ';' { AssignmentNode(n, v, LOCATIONS) }
 type_name[TypeNode]:
       | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(NAME) { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), LOCATIONS) }
       | t=(SOFT_KEYWORD | NAME) { TypeNode(NameNode(t.string, LOCATIONS), LOCATIONS) }
-var_name[NameNode]: NAME { NameNode(name.string, LOCATIONS) }
-var_value: expr
 
-## 变量赋值
-var_assign: n=member_expr "=" v=var_value ";" { AssignmentNode(n,v, LOCATIONS) }
+# 表达式作为语句
+expression_as_statement[ExprStmtNode]: e=expr ';' { ExprStmtNode(e, LOCATIONS) }
 
 # 表达式
-## 表达式作为语句
-expression_as_statement[ASTNode]: e=expr ";" { e }
-
-## 表达式 - 按运算符优先级组织
-## 优先级从低到高：逻辑或 -> 逻辑与 -> 相等比较 -> 关系比较 -> 加减 -> 乘除 -> 因子
-
-## 逻辑或运算 (最低优先级)
-expr: 
-      | expr "||" logical_and { BinaryOpNode(expr, Operator.LOGICAL_OR, logical_and, LOCATIONS) }
-      | logical_and { logical_and }
-
-## 逻辑与运算
+expr:
+    | assignment
+assignment[ASTNode]:
+    | target=member_expr '=' val=assignment { AssignmentNode(target, val, LOCATIONS) }
+    | logical_or
+logical_or:
+    | logical_or '||' logical_and { BinaryOpNode(logical_or, Operator.LOGICAL_OR, logical_and, LOCATIONS) }
+    | logical_and
 logical_and:
-      | logical_and "&&" equality { BinaryOpNode(logical_and, Operator.LOGICAL_AND, equality, LOCATIONS) }
-      | equality { equality }
-
-## 相等比较运算
+    | logical_and '&&' equality { BinaryOpNode(logical_and, Operator.LOGICAL_AND, equality, LOCATIONS) }
+    | equality
 equality:
-      | equality '==' relational { BinaryOpNode(equality, Operator.EQUAL, relational, LOCATIONS) }
-      | equality '!=' relational { BinaryOpNode(equality, Operator.NOT_EQUAL, relational, LOCATIONS) }
-      | relational { relational }
-
-## 关系比较运算
+    | equality '==' relational { BinaryOpNode(equality, Operator.EQUAL, relational, LOCATIONS) }
+    | equality '!=' relational { BinaryOpNode(equality, Operator.NOT_EQUAL, relational, LOCATIONS) }
+    | relational
 relational:
-      | relational '<' additive { BinaryOpNode(relational, Operator.LESS_THAN, additive, LOCATIONS) }
-      | relational '<=' additive { BinaryOpNode(relational, Operator.LESS_EQUAL, additive, LOCATIONS) }
-      | relational '>' additive { BinaryOpNode(relational, Operator.GREATER_THAN, additive, LOCATIONS) }
-      | relational '>=' additive { BinaryOpNode(relational, Operator.GREATER_EQUAL, additive, LOCATIONS) }
-      | additive { additive }
-
-## 加减运算
-additive: 
-      | additive '+' multiplicative { BinaryOpNode(additive, Operator.ADD, multiplicative, LOCATIONS) }
-      | additive '-' multiplicative { BinaryOpNode(additive, Operator.SUBTRACT, multiplicative, LOCATIONS) }
-      | multiplicative { multiplicative }
-
-## 乘除运算
-multiplicative: 
-      | multiplicative '*' factor { BinaryOpNode(multiplicative, Operator.MULTIPLY, factor, LOCATIONS) }
-      | multiplicative '/' factor { BinaryOpNode(multiplicative, Operator.DIVIDE, factor, LOCATIONS) }
-      | factor { factor }
+    | relational '<' additive { BinaryOpNode(relational, Operator.LESS_THAN, additive, LOCATIONS) }
+    | relational '<=' additive { BinaryOpNode(relational, Operator.LESS_EQUAL, additive, LOCATIONS) }
+    | relational '>' additive { BinaryOpNode(relational, Operator.GREATER_THAN, additive, LOCATIONS) }
+    | relational '>=' additive { BinaryOpNode(relational, Operator.GREATER_EQUAL, additive, LOCATIONS) }
+    | additive
+additive:
+    | additive '+' multiplicative { BinaryOpNode(additive, Operator.ADD, multiplicative, LOCATIONS) }
+    | additive '-' multiplicative { BinaryOpNode(additive, Operator.SUBTRACT, multiplicative, LOCATIONS) }
+    | multiplicative
+multiplicative:
+    | multiplicative '*' factor { BinaryOpNode(multiplicative, Operator.MULTIPLY, factor, LOCATIONS) }
+    | multiplicative '/' factor { BinaryOpNode(multiplicative, Operator.DIVIDE, factor, LOCATIONS) }
+    | factor
 
 factor:
-      | '(' expr ')' { expr }
-      | unary { unary }
-      | new_instance { new_instance }
-      | member_expr { member_expr }
-
+    | '(' expr ')' { expr }
+    | unary
+    | new_instance
+    | member_expr
 unary:
-      | '-' factor { UnaryOpNode(Operator.SUBTRACT, factor, LOCATIONS) }
-      | '+' factor { UnaryOpNode(Operator.ADD, factor, LOCATIONS) }
-      | '!' factor { UnaryOpNode(Operator.NOT, factor, LOCATIONS) }
+    | '-' factor { UnaryOpNode(Operator.SUBTRACT, factor, LOCATIONS) }
+    | '+' factor { UnaryOpNode(Operator.ADD, factor, LOCATIONS) }
+    | '!' factor { UnaryOpNode(Operator.NOT, factor, LOCATIONS) }
 
 member_expr:
-      | member_expr '.' property=NAME { GetPropertyNode(member_expr, NameNode(property.string, LOCATIONS), LOCATIONS) }
-      | member_expr '(' args=func_call_param? ')' { CallNode(member_expr, args or [], {}, LOCATIONS) }
-      | atom
+    | member_expr '.' property=NAME { GetPropertyNode(member_expr, NameNode(property.string, LOCATIONS), LOCATIONS) }
+    | member_expr '(' args=func_call_param? ')' { CallNode(member_expr, args or [], {}, LOCATIONS) }
+    | atom
+func_call_param[list[ASTNode]]: head=expr tail=(',' expr)* { [head] + [t[1] for t in tail] }
 
 atom:
-      | b=("true"|"false") { BoolNode(b.string, LOCATIONS) }
-      | "null" { NullNode(LOCATIONS) }
-      | NAME { NameNode(name.string, LOCATIONS) }
-      | NUMBER { NumberNode(number.string, LOCATIONS) }
-      | STRING { StringNode(string.string, LOCATIONS) }
+    | b=('true' | 'false') { BoolNode(b.string, LOCATIONS) }
+    | 'null' { NullNode(LOCATIONS) }
+    | NAME { NameNode(name.string, LOCATIONS) }
+    | NUMBER { NumberNode(number.string, LOCATIONS) }
+    | STRING { StringNode(string.string, LOCATIONS) }
 
+# 控制流语句
+if_statement[IfNode]: 'if' '(' c=expr ')' '{' tb=func_block '}' e=else_clause? { IfNode(c, tb, e, LOCATIONS) }
+else_clause[ASTNode]:
+    | 'else' b=if_statement { b }
+    | 'else' '{' b=func_block '}' { b }
 
-# 控制语句块
-
-## 分支语句块
-### if语句块
-if_statement:
-      | 'if' "(" c=expr ")" "{" tb=func_block? "}" eb=else_if_barch { IfNode(c, tb, eb, LOCATIONS) }
-      | 'if' "(" c=expr ")" "{" tb=func_block? "}" eb=else_barch? { IfNode(c, tb, eb, LOCATIONS) }
-else_if_barch:
-      | 'else' 'if' "(" c=expr ")" "{" tb=func_block? "}" eb=else_if_barch { IfNode(c, tb, eb, LOCATIONS) }
-      | 'else' 'if' "(" c=expr ")" "{" tb=func_block? "}" eb=else_barch? { IfNode(c, tb, eb, LOCATIONS) }
-else_barch:
-      | 'else' "{" eb=func_block? "}" {eb}
-
-
-## 循环语句块
-
-### break
-break_statement:
-      | "break" ";" { BreakNode(LOCATIONS) }
-### continue
-continue_statement:
-      | "continue" ";" { ContinueNode(LOCATIONS) }
-
-### 循环体
-loop_body_statement: break_statement | continue_statement | function_ret | pack_import | function | var_decl | var_assign | if_statement | while_statement | for_statement | expression_as_statement
-loop_block[BlockNode]: b=loop_body_statement* { BlockNode(b or [], LOCATIONS) }
-
-### while语句块
-while_statement[WhileNode]:
-      | 'while' "(" c=expr ")" "{" b=loop_block "}" { WhileNode(c, b, LOCATIONS) }
-
-### for语句块
-for_statement[ForNode]:
-      | 'for' "(" i=expr ";" c=expr ";" u=expr ")" "{" b=loop_block "}" { ForNode(i, c, u, b, LOCATIONS) }
+while_statement[WhileNode]: 'while' '(' c=expr ')' '{' b=func_block '}' { WhileNode(c, b, LOCATIONS) }
+for_statement[ForNode]: 'for' '(' i=(for_var_decl | expr)? ';' c=expr? ';' u=expr? ')' '{' b=func_block '}' { ForNode(i, c, u, b, LOCATIONS) }
 
 # 类与对象
-## 类定义
-class_definition:
-      | "class" n=NAME "{" cb=class_body "}" { ClassNode(NameNode(n.string, LOCATIONS), cb, [], LOCATIONS) }
-
-class_body[BlockNode]:
-      | m=(var_decl | function)* {BlockNode(m or [], LOCATIONS)}
-
-## 实例化
-new_instance[NewInstanceNode]:
-      | 'new' c=member_expr { NewInstanceNode(c, LOCATIONS) }
+class_definition[ClassNode]: "class" n=NAME "{" cb=class_body "}" { ClassNode(NameNode(n.string, LOCATIONS), cb, [], LOCATIONS) }
+class_body[BlockNode]: m=(var_decl | function)* { BlockNode(m or [], LOCATIONS) }
+new_instance[NewInstanceNode]: 'new' c=member_expr { NewInstanceNode(c, LOCATIONS) }

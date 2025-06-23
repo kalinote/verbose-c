@@ -1,37 +1,109 @@
-// --- 作用域功能测试 ---
+// Comprehensive Test for verbose_c Grammar
 
-// 1. 定义一个全局变量
-int global_var = 1;
+// 1. 包导入 (pack_import)
+#include "mylib.vbc"
+#include <stdio.h>
 
-// 2. 进入第一个独立的块作用域
-{
-    // 在块内定义一个局部变量
-    int block_var = 10;
-    
-    // 在块内访问并修改全局变量
-    global_var = global_var + block_var; // global_var 的值现在应该是 1 + 10 = 11
-}
+// 2. 全局变量声明 (var_decl)
+int global_counter = 0;
+string global_message;
+float PI = 3.14;
+bool is_test_running = true;
 
-// 此时，block_var 应该已经被销毁
+// 3. 类定义 (class_definition)
+class Vehicle {
+    // 成员变量 (var_decl in class_body)
+    string brand;
+    int year;
 
-// 3. 进入第二个独立的块作用域
-{
-    // 定义一个同名的局部变量。
-    // 如果作用域被正确销毁，这里不应该发生“重复定义”错误。
-    int block_var = 20; 
-    
-    // 再次修改全局变量
-    global_var = global_var + block_var; // global_var 的值现在应该是 11 + 20 = 31
-    
-    // 4. 创建一个嵌套的块作用域
-    {
-        int nested_var = 5;
-        global_var = global_var + nested_var; // global_var 的值现在应该是 31 + 5 = 36
+    // 构造函数 (function in class_body)
+    void __init__(string b, int y) {
+        this.brand = b;
+        this.year = y;
     }
-    
-    // 在这里，nested_var 应该已经被销毁
+
+    // 成员方法 (function in class_body)
+    void display() {
+        // 方法内部的变量声明
+        string info = "Vehicle: " + this.brand;
+        // 表达式作为语句 (函数调用)
+        // print(info); // 调用未定义的函数，暂时注释
+    }
 }
 
-// 在程序的最后，所有在块内定义的变量 (block_var, nested_var) 都应该已不存在。
-// global_var 的最终值应该是 36。
-// 如果这段代码能够顺利执行而不报错，就说明我们的作用域实现是基本正确的。
+// 4. 函数定义 (function)
+int add(int a, int b) {
+    // 返回语句 (function_ret)
+    return a + b;
+}
+
+// 5. 主要逻辑
+void main() {
+    // 变量赋值 (var_assign)
+    global_message = "Starting test...";
+
+    // 实例化 (new_instance)
+    Vehicle myCar = new Vehicle("VBC-Car", 2024);
+
+    // 成员访问和调用 (member_expr)
+    myCar.display();
+    myCar.year = 2025; // 成员赋值
+
+    // 独立代码块 (independent_block)
+    {
+        int local_scope_var = 100;
+        global_counter = global_counter + local_scope_var;
+    }
+
+    // if-else-if-else 链 (if_statement)
+    if (myCar.year > 2024) {
+        global_message = "Future car!";
+    } else if (myCar.year == 2024) {
+        global_message = "Present car!";
+    } else {
+        global_message = "Past car.";
+    }
+
+    // while 循环 (while_statement)
+    int i = 3;
+    while (i > 0) {
+        if (i == 2) {
+            i = i - 1;
+            // continue 语句 (continue_statement)
+            continue;
+        }
+        global_counter = add(global_counter, i);
+        i = i - 1;
+    }
+
+    // for 循环 (for_statement)
+    for (int j = 0; j < 5; j = j + 1) {
+        if (j == 3) {
+            // break 语句 (break_statement)
+            break;
+        }
+        global_counter = global_counter + 1;
+    }
+
+    // 表达式测试 (expr, all levels)
+    bool condition1 = true || false;
+    bool condition2 = condition1 && is_test_running;
+    bool comparison = (global_counter > 100) == (PI <= 3.14);
+    
+    // 算术和一元运算
+    int result = (10 + 20) * 3 / 2 - 1;
+    result = -result;
+    bool is_positive = ! (result < 0);
+
+    // 表达式作为语句 (expression_as_statement)
+    add(5, 3);
+
+    // 原子类型 (atom)
+    string final_msg = "Test finished.";
+    int final_code = 0;
+    bool success = true;
+    object no_value = null;
+}
+
+// 程序入口调用
+main();

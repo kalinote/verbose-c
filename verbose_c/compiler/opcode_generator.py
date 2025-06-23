@@ -250,6 +250,7 @@ class OpcodeGenerator(VisitorBase):
 
 
     def visit_RangeNode(self, node: RangeNode):
+        # 高级功能，后续添加，现在不做实现
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
 
     def visit_BlockNode(self, node: BlockNode):
