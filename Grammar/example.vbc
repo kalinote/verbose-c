@@ -1,8 +1,8 @@
 // Comprehensive Test for verbose_c Grammar
 
-// 1. 包导入 (pack_import)
-#include "mylib.vbc"
-#include <stdio.h>
+// 1. 宏定义
+#include <import_test.vbc>
+#define PI 3.14159
 
 // 2. 全局变量声明 (var_decl)
 int global_counter = 0;

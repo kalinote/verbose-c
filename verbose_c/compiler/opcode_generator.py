@@ -149,14 +149,19 @@ class OpcodeGenerator(VisitorBase):
     def visit_TypeNode(self, node: TypeNode):
         raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
 
+    def visit_RootNode(self, node: RootNode):
+        # TODO 暂时遍历执行所有模块，后续进一步完善
+        for module in node.modules:
+            self.visit(module)
+            
+        # 执行完停机
+        self.emit(Opcode.HALT)
+
     def visit_ModuleNode(self, node: ModuleNode):
         
         # TODO 暂时遍历执行所有语句，后续进一步完善
         for statement in node.body:
             self.visit(statement)
-            
-        # 执行完停机
-        self.emit(Opcode.HALT)
         
         # 解析标签
         for i, instruction in enumerate(self.bytecode):
@@ -164,9 +169,6 @@ class OpcodeGenerator(VisitorBase):
                 opcode, operand = instruction
                 if isinstance(operand, str) and operand in self.labels:
                     self.bytecode[i] = (opcode, self.labels[operand])
-
-    def visit_PackImportNode(self, node: PackImportNode):
-        NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
         
     def visit_LabelNode(self, node: LabelNode):
         lebel = self.generate_label(node.name.name)
@@ -770,3 +772,10 @@ class OpcodeGenerator(VisitorBase):
 
     def visit_SetPropertyNode(self, node: SetPropertyNode):
         raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
+
+    def visit_IncludeNode(self, node: IncludeNode):
+        pass
+
+    def visit_DefineNode(self, node: DefineNode):
+        pass
+    

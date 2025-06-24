@@ -135,6 +135,7 @@ def compile_source_file(
                 print(f"当前token位置: {tokenizer._index}")
                 print(f"总token数量: {len(tokenizer.tokens)}")
                 if tokenizer._index < len(tokenizer.tokens):
+                    # 这里可能有点问题，第一个有效token报错时，tokenizer._index为0，但实际如果第一个token是无效的，则current_token会指向那个无效token
                     current_token = tokenizer.tokens[tokenizer._index]
                     print(f"当前token: {current_token}")
             return

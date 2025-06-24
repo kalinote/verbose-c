@@ -94,6 +94,17 @@ class TypeNode(ASTNode):
         self.type_name: NameNode = type_name
     
 # 结构和运算
+class RootNode(ASTNode):
+    """
+    根节点，作为整个AST的根节点
+
+    Args:
+        modules (list[ModuleNode]): 模块列表
+    """
+    def __init__(self, modules: list["ModuleNode"], start_line = None, start_column = None, end_line = None, end_column = None):
+        super().__init__(start_line, start_column, end_line, end_column)
+        self.modules: list[ModuleNode] = modules
+
 class ModuleNode(ASTNode):
     """
     包节点，作为每个包的根节点
@@ -104,17 +115,6 @@ class ModuleNode(ASTNode):
     def __init__(self, body: list[ASTNode], start_line = None, start_column = None, end_line = None, end_column = None):
         super().__init__(start_line, start_column, end_line, end_column)
         self.body: list[ASTNode] = body
-
-class PackImportNode(ASTNode):
-    """
-    包导入节点
-    
-    Args:
-        name (NameNode | StringNode): 包名
-    """
-    def __init__(self, name: NameNode | StringNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
-        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.name: NameNode | StringNode = name
 
 class LabelNode(ASTNode):
     """
@@ -411,3 +411,22 @@ class SetPropertyNode(ASTNode):
         self.property_name: NameNode = property_name
         self.value: ASTNode = value
 
+# 宏操作相关
+class IncludeNode(ASTNode):
+    """
+    #include 宏指令
+    """
+    def __init__(self, path: str, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.path: str = path
+
+class DefineNode(ASTNode):
+    """
+    #define 宏指令
+    
+    TODO 这个节点可能需要进一步完善
+    """
+    def __init__(self, name: str, body: str, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.name: str = name
+        self.body: str = body

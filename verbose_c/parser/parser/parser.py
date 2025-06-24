@@ -262,9 +262,9 @@ class Parser:
         return None
 
     @memoize
-    def include_header(self) -> Token | None:
+    def macro_code(self) -> Token | None:
         tok = self._tokenizer.peek()
-        if tok.type == TokenType.INCLUDE_HEADER:
+        if tok.type == TokenType.MACRO_CODE:
             return self._tokenizer.getnext()
         return None
 

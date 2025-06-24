@@ -33,7 +33,7 @@ class RuleCheckingVisitor(GrammarVisitor):
     def visit_NameLeaf(self, node: NameLeaf) -> None:
         if node.value not in self.rules and node.value not in self.tokens:
             # TODO: 为（叶子）节点添加行/列信息
-            raise GrammarError(f"悬空引用规则 {node.value!r}")
+            raise GrammarError(f"未知规则: {node.value!r}")
 
     def visit_NamedItem(self, node: NamedItem) -> None:
         if node.name and node.name.startswith("_"):

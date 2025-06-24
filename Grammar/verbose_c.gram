@@ -1,12 +1,20 @@
-# 根节点，固定为ModuleNode
-start[ModuleNode]: sl=statement* END { ModuleNode(sl, LOCATIONS) }
+@subheader'''
+import re
+'''
+
+
+# 根节点，固定为RootNode，为后续多模块准备
+start[RootNode]: mod=module END { RootNode([mod], LOCATIONS)}
+
+# 模块
+module[ModuleNode]: sl=statement* { ModuleNode(sl, LOCATIONS) }
 
 # 基本语句
 statement:
     | independent_block
     | class_definition
+    | macro_definition  
     | function_ret
-    | pack_import
     | function
     | var_decl
     | var_assign
@@ -17,12 +25,18 @@ statement:
     | continue_statement
     | expression_as_statement
 
-# 包导入
-pack_import[PackImportNode]: "#" 'include' n=include_name { PackImportNode(n, LOCATIONS) }
-include_name[NameNode | StringNode]:
-    | i=INCLUDE_HEADER { NameNode(i.string, LOCATIONS) }
-    | s=STRING { StringNode(s.string, LOCATIONS) }
-    | n=NAME { NameNode(n.string, LOCATIONS) }
+# 宏
+macro_definition[ASTNode]:
+    | include_statement
+    | define_statement
+
+# 引入文件
+include_statement[IncludeNode]:
+    | mc=MACRO_CODE { IncludeNode(path=match.group(1), LOCATIONS) if (match := re.match(r'#\s*include\s+["<](.+)[">]', mc.string)) else None }
+
+# 定义宏
+define_statement[DefineNode]:
+    | mc=MACRO_CODE { DefineNode(name=match.group(1), body=match.group(2), LOCATIONS) if (match := re.match(r'#\s*define\s+([a-zA-Z_]\w*)\s+(.*)', mc.string)) else None }
 
 # 函数
 function[FunctionNode]: t=type_name n=NAME '(' p=params? ')' '{' b=func_block '}' { FunctionNode(t, NameNode(n.string, LOCATIONS), p or [], {}, b, LOCATIONS) }

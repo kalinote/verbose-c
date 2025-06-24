@@ -10,8 +10,7 @@ class TokenType(Enum):
     NEWLINE    = ("NEWLINE", r"\r?\n")                          # 换行符
 
     # 预处理器相关或特殊构造
-    INCLUDE_HEADER = ("INCLUDE_HEADER", r"<[a-zA-Z0-9_./]+>")      # 导入名称
-    HASH       = ("#", r"#")                            # 井号 (预处理器等)
+    MACRO_CODE = ("MACRO_CODE", r"#(?:[^\r\n]*?\\\r?\n)*[^\r\n]*") # 宏代码, 匹配从#开始的完整预处理指令，支持'\'换行
 
     # 复合操作符
     SHIFT_LEFT_ASSIGN = ("<<=", r"<<=")                 # 左移等于

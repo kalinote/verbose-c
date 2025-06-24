@@ -108,7 +108,7 @@ class PythonCallMakerVisitor(GrammarVisitor):
             "NAME",
             "NUMBER",
             "STRING",
-            "INCLUDE_HEADER",
+            "MACRO_CODE",
             "OP",
             "TYPE_COMMENT",
         ):
