@@ -12,6 +12,8 @@ from verbose_c.compiler.symbol import SymbolTable
 from verbose_c.compiler.enum import ScopeType
 from verbose_c.compiler.opcode_generator import OpcodeGenerator
 
+default_parser_output = "parser.py"
+
 def parse_args():
     parser = argparse.ArgumentParser(
         prog="verbose-c",
@@ -63,7 +65,7 @@ def main():
     # Default behavior: compile source code
     if args.compile_parser:
         # Compile grammar file to generate parser
-        compile_file(args.filename, args.log, args.log_parser_gen)
+        compile_file(args.filename, default_parser_output, args.log_parser_gen)
     else:
         # Compile source file to opcode
         compile_source_file(
@@ -99,7 +101,7 @@ def compile_source_file(
     print(f"编译源代码文件: {filename}")
     
     # 确保解析器存在
-    parser_path = "parser.py"
+    parser_path = default_parser_output
     if refresh_parser or not os.path.exists(parser_path):
         print("正在生成解析器...")
         grammar_file = "Grammar/verbose_c.gram"
@@ -289,12 +291,12 @@ def compile_source_file(
         traceback.print_exc()
 
 
-def compile_file(filename, log, log_parser_gen=None):
+def compile_file(filename, parser_output, log_parser_gen=None):
     """
     编译语法文件生成解析器
     """
     t0 = time.time()
-    grammar, parser, tokenizer, gen = generate_python_code(filename, log)
+    grammar, parser, tokenizer, gen = generate_python_code(filename, parser_output)
     t1 = time.time()
     
     validate_grammar(grammar)

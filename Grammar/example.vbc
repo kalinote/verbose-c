@@ -3,6 +3,13 @@
 // 1. 宏定义
 #include <import_test.vbc>
 #define PI 3.14159
+// do-while暂时还没有实现
+#define ADD(x, y) \
+do \
+{\
+    int sum = (x) + (y);\
+    return sum;\
+} while (0)
 
 // 2. 全局变量声明 (var_decl)
 int global_counter = 0;
