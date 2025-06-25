@@ -251,6 +251,19 @@ class WhileNode(ASTNode):
         self.condition: ASTNode = condition
         self.body: BlockNode = body
 
+class DoWhileNode(ASTNode):
+    """
+    do-while 循环语句节点
+    
+    Args:
+        body (BlockNode): 循环体
+        condition (ASTNode): 循环条件
+    """
+    def __init__(self, body: BlockNode, condition: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.body: BlockNode = body
+        self.condition: ASTNode = condition
+
 class ForNode(ASTNode):
     """
     遍历循环语句节点

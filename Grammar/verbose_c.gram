@@ -14,6 +14,7 @@ statement:
     | var_assign
     | if_statement
     | while_statement
+    | do_while_statement
     | for_statement
     | break_statement
     | continue_statement
@@ -106,6 +107,7 @@ else_clause[ASTNode]:
     | 'else' '{' b=func_block '}' { b }
 
 while_statement[WhileNode]: 'while' '(' c=expr ')' '{' b=func_block '}' { WhileNode(c, b, LOCATIONS) }
+do_while_statement[DoWhileNode]: 'do' '{' b=func_block '}' 'while' '(' c=expr ')' ';' { DoWhileNode(b, c, LOCATIONS) }
 for_statement[ForNode]: 'for' '(' i=(for_var_decl | expr)? ';' c=expr? ';' u=expr? ')' '{' b=func_block '}' { ForNode(i, c, u, b, LOCATIONS) }
 
 # 类与对象

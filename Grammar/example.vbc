@@ -1,15 +1,15 @@
 // Comprehensive Test for verbose_c Grammar
 
 // 1. 宏定义
-#include <import_test.vbc>
-#define PI 3.14159
-// do-while暂时还没有实现
-#define ADD(x, y) \
-do \
-{\
-    int sum = (x) + (y);\
-    return sum;\
-} while (0)
+#include <include_test.vbc>
+#define CONST_E 2.71828
+#define ADD(x, y) (x + y)
+#define SWAP(a, b, type) \
+    do { \
+        type temp = (a); \
+        a = (b); \
+        b = temp; \
+    } while(false)
 
 // 2. 全局变量声明 (var_decl)
 int global_counter = 0;
@@ -41,11 +41,16 @@ class Vehicle {
 // 4. 函数定义 (function)
 int add(int a, int b) {
     // 返回语句 (function_ret)
-    return a + b;
+    return ADD(a, b);   // 调用宏函数
 }
 
 // 5. 主要逻辑
 void main() {
+    int num1 = 3;
+    int num2 = 5;
+    // 多行宏函数
+    SWAP(num1, num2, int);
+
     // 变量赋值 (var_assign)
     global_message = "Starting test...";
 
@@ -95,7 +100,7 @@ void main() {
     // 表达式测试 (expr, all levels)
     bool condition1 = true || false;
     bool condition2 = condition1 && is_test_running;
-    bool comparison = (global_counter > 100) == (PI <= 3.14);
+    bool comparison = (global_counter > 100) == (CONST_E <= 3.14);
     
     // 算术和一元运算
     int result = (10 + 20) * 3 / 2 - 1;

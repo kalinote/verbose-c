@@ -401,6 +401,28 @@ class OpcodeGenerator(VisitorBase):
         # 退出循环时弹出标签栈
         self.loop_stack.pop()
 
+    def visit_DoWhileNode(self, node: DoWhileNode):
+        loop_start_label = self.generate_label("do_while_start")
+        loop_end_label = self.generate_label("do_while_end")
+        continue_label = self.generate_label("do_while_continue")
+
+        loop_context = LoopContext(
+            loop_type=LoopType.DO_WHILE,
+            continue_label=continue_label,
+            break_label=loop_end_label
+        )
+        self.loop_stack.append(loop_context)
+
+        self.mark_label(loop_start_label)
+        self.visit(node.body)
+        self.mark_label(continue_label)
+        self.visit(node.condition)
+        self.emit(Opcode.JUMP_IF_FALSE, loop_end_label)
+        self.emit(Opcode.JUMP, loop_start_label)
+        self.mark_label(loop_end_label)
+        
+        self.loop_stack.pop()
+
     def visit_ForNode(self, node: ForNode):
         loop_condition_label = self.generate_label("for_condition")
         loop_update_label = self.generate_label("for_update")

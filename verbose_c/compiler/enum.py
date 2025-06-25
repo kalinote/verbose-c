@@ -53,3 +53,4 @@ class LoopType(Enum):
     """
     FOR = auto()
     WHILE = auto()
+    DO_WHILE = auto()
