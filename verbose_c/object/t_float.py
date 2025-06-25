@@ -93,6 +93,13 @@ class VBCFloat(VBCObject):
     def __hash__(self):
         return hash_(str(self._object_type.value) + str(self.value))
 
+    # [这段代码由AI修改，后续注意检查]
+    # TODO: 此前的VBCFloat类未实现__neg__方法，导致虚拟机在执行UNARY_MINUS指令时，
+    # 无法对VBCFloat对象进行取负操作，从而引发TypeError。
+    # 修复：添加__neg__方法，使其返回一个新的、值为负的VBCFloat对象，并保持原有类型。
+    def __neg__(self):
+        return VBCFloat(-self.value, self._object_type)
+
     @staticmethod
     def _create_with_promotion(value: float, initial_type: VBCObjectType):
         sorted_types = sorted(

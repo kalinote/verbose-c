@@ -144,7 +144,8 @@ class Preprocessor:
                     processed_lines.append(processed_content)
                 else:
                     print(f"警告: #include 文件未找到 '{path_to_include}' (在 {file_path} 中)")
-                    processed_lines.append(line)
+                    # processed_lines.append(line)
+                    # 如果没有找到导入的目标文件，则直接丢弃掉这行宏代码
 
             elif define_match:
                 # 处理 #define
