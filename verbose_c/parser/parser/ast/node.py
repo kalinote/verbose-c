@@ -410,33 +410,3 @@ class SetPropertyNode(ASTNode):
         self.obj: ASTNode = obj
         self.property_name: NameNode = property_name
         self.value: ASTNode = value
-
-# 宏操作相关
-class IncludeNode(ASTNode):
-    """
-    #include 宏指令
-    """
-    def __init__(self, path: str, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
-        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.path: str = path
-
-class DefineNode(ASTNode):
-    """
-    #define 宏指令
-    
-    支持两种形式:
-    1. 值宏: #define PI 3.14
-    2. 函数宏: #define MAX(a, b) ((a) > (b) ? (a) : (b))
-    
-    Args:
-        name (str): 宏名称
-        body (str): 宏内容
-        function (bool): 是否为函数宏
-        params (list[str]): 如果是函数宏，则为参数列表，否则为空列表
-    """
-    def __init__(self, name: str, body: str, function: bool = False, params: list[str] = [], start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
-        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.name: str = name
-        self.body: str = body
-        self.function: bool = function
-        self.params: list[str] | None = params

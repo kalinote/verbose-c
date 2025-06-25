@@ -1,33 +1,3 @@
-@subheader'''
-import re
-
-def define_handler(s, **LOCATIONS):
-    # 优先尝试匹配函数式宏: #define NAME(...) ...
-    # 匹配宏名称，参数列表（允许为空），以及宏体
-    match_func = re.match('#\\s*define\\s+([a-zA-Z_]\\w*)\\s*\\(([^)]*)\\)\\s*(.*)', s, re.DOTALL)
-    if match_func:
-        name = match_func.group(1)
-        # 解析参数列表，去除每个参数前后的空格，并过滤掉空字符串
-        params_str = match_func.group(2)
-        params = [p.strip() for p in params_str.split(',') if p.strip()] if params_str else []
-        body = match_func.group(3)
-        return DefineNode(name=name, body=body, function=True, params=params, **LOCATIONS)
-    else:
-        # 如果不是函数式宏，则尝试匹配值宏: #define NAME ...
-        # 匹配宏名称和宏体
-        match_val = re.match('#\\s*define\\s+([a-zA-Z_]\\w*)\\s+(.*)', s, re.DOTALL)
-        if match_val:
-            name = match_val.group(1)
-            body = match_val.group(2)
-            return DefineNode(name=name, body=body, function=False, params=[], **LOCATIONS)
-        else:
-            # 如果两种格式都不匹配，则返回 None
-            return None
-    
-    return None
-'''
-
-
 # 根节点，固定为RootNode，为后续多模块准备
 start[RootNode]: mod=module END { RootNode([mod], LOCATIONS)}
 
@@ -38,7 +8,6 @@ module[ModuleNode]: sl=statement* { ModuleNode(sl, LOCATIONS) }
 statement:
     | independent_block
     | class_definition
-    | macro_definition  
     | function_ret
     | function
     | var_decl
@@ -49,19 +18,6 @@ statement:
     | break_statement
     | continue_statement
     | expression_as_statement
-
-# 宏
-macro_definition[ASTNode]:
-    | include_statement
-    | define_statement
-
-# 引入文件
-include_statement[IncludeNode]:
-    | mc=MACRO_CODE { IncludeNode(path=match.group(1), LOCATIONS) if (match := re.match(r'#\s*include\s+["<](.+)[">]', mc.string)) else None }
-
-# 定义宏
-define_statement[DefineNode]:
-    | mc=MACRO_CODE { define_handler(mc.string, LOCATIONS) }
 
 # 函数
 function[FunctionNode]: t=type_name n=NAME '(' p=params? ')' '{' b=func_block '}' { FunctionNode(t, NameNode(n.string, LOCATIONS), p or [], {}, b, LOCATIONS) }

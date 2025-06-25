@@ -1,8 +1,5 @@
-
-from typing import List
 from verbose_c.compiler.enum import ScopeType
-from verbose_c.compiler.opcode import Opcode
-from verbose_c.compiler.opcode_generator import OpcodeGenerator
+from verbose_c.compiler.opcode_generator_visitor import OpcodeGenerator
 from verbose_c.compiler.symbol import SymbolTable
 from verbose_c.parser.parser.ast.node import ASTNode
 

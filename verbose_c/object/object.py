@@ -11,7 +11,7 @@ class VBCObject:
         self._object_type = object_type
 
     def __str__(self):
-        return f"{self.__class__.__name__}->{self._object_type}"
+        return f"{self._object_type}"
 
     def __eq__(self, value):
         NotImplementedError("子类必须实现此方法")

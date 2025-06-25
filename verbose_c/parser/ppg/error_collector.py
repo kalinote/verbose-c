@@ -1,6 +1,6 @@
 from typing import List, Optional, Set, Tuple
 from dataclasses import dataclass
-from verbose_c.parser.lexer.enum import Operator
+from verbose_c.parser.lexer.enum import Operator, TokenType
 from verbose_c.parser.lexer.token import Token
 from verbose_c.parser.lexer.tokenizer import Mark, Tokenizer
 
@@ -80,9 +80,18 @@ class ErrorCollector:
         if not self.errors:
             return "没有发现解析错误"
         
-        try:
-            actual_token_at_furthest = self.tokenizer.tokens[self.furthest_position]
-        except IndexError:
+        # 从最远的位置开始，查找第一个有效token作为错误报告的目标
+        peek_index = self.furthest_position
+        actual_token_at_furthest = None
+        while peek_index < len(self.tokenizer.tokens):
+            tok = self.tokenizer.tokens[peek_index]
+            if tok.type not in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.WHITESPACE):
+                actual_token_at_furthest = tok
+                break
+            peek_index += 1
+        
+        if actual_token_at_furthest is None:
+            # 如果找不到有效token，就用peek的结果
             actual_token_at_furthest = self.tokenizer.peek()
 
         line = actual_token_at_furthest.line or 0
@@ -94,16 +103,8 @@ class ErrorCollector:
         lines.append(f"错误位置: 第 {line} 行，第 {column} 列")
         
         if self.furthest_expected:
-            operators = set(Operator.__members__.keys())
-            
             expected_set = self.furthest_expected
-            
-            if any(op in expected_set for op in operators):
-                filtered_expected = {exp for exp in expected_set if exp not in operators}
-                filtered_expected.add("Operator")
-                expected_str = ', '.join(sorted(filtered_expected))
-            else:
-                expected_str = ', '.join(sorted(expected_set))
+            expected_str = ', '.join(sorted(expected_set))
 
             lines.append(f"错误: 期望 {expected_str} 其中之一, 实际是 '{actual_token_at_furthest.string}'")
         else:

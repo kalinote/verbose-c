@@ -6,11 +6,8 @@ import traceback
 import importlib.util
 from verbose_c.parser.ppg.build import build_python_parser_and_generator
 from verbose_c.parser.ppg.validator import validate_grammar
-from verbose_c.parser.lexer.lexer import Lexer
 from verbose_c.parser.lexer.tokenizer import Tokenizer
-from verbose_c.compiler.symbol import SymbolTable
-from verbose_c.compiler.enum import ScopeType
-from verbose_c.compiler.opcode_generator import OpcodeGenerator
+from verbose_c.compiler.compiler import Compiler
 
 default_parser_output = "parser.py"
 
@@ -134,31 +131,34 @@ def compile_source_file(
                 print("\n" + parser.get_error_report())
             else:
                 print("AST结果为None，但没有收集到具体错误信息")
-                print(f"当前token位置: {tokenizer._index}")
-                print(f"总token数量: {len(tokenizer.tokens)}")
-                if tokenizer._index < len(tokenizer.tokens):
-                    # 这里可能有点问题，第一个有效token报错时，tokenizer._index为0，但实际如果第一个token是无效的，则current_token会指向那个无效token
-                    current_token = tokenizer.tokens[tokenizer._index]
-                    print(f"当前token: {current_token}")
+                error_token = tokenizer.get_last_non_whitespace_token()
+                if error_token:
+                    print(f"错误token: {error_token}")
+                    line, col = error_token.start
+                    line_source = tokenizer.get_line_source(line)
+                    print(f"\n错误位置: 第 {line} 行, 第 {col} 列")
+                    print(f"错误上下文:")
+                    print(f"  {line} | {line_source}")
+                    print(f"      {' ' * col}{'^' * len(error_token.string)}")
+                else:
+                    print("无法定位到具体的错误位置")
             return
             
         if ast:
             from verbose_c.parser.parser.parser import ast_dump
             ast_content = ast_dump(ast_node, indent=4)
-            
-        # 创建符号表
-        symbol_table = SymbolTable(ScopeType.GLOBAL)
-        
-        # 生成操作码
-        print("生成操作码...")
-        opcode_gen = OpcodeGenerator(symbol_table)
-        opcode_gen.visit(ast_node)
+
+        # 编译AST
+        print("编译AST生成操作码...")
+        compiler = Compiler(ast_node)
+        compiler.compile()
+        opcode_gen = compiler.opcode_generator
         
         # 输出结果到终端
         if opcode or const or label:
             if opcode:
                 print("\n=== 生成的操作码 ===")
-                for i, instruction in enumerate(opcode_gen.bytecode):
+                for i, instruction in enumerate(compiler.bytecode):
                     if len(instruction) == 1:
                         print(f"{i:4d}: {instruction[0].name}")
                     else:
@@ -166,7 +166,7 @@ def compile_source_file(
             
             if const:
                 print(f"\n=== 常量池 ===")
-                for i, constant in enumerate(opcode_gen.constant_pool):
+                for i, constant in enumerate(compiler.constant_pool):
                     print(f"{i:4d}: {constant}")
             
             if label:
@@ -208,7 +208,7 @@ def compile_source_file(
                 log_collector = vm_debug_logs if debug_vm and log else None
                 
                 vm = VBCVirtualMachine(debug_log_collector=log_collector)
-                vm.excute(opcode_gen.bytecode, opcode_gen.constant_pool)
+                vm.excute(compiler.bytecode, compiler.constant_pool)
                 
                 print("程序执行完成")
                 
@@ -238,7 +238,7 @@ def compile_source_file(
                 # 输出操作码
                 if opcode:
                     f.write("\n=== 操作码 ===\n")
-                    for i, instruction in enumerate(opcode_gen.bytecode):
+                    for i, instruction in enumerate(compiler.bytecode):
                         if len(instruction) == 1:
                             f.write(f"{i:4d}: {instruction[0].name}\n")
                         else:
@@ -247,7 +247,7 @@ def compile_source_file(
                 # 输出常量池
                 if const:
                     f.write(f"\n=== 常量池 ===\n")
-                    for i, constant in enumerate(opcode_gen.constant_pool):
+                    for i, constant in enumerate(compiler.constant_pool):
                         f.write(f"{i:4d}: {constant}\n")
                 
                 # 输出标签
