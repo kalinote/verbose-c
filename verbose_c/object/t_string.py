@@ -45,3 +45,6 @@ class VBCString(VBCObject):
 
     def __truediv__(self, other):
         raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "/" 运算符')
+
+    def __neg__(self):
+        return VBCString(self.value[::-1])

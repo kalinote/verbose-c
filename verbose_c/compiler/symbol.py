@@ -63,6 +63,17 @@ class SymbolTable:
         self._parent: Optional['SymbolTable'] = parent
         self._next_local_address: int = 0 # 用于分配局部变量的栈帧索引
 
+    def _get_function_scope(self) -> Optional['SymbolTable']:
+        """
+        向上查找并返回最近的函数作用域符号表。
+        """
+        current = self
+        while current:
+            if current._scope_type == ScopeType.FUNCTION:
+                return current
+            current = current._parent
+        return None
+
     def add_symbol(self, name: str, type_node: Optional[TypeNode] = None, kind: SymbolKind = SymbolKind.VARIABLE) -> Symbol:
         """
         向当前作用域添加一个符号。
@@ -71,16 +82,14 @@ class SymbolTable:
         if name in self._symbols:
             raise Exception(f"重复定义标识符: {name} 在 {self._scope_type.name} 作用域")
         
-        # [这段代码由AI修改，后续注意检查]
-        # TODO: 此前的逻辑会为所有VARIABLE类型的符号分配局部地址，这会导致全局变量被错误地
-        # 赋予一个局部地址，从而在代码生成时被误认为是局部变量。
-        # 修复：增加 self._scope_type == ScopeType.FUNCTION 的判断，
-        # 确保只有在函数作用域内的变量和参数才会被分配局部地址（即在栈帧上的索引）。
-        # 全局变量的 address 将保持为 None，代码生成器将据此生成正确的全局变量操作码。
         address = None
-        if self._scope_type == ScopeType.FUNCTION and kind in [SymbolKind.VARIABLE, SymbolKind.PARAMETER]:
-            address = self._next_local_address
-            self._next_local_address += 1
+        # 查找最近的函数作用域
+        function_scope = self._get_function_scope()
+        
+        if function_scope and kind in [SymbolKind.VARIABLE, SymbolKind.PARAMETER]:
+            # 如果在函数作用域内（包括其子块作用域），则分配局部变量地址
+            address = function_scope._next_local_address
+            function_scope._next_local_address += 1
 
         symbol = Symbol(name, type_node, kind, address)
         self._symbols[name] = symbol

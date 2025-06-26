@@ -107,10 +107,6 @@ class VBCVirtualMachine:
         self._pc = 0
         self._running = True
         
-        # [这段代码由AI修改，后续注意检查]
-        # TODO: 虚拟机的主循环条件曾错误地使用初始传入的全局字节码(bytecode)的长度作为边界。
-        # 这导致在调用函数（会切换self._bytecode）后，循环可能因为错误的边界判断而提前终止。
-        # 修复：将循环条件改为使用当前虚拟机实例的字节码 self._bytecode，确保它始终反映当前执行上下文（全局或函数内）的正确长度。
         while self._running and self._pc < len(self._bytecode):
             # 取码、译码、执行
             instruction = self._fetch_instruction()

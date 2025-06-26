@@ -75,11 +75,6 @@ class OpcodeGenerator(VisitorBase):
         Args:
             value (any): 要添加的常量对象
         """
-        # [这段代码由AI修改，后续注意检查]
-        # TODO: 此前的实现(if value not in self.constant_pool)存在缺陷，因为在Python中 0 == False, 1 == True。
-        # 这会导致在添加值为0的VBCInteger时，如果常量池中已存在值为False的VBCBool，
-        # 就会错误地复用VBCBool的索引，反之亦然，从而引发后续运算的TypeError。
-        # 修复：遍历常量池，必须同时检查值和类型都相同时才复用索引。
         for i, constant in enumerate(self.constant_pool):
             if type(constant) is type(value) and constant == value:
                 return i
@@ -264,11 +259,6 @@ class OpcodeGenerator(VisitorBase):
         NotImplementedError(f"{node.__class__.__name__} visit 尚未实现")
 
     def visit_BlockNode(self, node: BlockNode):
-        # [这段代码由AI修改，后续注意检查]
-        # TODO: 此前的实现中，BlockNode会生成ENTER_SCOPE/EXIT_SCOPE指令，但IfNode等节点也会生成，
-        # 导致了双重作用域，引发了变量被错误清理的问题。
-        # 修复：将运行时作用域(ENTER/EXIT)的管理责任完全上移给使用BlockNode的节点（如IfNode, ForNode等）。
-        # BlockNode本身只负责管理编译时的符号表作用域，以进行静态检查。
         original_symbol_table = self.symbol_table
         block_symbol_table = SymbolTable(scope_type=ScopeType.BLOCK, parent=original_symbol_table)
         block_symbol_table._next_local_address = original_symbol_table._next_local_address
@@ -281,11 +271,6 @@ class OpcodeGenerator(VisitorBase):
         self.symbol_table = original_symbol_table
 
     def visit_VarDeclNode(self, node: VarDeclNode):
-        # [这段代码由AI修改，后续注意检查]
-        # TODO: 此前的实现无条件地生成STORE_LOCAL_VAR指令，这在处理全局变量时是错误的，
-        # 因为全局变量在符号表中的address为None，导致生成了没有操作数的错误指令。
-        # 修复：在生成存储指令前，检查symbol.address。如果不为None，则生成STORE_LOCAL_VAR；
-        # 否则，生成STORE_GLOBAL_VAR。这使得变量声明的指令生成与变量赋值的逻辑保持一致。
         declared_type: VBCObjectType | None = None
         type_name_str = node.var_type.type_name.name
         
@@ -368,11 +353,6 @@ class OpcodeGenerator(VisitorBase):
         self.emit(Opcode.POP)
 
     def visit_IfNode(self, node: IfNode):
-        # [这段代码由AI修改，后续注意检查]
-        # TODO: 此前的实现没有为if/else的块创建独立的运行时作用域，
-        # 结合BlockNode中错误的实现，导致了作用域混乱。
-        # 修复：现在由IfNode负责为它的执行块（then/else）创建和销毁运行时作用域。
-        # 这确保了在if块中定义的变量（如local_scope_var）不会泄露，并且在块结束后被正确清理。
         self.visit(node.condition)
         
         endif_label = self.generate_label("if_end")
@@ -549,19 +529,6 @@ class OpcodeGenerator(VisitorBase):
                 kind=SymbolKind.PARAMETER
             )
             
-        # 创建单独的编译环境
-        # [这段代码由AI修改，后续注意检查]
-        # TODO: [架构性问题] 当前的编译器设计存在一个核心问题：它没有将`main`函数体内的代码
-        # 真正地视为一个函数作用域来编译，而是将其作为全局代码的一部分处理。
-        # 这导致了`main`函数中声明的所有变量（如num1, i, j）都被错误地编译成了全局变量。
-        # 虽然在当前测试用例中程序能够“碰巧”正确运行，但这是一个严重的架构缺陷。
-        #
-        # 理想的修复方案可能需要重构Compiler和Engine的交互方式，例如：
-        # 1. 语法分析后，识别出哪些是真正的全局声明，哪些属于main函数的逻辑。
-        # 2. 先用一个Compiler实例在GLOBAL作用域下编译全局部分。
-        # 3. 再为main函数的AST节点，创建一个新的、scope_type为FUNCTION的Compiler实例进行编译。
-        #
-        # 当前为FunctionNode创建新Compiler实例的逻辑是正确的，但顶层的main函数没有享受到这个待遇。
         function_compiler = Compiler(
             target_ast=node.body,
             # TODO 根据主编译器优化等级进行优化

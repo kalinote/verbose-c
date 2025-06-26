@@ -28,3 +28,6 @@ class VBCBool(VBCObject):
 
     def __bool__(self):
         return self.value
+
+    def __neg__(self):
+        return VBCBool(not self.value)
