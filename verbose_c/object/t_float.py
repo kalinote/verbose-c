@@ -96,6 +96,9 @@ class VBCFloat(VBCObject):
     def __neg__(self):
         return VBCFloat(-self.value, self._object_type)
 
+    def __pos__(self):
+        return self
+
     @staticmethod
     def _create_with_promotion(value: float, initial_type: VBCObjectType):
         sorted_types = sorted(

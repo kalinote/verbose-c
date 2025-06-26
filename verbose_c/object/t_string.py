@@ -48,3 +48,6 @@ class VBCString(VBCObject):
 
     def __neg__(self):
         return VBCString(self.value[::-1])
+
+    def __pos__(self):
+        return self

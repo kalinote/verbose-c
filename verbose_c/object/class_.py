@@ -24,7 +24,11 @@ class VBCClass(VBCObject):
         """
         实例化类
         """
-        return VBCInstance(class_=self)
+        instance = VBCInstance(class_=self)
+        # 将类的字段定义复制到实例中，初始化为默认值
+        for field_name, default_value in self._fields.items():
+            instance.fields[field_name] = default_value
+        return instance
 
     def lookup_method(self, name: str) -> VBCObject | None:
         """
@@ -40,4 +44,3 @@ class VBCClass(VBCObject):
                 return method
 
         return None
-    

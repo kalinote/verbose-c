@@ -31,3 +31,6 @@ class VBCBool(VBCObject):
 
     def __neg__(self):
         return VBCBool(not self.value)
+
+    def __pos__(self):
+        return self

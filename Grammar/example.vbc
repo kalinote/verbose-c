@@ -1,9 +1,41 @@
-int global_var = 1;
+// --- 类型测试用例 ---
 
-int main() {
-    int local_var = 2;
-    int s = global_var + local_var;
-    return 0;
+// 1. 正确的变量声明和赋值
+int a = 10;
+long b = a;       // 正确: int 可以赋值给 long
+string s = "hello" + " world";
+
+// 2. 错误的赋值
+// float f = 10.5;
+// int c = f;       // 错误: 不能将 float 赋值给 int
+
+// 3. 表达式类型推断
+bool result = (a + b > 5) && (s == "hello world");
+
+// 4. 函数类型检查
+int add(int x, int y) {
+    return x + y;
 }
 
-main();
+int sum = add(5, 10);
+// string wrong_sum = add(5, 10); // 错误: 返回值是 int，不能赋值给 string
+// int wrong_call = add(5, "hello"); // 错误: 第二个参数应该是 int，不是 string
+
+// 5. 类和对象类型检查
+class Point {
+    int x;
+    int y;
+
+    void move(int dx, int dy) {
+        this.x = this.x + dx;
+        this.y = this.y + dy;
+    }
+}
+
+Point p = new Point();
+p.x = 100;
+p.y = 0;   // y 在使用前必须被初始化
+// p.z = 200; // 错误: Point 类型没有属性 'z'
+
+p.move(10, 20);
+// p.move(10); // 错误: 参数数量不匹配

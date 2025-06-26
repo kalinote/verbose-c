@@ -372,18 +372,18 @@ class ClassNode(ASTNode):
         self.base_classes: str = base_classes or []
         self.body: BlockNode = body
 
-class AttributeNode(ASTNode):
-    """
-    TODO 属性节点
+# class AttributeNode(ASTNode):
+#     """
+#     属性节点
     
-    Args:
-        name (NameNode): 属性名
-        attr_type (str): 属性类型
-    """
-    def __init__(self, name: NameNode, attr_type: AttributeType, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
-        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
-        self.name: NameNode = name
-        self.attr_type: AttributeType = attr_type
+#     Args:
+#         name (NameNode): 属性名
+#         attr_type (str): 属性类型
+#     """
+#     def __init__(self, name: NameNode, attr_type: AttributeType, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None):
+#         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+#         self.name: NameNode = name
+#         self.attr_type: AttributeType = attr_type
 
 class NewInstanceNode(ASTNode):
     """

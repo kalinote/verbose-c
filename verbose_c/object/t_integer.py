@@ -87,6 +87,9 @@ class VBCInteger(VBCObject):
     def __neg__(self):
         return VBCInteger(-self.value, self._object_type)
 
+    def __pos__(self):
+        return self
+
     @staticmethod
     def _create_with_promotion(value: int, initial_type: VBCObjectType):
         sorted_types = sorted(
