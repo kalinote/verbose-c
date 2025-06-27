@@ -3,6 +3,7 @@ from verbose_c.compiler.opcode import Instruction, Opcode
 from verbose_c.error import VBCRuntimeError, TracebackFrame
 from verbose_c.object.class_ import VBCClass
 from verbose_c.object.instance import VBCInstance
+from verbose_c.object.object import VBCObject
 from verbose_c.object.t_string import VBCString
 from verbose_c.utils.stack import Stack
 from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame
@@ -19,7 +20,7 @@ def register_instruction(opcode: Opcode):
     return decorator
 
 class VBCVirtualMachine:
-    """
+    """                                                              
     verbose-c 虚拟机核心功能
     """
     
@@ -27,7 +28,7 @@ class VBCVirtualMachine:
         self._stack: Stack = Stack()            # 栈
         self._pc = 0                            # 程序计数器
         self._local_variables = []              # 局部变量（使用列表按索引访问）
-        self._global_variables = {}             # 全局变量 # TODO 考虑一下这里要不要和局部变量保持一致
+        self._global_variables = {}             # 全局变量
         self._call_stack: list[CallFrame] = []  # 调用栈
         self._scope_stack = []                  # 作用域栈，用于嵌套作用域管理
         self._running = False                   # 是否正在运行

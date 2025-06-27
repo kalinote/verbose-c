@@ -1,7 +1,7 @@
 from verbose_c.compiler.enum import CompilerPass, ScopeType
 from verbose_c.compiler.opcode_generator_visitor import OpcodeGenerator
 from verbose_c.compiler.symbol import SymbolTable
-from verbose_c.compiler.type_checker import TypeChecker
+from verbose_c.compiler.type_checker_visitor import TypeChecker
 from verbose_c.parser.parser.ast.node import ASTNode
 
 

@@ -31,7 +31,7 @@ class Lexer:
         # 基于 TokenType 构造 master_pattern
         patterns = [f"(?P<{t.name}>{t.pattern})"
                     for t in TokenType]
-        self.master_pattern = re.compile("|".join(patterns))
+        self.master_pattern = re.compile("|".join(patterns), re.UNICODE)
 
     def tokenize(self):
         self.tokens = list(self._tokenize())
