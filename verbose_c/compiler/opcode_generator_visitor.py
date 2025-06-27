@@ -46,24 +46,36 @@ class OpcodeGenerator(VisitorBase):
     """
     根据AST生成机器码的访问者类
     """
-    def __init__(self, symbol_table: SymbolTable):
+    def __init__(self, symbol_table: SymbolTable, source_path: str | None = None):
         self.symbol_table: SymbolTable = symbol_table
+        self.source_path = source_path
         self.bytecode: list[tuple] = []
         self.labels = {}
         self.constant_pool = []
+        self.lineno_table: list[tuple[int, int]] = [] # (字节码偏移, 行号)
+        self.current_line = -1
         self.next_label_id = 0
         self.loop_stack: list[LoopContext] = []  # 循环标签栈，后续支持嵌套循环和多层跳出
         self.function_compilation_results = {} # 存储函数编译结果
 
+    def visit(self, node: ASTNode):
+        self.current_line = node.start_line
+        return super().visit(node)
+
     # 工具方法
     def emit(self, opcode: Opcode, operand=None):
         """
-        添加操作码到字节码流中
+        添加操作码到字节码流中, 并记录行号信息
         
         Args:
             opcode (Opcode): 操作码
             operand (_type_, optional): 操作数. Defaults to None.
         """
+        # 记录行号映射：当前字节码的偏移量 -> 当前行号
+        # 只有当行号变化时才记录，以节省空间
+        if not self.lineno_table or self.lineno_table[-1][1] != self.current_line:
+            self.lineno_table.append((len(self.bytecode), self.current_line))
+
         if operand is not None:
             self.bytecode.append((opcode, operand))
         else:
@@ -486,29 +498,23 @@ class OpcodeGenerator(VisitorBase):
 
     def visit_FunctionNode(self, node: FunctionNode):
         from verbose_c.compiler.compiler import Compiler
-        
-        function_symbol_table = SymbolTable(scope_type=ScopeType.FUNCTION, parent=self.symbol_table)
+        from verbose_c.compiler.enum import CompilerPass
         
         func_symbol = self.symbol_table.lookup(node.name.name)
         if not isinstance(func_symbol.type_, FunctionType):
-             raise RuntimeError(f"内部错误: 期望找到函数类型，但找到了 {func_symbol.type_}")
+            raise RuntimeError(f"内部错误: 期望找到函数类型，但找到了 {func_symbol.type_}")
         
-        func_type = func_symbol.type_
-
-        for i, param_node in enumerate(node.args):
-            param_type = func_type.param_types[i]
-            function_symbol_table.add_symbol(
-                name=param_node.name.name,
-                type_=param_type,
-                kind=SymbolKind.PARAMETER
-            )
+        function_symbol_table = func_symbol.scope
+        if function_symbol_table is None:
+            raise RuntimeError(f"内部错误: 未找到 '{node.name.name}' 的符号表")
             
         function_compiler = Compiler(
             target_ast=node.body,
-            # TODO 根据主编译器优化等级进行优化
             optimize_level=0,
             symbol_table=function_symbol_table,
             scope_type=ScopeType.FUNCTION,
+            source_path=self.source_path,
+            passes_to_run=[CompilerPass.GENERATE_CODE]
         )
         
         function_compiler.compile()
@@ -545,7 +551,9 @@ class OpcodeGenerator(VisitorBase):
             bytecode=function_bytecode,
             constants=function_constants,
             param_count=param_count,
-            local_count=local_count
+            local_count=local_count,
+            source_path=self.source_path,
+            lineno_table=function_op_generator.lineno_table
         )
         
         const_index = self.add_constant(vbc_function)
@@ -558,7 +566,7 @@ class OpcodeGenerator(VisitorBase):
             # 高级功能，后续添加，现在不做实现
             raise NotImplementedError(f"关键字参数在函数调用中暂未实现, 在行: {node.start_line}, 列: {node.start_column}")
         
-        # 约定：先加载函数对象，再加载参数
+        # 先加载函数对象，再加载参数
         self.visit(node.name)
         
         for arg_expr in node.args:
@@ -569,12 +577,13 @@ class OpcodeGenerator(VisitorBase):
 
     def visit_ClassNode(self, node: ClassNode):
         from verbose_c.compiler.compiler import Compiler
+        from verbose_c.compiler.enum import CompilerPass
         class_name = node.name.name
         
         original_table = self.symbol_table
         class_symbol = self.symbol_table.lookup(class_name)
         if not (class_symbol and class_symbol.scope):
-             raise RuntimeError(f"内部错误: TypeChecker未能正确创建或链接类 '{class_name}' 的作用域")
+            raise RuntimeError(f"内部错误: TypeChecker未能正确创建或链接类 '{class_name}' 的作用域")
         self.symbol_table = class_symbol.scope
 
         vbc_class = VBCClass(name=class_name, super_class=[])
@@ -598,7 +607,8 @@ class OpcodeGenerator(VisitorBase):
                 method_symbol = self.symbol_table.lookup(method_name)
                 if not (method_symbol and method_symbol.scope):
                     raise RuntimeError(f"内部错误: TypeChecker未能正确创建或链接方法 '{method_name}' 的作用域")
-                self.symbol_table = method_symbol.scope
+                
+                method_symbol_table = method_symbol.scope
 
                 # 从符号中获取类型信息
                 class_type = original_method_table.lookup(class_name).type_
@@ -611,8 +621,10 @@ class OpcodeGenerator(VisitorBase):
                 method_compiler = Compiler(
                     target_ast=statement.body,
                     optimize_level=0,
-                    symbol_table=self.symbol_table,
+                    symbol_table=method_symbol_table,
                     scope_type=ScopeType.FUNCTION,
+                    source_path=self.source_path,
+                    passes_to_run=[CompilerPass.GENERATE_CODE],
                 )
                 
                 method_compiler.compile()
@@ -649,7 +661,9 @@ class OpcodeGenerator(VisitorBase):
                     bytecode=function_bytecode,
                     constants=function_constants,
                     param_count=param_count,
-                    local_count=local_count
+                    local_count=local_count,
+                    source_path=self.source_path,
+                    lineno_table=method_op_generator.lineno_table
                 )
                 
                 vbc_class._methods[method_name] = vbc_method
@@ -690,26 +704,28 @@ class OpcodeGenerator(VisitorBase):
         init_symbol = self.symbol_table.lookup("__init__")
         
         # 如果用户定义了__init__，则其符号有关联的作用域，否则为默认构造函数创建一个临时的空作用域
-        if init_symbol and init_symbol.scope:
-            self.symbol_table = init_symbol.scope
-        else:
-            self.symbol_table = SymbolTable(scope_type=ScopeType.FUNCTION, parent=self.symbol_table)
+        if not (init_symbol and init_symbol.scope):
+            raise RuntimeError(f"内部错误: TypeChecker未能正确创建或链接构造函数 '__init__' 的作用域")
+        
+        init_symbol_table = init_symbol.scope
 
         # 在父作用域（original_init_table）中查找类符号
         class_symbol = original_init_table.lookup(class_name)
         if not class_symbol or not isinstance(class_symbol.type_, ClassType):
-             raise RuntimeError(f"内部错误: 无法在类作用域的父作用域中找到类本身的类型符号")
+            raise RuntimeError(f"内部错误: 无法在类作用域的父作用域中找到类本身的类型符号")
         class_type = class_symbol.type_
         init_method_type = class_type.methods.get("__init__")
         if not isinstance(init_method_type, FunctionType):
-             raise RuntimeError(f"内部错误: 无法找到构造函数 '__init__' 的类型")
+            raise RuntimeError(f"内部错误: 无法找到构造函数 '__init__' 的类型")
 
         # TypeChecker已经填充了'this'和参数，这里直接编译
         init_compiler = Compiler(
             target_ast=final_init_method_node.body,
             optimize_level=0,
-            symbol_table=self.symbol_table,
+            symbol_table=init_symbol_table,
             scope_type=ScopeType.FUNCTION,
+            source_path=self.source_path,
+            passes_to_run=[CompilerPass.GENERATE_CODE],
         )
         init_compiler.compile()
         init_op_generator = init_compiler.opcode_generator
@@ -734,13 +750,10 @@ class OpcodeGenerator(VisitorBase):
             bytecode=init_op_generator.bytecode,
             constants=init_op_generator.constant_pool,
             param_count=len(final_init_args),
-            local_count=init_local_count
+            local_count=init_local_count,
+            source_path=self.source_path,
+            lineno_table=init_op_generator.lineno_table
         )
-        
-        vbc_class._methods["__init__"] = vbc_init_method
-        class_index = self.add_constant(vbc_class)
-        self.emit(Opcode.LOAD_CONSTANT, class_index)
-        self.symbol_table = original_init_table
         
         vbc_class._methods["__init__"] = vbc_init_method
         self.symbol_table = original_table

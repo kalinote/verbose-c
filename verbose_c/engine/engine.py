@@ -141,7 +141,7 @@ def compile_module(
         raise SyntaxError(f"在文件 {file_path} 中解析失败:\n{error_report}")
 
     # 编译AST
-    compiler = Compiler(ast_node)
+    compiler = Compiler(ast_node, source_path=file_path)
     compiler.compile()
     errors = compiler.get_errors()
     if errors:

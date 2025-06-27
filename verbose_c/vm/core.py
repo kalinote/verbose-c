@@ -1,4 +1,6 @@
+import bisect
 from verbose_c.compiler.opcode import Instruction, Opcode
+from verbose_c.error import VBCRuntimeError, TracebackFrame
 from verbose_c.object.class_ import VBCClass
 from verbose_c.object.instance import VBCInstance
 from verbose_c.object.t_string import VBCString
@@ -26,11 +28,16 @@ class VBCVirtualMachine:
         self._pc = 0                            # 程序计数器
         self._local_variables = []              # 局部变量（使用列表按索引访问）
         self._global_variables = {}             # 全局变量 # TODO 考虑一下这里要不要和局部变量保持一致
-        self._call_stack = []                   # 调用栈
+        self._call_stack: list[CallFrame] = []  # 调用栈
         self._scope_stack = []                  # 作用域栈，用于嵌套作用域管理
         self._running = False                   # 是否正在运行
         self._handlers = _vm_handlers           # 使用全局的处理器映射
         self._debug_log_collector = debug_log_collector # 调试日志收集器
+        
+        # 运行时上下文
+        self._bytecode: list = []
+        self._constants: list = []
+        self._current_function: VBCFunction | None = None # 当前正在执行的函数
 
     
     def _fetch_instruction(self) -> Instruction:
@@ -46,59 +53,79 @@ class VBCVirtualMachine:
         执行单条指令
         """
         if len(instruction) == 1:
-            opcode = instruction[0]
-            operand = None
+            opcode, operand = instruction[0], None
         else:
             opcode, operand = instruction
-        
-        if opcode in self._handlers:
-            handler = self._handlers[opcode]
-            try:
-                if operand is not None:
-                    handler(self, operand)
-                else:
-                    handler(self)
-            except Exception as e:
-                stack_info = []
-                temp_stack = []
-                while not self._stack.is_empty():
-                    val = self._stack.pop()
-                    stack_info.append(f"{type(val).__name__}: {repr(val)}")
-                    temp_stack.append(val)
 
-                for val in reversed(temp_stack):
-                    self._stack.push(val)
-                
-                stack_str = "\n        " + ",\n        ".join(reversed(stack_info)) + "\n    " if stack_info else "空栈"
-                
-                context_start = max(0, self._pc - 3)
-                context_end = min(len(self._bytecode), self._pc + 4)
-                context_instructions = []
-                for i in range(context_start, context_end):
-                    marker = ">>> " if i == self._pc else "    "
-                    instr = self._bytecode[i]
-                    if len(instr) == 1:
-                        context_instructions.append(f"{marker}{i}: {instr[0].name}")
-                    else:
-                        context_instructions.append(f"{marker}{i}: {instr[0].name} {instr[1]}")
-                
-                context_str = "\n".join(context_instructions)
-                
-                error_msg = f"""
-虚拟机执行错误详情:
-    错误: {e}
-    指令位置: {self._pc}
-    当前指令: {opcode.name}{f' {operand}' if operand is not None else ''}
-    栈状态: [{stack_str}]
-    局部变量: {[str(item) for item in self._local_variables]}
-    指令上下文:
-{context_str}
-                """.strip()
-                raise RuntimeError(error_msg) from e
-        else:
+        handler = self._handlers.get(opcode)
+        if handler is None:
             raise RuntimeError(f"未知操作码: {opcode}")
+
+        try:
+            if operand is not None:
+                handler(self, operand)
+            else:
+                handler(self)
+        except Exception as e:
+            # 捕获到任何指令执行期间的异常，生成并抛出结构化的 VBCRuntimeError
+            vbc_error = self._generate_runtime_error(e)
+            raise vbc_error from e
+
+    def _find_line_from_pc(self, function: VBCFunction, pc: int) -> int:
+        """根据程序计数器(PC)在行号表中查找对应的行号"""
+        if not function.lineno_table:
+            return -1
         
-    def excute(self, bytecode, constants):
+        pc_offsets = [item[0] for item in function.lineno_table]
+        index = bisect.bisect_right(pc_offsets, pc)
+        
+        if index > 0:
+            return function.lineno_table[index - 1][1]
+        
+        return -1
+
+    def _generate_runtime_error(self, e: Exception) -> VBCRuntimeError:
+        """生成一个包含完整调用栈的 VBCRuntimeError"""
+        traceback_frames = []
+
+        if self._current_function:
+            line = self._find_line_from_pc(self._current_function, self._pc)
+            traceback_frames.append(
+                TracebackFrame(
+                    filepath=self._current_function.source_path or "<unknown>",
+                    line=line,
+                    scope_name=self._current_function.name
+                )
+            )
+
+        for frame in reversed(self._call_stack):
+            func = frame.function
+            pc = frame.return_pc
+            
+            if isinstance(func, VBCBoundMethod):
+                func = func.method
+
+            if isinstance(func, VBCFunction):
+                line = self._find_line_from_pc(func, pc)
+                traceback_frames.append(
+                    TracebackFrame(
+                        filepath=func.source_path or "<unknown>",
+                        line=line,
+                        scope_name=func.name
+                    )
+                )
+        
+        # Python 的 traceback 是从调用者到被调用者，所以我们需要反转列表
+        traceback_frames.reverse()
+        
+        # 获取原始异常的类型和消息
+        error_type_name = type(e).__name__
+        error_message = str(e)
+        full_message = f"{error_type_name}: {error_message}"
+
+        return VBCRuntimeError(full_message, traceback_frames)
+        
+    def excute(self, bytecode, constants, source_path: str | None = None):
         """
         虚拟机指令执行循环
         """
@@ -106,6 +133,16 @@ class VBCVirtualMachine:
         self._constants = constants
         self._pc = 0
         self._running = True
+
+        # 为顶层模块创建一个伪函数对象，作为调用栈的根
+        module_func = VBCFunction(
+            name="<module>",
+            bytecode=bytecode,
+            constants=constants,
+            source_path=source_path,
+            # TODO: 顶层模块也应该有行号表
+        )
+        self._current_function = module_func
         
         while self._running and self._pc < len(self._bytecode):
             # 取码、译码、执行
@@ -327,8 +364,9 @@ class VBCVirtualMachine:
         # 恢复调用前的上下文
         call_frame: CallFrame = self._call_stack.pop()
         
+        # 构造函数调用的特殊处理：返回实例 `this` 而不是构造函数的返回值
         if getattr(call_frame, 'is_constructor_call', False):
-            instance = self._local_variables[0]
+            instance = self._local_variables[0] # 'this' 存储在局部变量0
             self._stack.push(instance)
         else:
             self._stack.push(return_value)
@@ -337,6 +375,11 @@ class VBCVirtualMachine:
         self._local_variables = call_frame.local_vars
         self._bytecode = call_frame.bytecode
         self._constants = call_frame.constants
+        # 恢复当前函数
+        if isinstance(call_frame.function, VBCBoundMethod):
+            self._current_function = call_frame.function.method
+        else:
+            self._current_function = call_frame.function
 
     ## 函数调用类指令
     @register_instruction(Opcode.CALL_FUNCTION)
@@ -355,11 +398,19 @@ class VBCVirtualMachine:
             
             args = [self._stack.pop() for _ in range(num_args)]
             args.reverse()
-            self._stack.pop()
+            self._stack.pop() # 弹出函数对象
 
-            call_frame = CallFrame(return_pc=self._pc, local_vars=self._local_variables, bytecode=self._bytecode, constants=self._constants, function_name=callable_obj.name)
+            call_frame = CallFrame(
+                function=self._current_function, 
+                return_pc=self._pc, 
+                local_vars=self._local_variables, 
+                bytecode=self._bytecode, 
+                constants=self._constants
+            )
             self._call_stack.append(call_frame)
 
+            # 切换到新函数的上下文
+            self._current_function = callable_obj
             self._bytecode = callable_obj.bytecode
             self._constants = callable_obj.constants
             self._local_variables = [None] * callable_obj.local_count
@@ -375,11 +426,19 @@ class VBCVirtualMachine:
 
             args = [self._stack.pop() for _ in range(num_args)]
             args.reverse()
-            self._stack.pop()
+            self._stack.pop() # 弹出绑定方法对象
 
-            call_frame = CallFrame(return_pc=self._pc, local_vars=self._local_variables, bytecode=self._bytecode, constants=self._constants, function_name=method.name)
+            call_frame = CallFrame(
+                function=self._current_function, 
+                return_pc=self._pc, 
+                local_vars=self._local_variables, 
+                bytecode=self._bytecode, 
+                constants=self._constants
+            )
             self._call_stack.append(call_frame)
 
+            # 切换到新方法的上下文
+            self._current_function = method
             self._bytecode = method.bytecode
             self._constants = method.constants
             self._local_variables = [None] * method.local_count
@@ -502,16 +561,18 @@ class VBCVirtualMachine:
             raise RuntimeError(f"构造函数 '{class_obj._name}.__init__' 期望 {init_method.param_count} 个参数，但提供了 {num_args} 个")
 
         call_frame = CallFrame(
+            function=self._current_function,
             return_pc=self._pc,
             local_vars=self._local_variables,
             bytecode=self._bytecode,
-            constants=self._constants,
-            function_name=init_method.name
+            constants=self._constants
         )
         
         setattr(call_frame, 'is_constructor_call', True)
         self._call_stack.append(call_frame)
 
+        # 切换到构造函数的上下文
+        self._current_function = init_method
         self._bytecode = init_method.bytecode
         self._constants = init_method.constants
         self._local_variables = [None] * init_method.local_count

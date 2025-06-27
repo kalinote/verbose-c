@@ -54,3 +54,16 @@ class LoopType(Enum):
     FOR = auto()
     WHILE = auto()
     DO_WHILE = auto()
+
+
+class CompilerPass(str, Enum):
+    """
+    编译流程
+    
+    ALL: 全部执行
+    TYPE_CHECK: 类型检查
+    GENERATE_CODE: 代码生成
+    """
+    ALL = "all"
+    TYPE_CHECK = "type_check"
+    GENERATE_CODE = "generate_code"

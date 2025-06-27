@@ -164,7 +164,7 @@ class VBCFloat(VBCObject):
         from verbose_c.object.t_integer import VBCInteger
         if isinstance(other, (VBCFloat, VBCInteger)):
             if other.value == 0:
-                raise ZeroDivisionError("division by zero")
+                raise ZeroDivisionError("除零错误")
             new_value = self.value / other.value
             base_type = other._object_type if self.type_priority < other.type_priority else self._object_type
             if isinstance(other, VBCInteger):

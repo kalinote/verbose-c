@@ -158,7 +158,7 @@ class VBCInteger(VBCObject):
         from verbose_c.object.t_float import VBCFloat
         if isinstance(other, (VBCInteger, VBCFloat)):
             if other.value == 0:
-                raise ZeroDivisionError("division by zero")
+                raise ZeroDivisionError("除零错误")
             new_value = self.value / other.value
             
             return VBCFloat._create_with_promotion(new_value, VBCObjectType.DOUBLE)

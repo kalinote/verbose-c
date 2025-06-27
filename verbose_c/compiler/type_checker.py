@@ -44,8 +44,9 @@ class TypeChecker(VisitorBase):
     """
     类型检查器，遍历AST并验证类型规则。
     """
-    def __init__(self, symbol_table: SymbolTable):
+    def __init__(self, symbol_table: SymbolTable, source_path: str | None = None):
         self.symbol_table = symbol_table
+        self.source_path = source_path
         self.errors: list[str] = []
         self.loop_level = 0
         self.current_function_return_type: Type | None = None   # 跟踪当前函数返回类型
@@ -344,7 +345,9 @@ class TypeChecker(VisitorBase):
         original_return_type = self.current_function_return_type
         self.current_function_return_type = return_type
 
-        self.visit(node.body)
+        # 手动处理函数体顶层块，避免 visit_BlockNode 创建不必要的额外作用域
+        for statement in node.body.statements:
+            self.visit(statement)
 
         self.current_function_return_type = original_return_type
         self.symbol_table = original_table
@@ -462,7 +465,9 @@ class TypeChecker(VisitorBase):
                 original_return_type = self.current_function_return_type
                 self.current_function_return_type = method_type.return_type
 
-                self.visit(member.body)
+                # 手动处理方法体顶层块，避免 visit_BlockNode 创建不必要的额外作用域
+                for statement in member.body.statements:
+                    self.visit(statement)
 
                 self.current_function_return_type = original_return_type
                 self.symbol_table = original_method_scope_parent_table

@@ -3,6 +3,7 @@ import os
 import time
 import traceback
 from verbose_c.engine.engine import compile_module, generate_parser
+from verbose_c.error import VBCRuntimeError, VBCCompileError, TracebackFrame
 
 default_parser_output = "parser.py"
 
@@ -64,6 +65,17 @@ def main():
             log_parser_gen=args.log_parser_gen
         )
         
+def format_runtime_error(error: VBCRuntimeError):
+    """
+    格式化并打印 VBCRuntimeError，模仿 Python 的 traceback 格式。
+    """
+    print("错误栈跟踪:")
+    for frame in error.traceback:
+        print(f'  在文件 "{frame.filepath}" 中, 第 {frame.line} 行, {frame.scope_name} 中')
+        # TODO: 增加打印源码行的功能
+    print(error.message)
+
+
 def compile_source_file(
         filename, 
         log=None,
@@ -105,7 +117,11 @@ def compile_source_file(
             log_collector = vm_debug_logs if debug_vm and log else None
             
             vm = VBCVirtualMachine(debug_log_collector=log_collector)
-            vm.excute(compilation_result.bytecode, compilation_result.constant_pool)
+            vm.excute(
+                bytecode=compilation_result.bytecode, 
+                constants=compilation_result.constant_pool,
+                source_path=filename
+            )
             print("程序执行完成")
 
         # 写入日志文件
@@ -181,8 +197,16 @@ def compile_source_file(
 
             print(f"\n编译输出已保存到: {log}")
 
+    except VBCRuntimeError as e:
+        # 捕获我们自定义的运行时错误并格式化输出
+        format_runtime_error(e)
+    except VBCCompileError as e:
+        # TODO: 完善编译错误的格式化输出
+        print(f"编译错误: 文件 {e.filepath}, 行 {e.line}")
+        print(f"  {e.message}")
     except Exception as e:
-        print(f"编译过程中发生错误: {e}")
+        # 对于其他意外的 Python 异常，仍然打印完整的 traceback 以便调试
+        print(f"发生了一个意外的内部错误: {e}")
         traceback.print_exc()
 
 
