@@ -42,3 +42,8 @@ string name = bft.input("你是：");
 bft.print("你好：");
 bft.println(name);
 bft.print_v();
+
+// 类型错误测试
+int a = "this is a string"; // 错误：不能将 string 赋值给 int
+string b = 123;              // 错误：不能将 int 赋值给 string
+bft.println(12345);          // 错误：println 期望 string，但得到 int

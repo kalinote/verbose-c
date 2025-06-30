@@ -4,6 +4,7 @@ from verbose_c.compiler.symbol import SymbolTable, SymbolKind
 from verbose_c.compiler.type_checker_visitor import TypeChecker
 from verbose_c.parser.parser.ast.node import ASTNode
 from verbose_c.vm.builtins_functions import BUILTIN_FUNCTION_SIGNATURES
+from verbose_c.error import VBCCompileError
 
 
 class Compiler:
@@ -31,7 +32,6 @@ class Compiler:
 
         self._bytecode = []
         self._constant_pool = []
-        self._errors = []
 
     def _populate_builtins(self):
         for name, signature in BUILTIN_FUNCTION_SIGNATURES.items():
@@ -65,15 +65,12 @@ class Compiler:
             # 类型检查
             self._type_checker.visit(self._target_ast)
             if self._type_checker.errors:
-                # 错误类型直接返回
-                self._errors.extend(self._type_checker.errors)
-                return
+                # 将所有收集到的错误信息合并，并抛出异常
+                combined_error_message = "\n".join(self._type_checker.errors)
+                raise VBCCompileError(combined_error_message, filepath=self._source_path)
         
         if run_all or CompilerPass.GENERATE_CODE in passes:
             # 代码生成
             self._opcode_generator.visit(self._target_ast)
             self._bytecode = self._opcode_generator.bytecode
             self._constant_pool = self._opcode_generator.constant_pool
-
-    def get_errors(self) -> list[str]:
-        return self._errors

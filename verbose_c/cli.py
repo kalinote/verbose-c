@@ -201,9 +201,10 @@ def compile_source_file(
         # 捕获我们自定义的运行时错误并格式化输出
         format_runtime_error(e)
     except VBCCompileError as e:
-        # TODO: 完善编译错误的格式化输出
-        print(f"编译错误: 文件 {e.filepath}, 行 {e.line}")
-        print(f"  {e.message}")
+        # 格式化并打印编译错误
+        print(f"编译错误: 文件 {e.filepath}")
+        for error_line in e.message.split('\n'):
+            print(f"  - {error_line}")
     except Exception as e:
         # 对于其他意外的 Python 异常，仍然打印完整的 traceback 以便调试
         print(f"发生了一个意外的内部错误: {e}")

@@ -143,10 +143,6 @@ def compile_module(
     # 编译AST
     compiler = Compiler(ast_node, source_path=file_path)
     compiler.compile()
-    errors = compiler.get_errors()
-    if errors:
-        error_report = "\n".join(errors)
-        raise TypeError(f"在文件 {file_path} 中数据类型解析失败:\n{error_report}")
     
     opcode_gen = compiler.opcode_generator
 
