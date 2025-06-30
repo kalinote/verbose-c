@@ -49,7 +49,7 @@ class Opcode(Enum):
     EXIT_SCOPE          = 0x63  # 退出当前作用域
     
     # === 类型转换类 (0x70-0x7F) ===
-    CAST                = 0x70  # 转换为整数
+    CAST                = 0x70  # 类型转换
     
     # === 内存管理类 (0x80-0x8F) ===
     ALLOC_OBJECT        = 0x80  # 分配对象内存

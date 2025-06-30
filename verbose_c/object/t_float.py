@@ -47,7 +47,7 @@ class VBCFloat(VBCObject):
         return super().__repr__() + f"(value={self.value})"
 
     def __str__(self):
-        return self.value
+        return str(self.value)
 
     def __eq__(self, other):
         from verbose_c.object.t_integer import VBCInteger

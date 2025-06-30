@@ -78,6 +78,7 @@ multiplicative:
     | factor
 
 factor:
+    | '(' type_name ')' expr { CastNode(type_name, expr, LOCATIONS) } 
     | '(' expr ')' { expr }
     | unary
     | new_instance

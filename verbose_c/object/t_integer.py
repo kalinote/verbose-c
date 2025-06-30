@@ -10,6 +10,7 @@ class VBCInteger(VBCObject):
     # 各数据类型位宽, 值为(位宽, 类型提升优先级), 不同数据类型的运算结果采用更高的优先级
     bit_width = {
         VBCObjectType.CHAR: (8, 1),
+        VBCObjectType.SHORT: (16, 1.5),
         VBCObjectType.INT: (32, 2),
         VBCObjectType.LONG: (64, 3),
         VBCObjectType.LONGLONG: (64, 4),

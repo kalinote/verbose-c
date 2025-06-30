@@ -5,8 +5,10 @@ class VBCObjectType(Enum):
     类与对象类型
     """
     CUSTOM = auto()
+    VOID = auto()
     CLASS = auto()
     CHAR = auto()
+    SHORT = auto()
     INT = auto()
     LONG = auto()
     LONGLONG = auto()

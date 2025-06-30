@@ -14,7 +14,7 @@ class VBCBool(VBCObject):
         return super().__repr__() + f"(value={self.value})"
 
     def __str__(self):
-        return str(self.value)
+        return str("true" if self.value else "false")
 
     def __hash__(self):
         return hash_(self.value)

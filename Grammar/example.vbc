@@ -1,49 +1,53 @@
-/* 内置函数测试 */
-class BuiltinFunctionTest {
-    string v;
+// --- 1. 安全的拓宽转换 (Widening Conversions) ---
+builtin_println("--- Widening Conversions ---");
+float f_from_i = (float)123;
+builtin_println(f_from_i); // 期望输出: 123.0
 
-    void __init__(string v) {
-        this.v = v;
-    }
+long l_from_i = (long)456;
+builtin_println(l_from_i); // 期望输出: 456
 
-    void print(string s) {
-        builtin_print(s);
-    }
 
-    void println(string s) {
-        builtin_println(s);
-    }
+// --- 2. 可能丢失信息的收窄转换 (Narrowing Conversions) ---
+builtin_println("\n--- Narrowing Conversions ---");
+int i_from_f = (int)3.14159;
+builtin_println(i_from_f); // 期望输出: 3 (小数部分被截断)
 
-    string input(string prompt) {
-        return builtin_input(prompt);
-    }
+int i_from_d = (int)99.99;
+builtin_println(i_from_d); // 期望输出: 99
 
-    void print_v() {
-        this.println(this.v);
-    }
-}
+char c_from_i = (char)65;
+builtin_println(c_from_i);  // 期望输出: 65
 
-/* 运行时错误测试 */
-double cause_error(int divisor) {
-    int x = 100;
-    // 除零错误测试
-    double result = x / divisor; 
-    return result;
-}
 
-void level_one() {
-    cause_error(0);
-}
+// --- 3. 转换为字符串 ---
+builtin_println("\n--- String Conversions ---");
+string s_from_i = (string)789;
+builtin_println(s_from_i); // 期望输出: "789"
 
-BuiltinFunctionTest bft = new BuiltinFunctionTest("构造函数定义字符串");
-bft.println("hello\n\tworld!");
+string s_from_f = (string)-123.45;
+builtin_println(s_from_f); // 期望输出: "-123.45"
 
-string name = bft.input("你是：");
-bft.print("你好：");
-bft.println(name);
-bft.print_v();
+string s_from_b = (string)true;
+builtin_println(s_from_b); // 期望输出: "true"
 
-// 类型错误测试
-int a = "this is a string"; // 错误：不能将 string 赋值给 int
-string b = 123;              // 错误：不能将 int 赋值给 string
-bft.println(12345);          // 错误：println 期望 string，但得到 int
+
+// --- 4. 转换为布尔值 ---
+builtin_println("\n--- Boolean Conversions ---");
+builtin_println((bool)1);      // 期望输出: true
+builtin_println((bool)0);      // 期望输出: false
+builtin_println((bool)-1);     // 期望输出: true
+builtin_println((bool)"");     // 期望输出: false
+builtin_println((bool)"abc");  // 期望输出: true
+
+
+// --- 5. 在表达式中使用 ---
+builtin_println("\n--- Usage in Expressions ---");
+int result = (int)5.5 + 10; // 5 + 10
+builtin_println(result); // 期望输出: 15
+
+builtin_println("Result is: " + (string)result); // 期望输出: "Result is: 15"
+
+
+// --- 6. 运行时错误测试 (可选，取消注释以测试) ---
+builtin_println("\n--- Runtime Error Test ---");
+int error_cast = (int)"hello"; // 应该会抛出一个运行时错误

@@ -70,6 +70,79 @@ class TypeChecker(VisitorBase):
         self.errors.append(f"未知类型 '{type_name}', 在 {type_node.start_line} 行")
         return ErrorType()
 
+    def _is_assignable(self, target_type: Type, source_type: Type) -> bool:
+        """
+        检查 source_type 是否能安全地赋值给 target_type。
+        """
+        # 规则1: 类型完全相同
+        if target_type == source_type:
+            return True
+        
+        # TODO 规则2: 允许任何类型赋值给 AnyType
+        if isinstance(target_type, AnyType):
+            return True
+
+        # 规则3: 允许整数赋值给浮点数 (提升)
+        if isinstance(target_type, FloatType) and isinstance(source_type, IntegerType):
+            return True
+            
+        # 规则4: 允许低精度数字赋值给高精度数字
+        if isinstance(target_type, (IntegerType, FloatType)) and isinstance(source_type, (IntegerType, FloatType)):
+            target_priority = TYPE_PROMOTION_PRIORITY.get(target_type.kind, -1)
+            source_priority = TYPE_PROMOTION_PRIORITY.get(source_type.kind, -1)
+            return target_priority >= source_priority
+
+        return False
+
+    def _is_castable(self, target_type: Type, source_type: Type) -> bool:
+        """
+        检查 source_type 是否能显式地转换为 target_type。
+        这个方法的规则比 is_assignable 更宽松，因为它处理的是用户明确要求的强制类型转换。
+        """
+        # 规则 1: 类型完全相同
+        if target_type == source_type:
+            return True
+
+        # 规则 2: 任何类型可以转换成 void 类型，同时 void 类型可以转换成任何类型。
+        if isinstance(target_type, VoidType) or isinstance(source_type, VoidType):
+            return True
+
+        # 规则 3: 任何数字类型之间都可以互相转换。
+        # 这包括了安全的拓宽转换 (int -> float) 和可能不安全的收窄转换 (float -> int, long -> int)。
+        # 程序员使用显式转换，就表示他们接受了可能的信息丢失风险。
+        is_target_numeric = isinstance(target_type, (IntegerType, FloatType))
+        is_source_numeric = isinstance(source_type, (IntegerType, FloatType))
+        if is_target_numeric and is_source_numeric:
+            return True
+
+        # 规则 4: 允许数字和布尔值转换为字符串。
+        is_target_string = isinstance(target_type, StringType)
+        is_source_numeric_or_bool = isinstance(source_type, (IntegerType, FloatType, BoolType))
+        if is_target_string and is_source_numeric_or_bool:
+            # 在运行时，这会调用类似 str(value) 的逻辑。
+            return True
+
+        # 规则 5: 允许字符串转换为数字类型。
+        # 这需要运行时支持，例如尝试解析字符串。如果解析失败，可能会在运行时抛出错误。
+        if is_target_numeric and isinstance(source_type, StringType):
+            return True
+            
+        # 规则 6: 字符串和数字转换布尔值
+        if isinstance(target_type, BoolType) and (isinstance(source_type, StringType) or is_source_numeric):
+            return True
+            
+        # TODO 规则 7: 允许对象类型之间的向上和向下转型。
+        # 这需要等继承实现后再添加。
+        # if isinstance(target_type, ClassType) and isinstance(source_type, ClassType):
+        #     # 向上转型总是安全的
+        #     if source_type.is_subclass_of(target_type):
+        #         return True
+        #     # 向下转型是允许的，但可能在运行时失败
+        #     if target_type.is_subclass_of(source_type):
+        #         return True
+
+        return False
+
     def visit_RootNode(self, node: RootNode) -> Type:
         for module in node.modules:
             self.visit(module)
@@ -189,7 +262,7 @@ class TypeChecker(VisitorBase):
             if isinstance(init_type, ErrorType):
                 return ErrorType()
 
-            if not self.is_assignable(declared_type, init_type):
+            if not self._is_assignable(declared_type, init_type):
                 self.errors.append(f"类型错误: 不能将类型 '{init_type}' 的值赋给类型为 '{declared_type}' 的变量 '{node.name.name}', 在 {node.start_line} 行")
 
         try:
@@ -208,35 +281,11 @@ class TypeChecker(VisitorBase):
         if isinstance(value_type, ErrorType):
             return ErrorType()
 
-        if not self.is_assignable(target_type, value_type):
+        if not self._is_assignable(target_type, value_type):
             self.errors.append(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的目标, 在 {node.start_line} 行")
             return ErrorType()
 
         return value_type
-
-    def is_assignable(self, target_type: Type, source_type: Type) -> bool:
-        """
-        检查 source_type 是否能安全地赋值给 target_type。
-        """
-        # 规则1: 类型完全相同
-        if target_type == source_type:
-            return True
-        
-        # 规则2: 允许任何类型赋值给 AnyType (如果未来支持)
-        if isinstance(target_type, AnyType):
-            return True
-
-        # 规则3: 允许整数赋值给浮点数 (提升)
-        if isinstance(target_type, FloatType) and isinstance(source_type, IntegerType):
-            return True
-            
-        # 规则4: 允许低精度数字赋值给高精度数字
-        if isinstance(target_type, (IntegerType, FloatType)) and isinstance(source_type, (IntegerType, FloatType)):
-            target_priority = TYPE_PROMOTION_PRIORITY.get(target_type.kind, -1)
-            source_priority = TYPE_PROMOTION_PRIORITY.get(source_type.kind, -1)
-            return target_priority >= source_priority
-
-        return False
 
     def visit_BlockNode(self, node: BlockNode) -> Type:
         original_table = self.symbol_table
@@ -371,7 +420,7 @@ class TypeChecker(VisitorBase):
             return VoidType()
         
         actual_return_type = self.visit(node.value)
-        if not self.is_assignable(self.current_function_return_type, actual_return_type):
+        if not self._is_assignable(self.current_function_return_type, actual_return_type):
             self.errors.append(f"类型错误: 函数应返回 '{self.current_function_return_type}' 类型, 但返回了 '{actual_return_type}' 类型, 在 {node.start_line} 行")
 
         return VoidType()
@@ -394,7 +443,7 @@ class TypeChecker(VisitorBase):
         for i, arg_node in enumerate(node.args):
             actual_arg_type = self.visit(arg_node)
             expected_arg_type = callee_type.param_types[i]
-            if not self.is_assignable(expected_arg_type, actual_arg_type):
+            if not self._is_assignable(expected_arg_type, actual_arg_type):
                 self.errors.append(f"类型错误: 函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型, 在 {arg_node.start_line} 行")
 
         return callee_type.return_type
@@ -515,9 +564,24 @@ class TypeChecker(VisitorBase):
             for i, arg_node in enumerate(class_call.args):
                 actual_arg_type = self.visit(arg_node)
                 expected_arg_type = constructor_type.param_types[i]
-                if not self.is_assignable(expected_arg_type, actual_arg_type):
+                if not self._is_assignable(expected_arg_type, actual_arg_type):
                     self.errors.append(f"类型错误: 构造函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型, 在 {arg_node.start_line} 行")
         elif len(class_call.args) > 0:
             self.errors.append(f"构造函数参数错误: 类 '{class_type.name}' 没有定义构造函数, 不能接受参数, 在 {node.start_line} 行")
 
         return class_type
+
+    def visit_CastNode(self, node: CastNode) -> Type:
+        # 获取原始表达式数据类型和目标类型
+        source_type = self.visit(node.expression)
+        target_type = self.resolve_type_node(node.target_type)
+
+        if isinstance(target_type, ErrorType) or isinstance(source_type, ErrorType):
+            return ErrorType()
+
+        # 检查类型是否可以转换
+        if not self._is_castable(target_type, source_type):
+            self.errors.append(f"类型错误: 无法将类型 '{source_type}' 强制转换为 '{target_type}', 在 {node.start_line} 行")
+            return ErrorType()
+        
+        return target_type

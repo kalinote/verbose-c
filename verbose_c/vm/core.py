@@ -2,8 +2,11 @@ import bisect
 from verbose_c.compiler.opcode import Instruction, Opcode
 from verbose_c.error import VBCRuntimeError, TracebackFrame
 from verbose_c.object.class_ import VBCClass
+from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.instance import VBCInstance
 from verbose_c.object.object import VBCObject
+from verbose_c.object.t_float import VBCFloat
+from verbose_c.object.t_integer import VBCInteger
 from verbose_c.object.t_string import VBCString
 from verbose_c.utils.stack import Stack
 from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame, VBCNativeFunction
@@ -494,8 +497,36 @@ class VBCVirtualMachine:
 
     ## 类型转换类指令
     @register_instruction(Opcode.CAST)
-    def __handle_cast_to_int(self):
-        pass
+    def __handle_cast(self, target_type_enum):
+        if target_type_enum is None:
+            raise RuntimeError("CAST 指令缺少目标类型操作数")
+
+        source_obj = self._stack.pop()
+        new_obj = None
+
+        # TODO 完善转换规则
+        # 规则 1: 转换为数字类型
+        if target_type_enum in VBCInteger.bit_width or target_type_enum in VBCFloat.bit_width:
+            if isinstance(source_obj, (VBCInteger, VBCFloat)):
+                value_as_float = float(source_obj.value)
+                if target_type_enum in VBCInteger.bit_width:
+                    new_obj = VBCInteger(int(value_as_float), target_type_enum)
+                else:
+                    new_obj = VBCFloat(value_as_float, target_type_enum)
+        
+        # 规则 2: 转换为字符串类型
+        elif target_type_enum == VBCObjectType.STRING:
+            new_obj = VBCString(str(source_obj))
+
+        # 规则 3: 转换为布尔类型
+        elif target_type_enum == VBCObjectType.BOOL:
+            new_obj = VBCBool(bool(source_obj))
+
+        if new_obj is None:
+            source_type_name = source_obj._object_type.name
+            raise TypeError(f"不支持从类型 '{source_type_name}' 到 '{target_type_enum.name}' 的强制类型转换")
+
+        self._stack.push(new_obj)
 
     ## 内存管理类指令
     @register_instruction(Opcode.ALLOC_OBJECT)

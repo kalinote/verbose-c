@@ -63,7 +63,7 @@ class OpcodeGenerator(VisitorBase):
         return super().visit(node)
 
     # 工具方法
-    def emit(self, opcode: Opcode, operand=None):
+    def _emit(self, opcode: Opcode, operand=None):
         """
         添加操作码到字节码流中, 并记录行号信息
         
@@ -81,7 +81,7 @@ class OpcodeGenerator(VisitorBase):
         else:
             self.bytecode.append((opcode,))
 
-    def add_constant(self, value) -> int:
+    def _add_constant(self, value) -> int:
         """
         添加常量到常量池，确保类型和值都匹配时才复用。
 
@@ -95,7 +95,7 @@ class OpcodeGenerator(VisitorBase):
         self.constant_pool.append(value)
         return len(self.constant_pool) - 1
 
-    def generate_label(self, lebel_name="unnamed"):
+    def _generate_label(self, lebel_name="unnamed"):
         """
         生成唯一标签
 
@@ -106,7 +106,7 @@ class OpcodeGenerator(VisitorBase):
         self.next_label_id += 1
         return label
 
-    def mark_label(self, label):
+    def _mark_label(self, label):
         """标记标签位置"""
         self.labels[label] = len(self.bytecode)
 
@@ -117,9 +117,9 @@ class OpcodeGenerator(VisitorBase):
             raise Exception(f"未定义的标识符: {node.name}, 在行: {node.start_line}, 列: {node.start_column}")
 
         if symbol.address is not None:
-            self.emit(Opcode.LOAD_LOCAL_VAR, symbol.address)
+            self._emit(Opcode.LOAD_LOCAL_VAR, symbol.address)
         else:
-            self.emit(Opcode.LOAD_GLOBAL_VAR, node.name)
+            self._emit(Opcode.LOAD_GLOBAL_VAR, node.name)
     
     def visit_NumberNode(self, node: NumberNode):
         target_type = getattr(node, "inferred_type", None)
@@ -139,30 +139,30 @@ class OpcodeGenerator(VisitorBase):
         # TODO 处理float和double类型
         if target_type in VBCInteger.bit_width.keys():
             vbc_int = VBCInteger(node.value, target_type)
-            const_index = self.add_constant(vbc_int)
-            self.emit(Opcode.LOAD_CONSTANT, const_index)
+            const_index = self._add_constant(vbc_int)
+            self._emit(Opcode.LOAD_CONSTANT, const_index)
         elif target_type in VBCFloat.bit_width.keys():
             vbc_float = VBCFloat(node.value, target_type)
-            const_index = self.add_constant(vbc_float)
-            self.emit(Opcode.LOAD_CONSTANT, const_index)
+            const_index = self._add_constant(vbc_float)
+            self._emit(Opcode.LOAD_CONSTANT, const_index)
         else:
             raise ValueError(f"不支持的目标数据类型: {target_type}")
 
     def visit_BoolNode(self, node: BoolNode):
         vbc_bool = VBCBool(node.value)
-        const_index = self.add_constant(vbc_bool)
-        self.emit(Opcode.LOAD_CONSTANT, const_index)
+        const_index = self._add_constant(vbc_bool)
+        self._emit(Opcode.LOAD_CONSTANT, const_index)
     
     def visit_StringNode(self, node: StringNode):
         # 去掉首尾的引号，得到原始内容
         raw_content = node.value[1:-1]
         vbc_str = VBCString(raw_content)
-        const_index = self.add_constant(vbc_str)
-        self.emit(Opcode.LOAD_CONSTANT, const_index)
+        const_index = self._add_constant(vbc_str)
+        self._emit(Opcode.LOAD_CONSTANT, const_index)
     
     def visit_NullNode(self, node: NullNode): 
-        const_index = self.add_constant(VBCNull())
-        self.emit(Opcode.LOAD_CONSTANT, const_index)
+        const_index = self._add_constant(VBCNull())
+        self._emit(Opcode.LOAD_CONSTANT, const_index)
 
     def visit_TypeNode(self, node: TypeNode):
         raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
@@ -173,7 +173,7 @@ class OpcodeGenerator(VisitorBase):
             self.visit(module)
             
         # 执行完停机
-        self.emit(Opcode.HALT)
+        self._emit(Opcode.HALT)
 
     def visit_ModuleNode(self, node: ModuleNode):
         
@@ -189,20 +189,20 @@ class OpcodeGenerator(VisitorBase):
                     self.bytecode[i] = (opcode, self.labels[operand])
         
     def visit_LabelNode(self, node: LabelNode):
-        lebel = self.generate_label(node.name.name)
-        self.mark_label(lebel)
+        lebel = self._generate_label(node.name.name)
+        self._mark_label(lebel)
         
     # 表达式
     def visit_UnaryOpNode(self, node: UnaryOpNode):
         self.visit(node.expr)
         
         if node.op == Operator.SUBTRACT:
-            self.emit(Opcode.UNARY_MINUS)
+            self._emit(Opcode.UNARY_MINUS)
         elif node.op == Operator.ADD:
             # TODO 检查这条分支是否有必要？ (+a 就是 a)
             pass
         elif node.op == Operator.NOT:
-            self.emit(Opcode.LOGICAL_NOT)  
+            self._emit(Opcode.LOGICAL_NOT)  
         else:
             raise ValueError(f"未知的单目运算符: {node.op}")
 
@@ -212,59 +212,59 @@ class OpcodeGenerator(VisitorBase):
         if node.op == Operator.LOGICAL_AND:
             self.visit(node.left)
             
-            end_label = self.generate_label("binary_end")
-            self.emit(Opcode.DUP)
-            self.emit(Opcode.JUMP_IF_FALSE, end_label)
+            end_label = self._generate_label("binary_end")
+            self._emit(Opcode.DUP)
+            self._emit(Opcode.JUMP_IF_FALSE, end_label)
             
-            self.emit(Opcode.POP)
+            self._emit(Opcode.POP)
             self.visit(node.right)
             
-            self.mark_label(end_label)
+            self._mark_label(end_label)
             
         elif node.op == Operator.LOGICAL_OR:
             self.visit(node.left)
             
-            next_instr_label = self.generate_label("logical_or_next")
-            end_label = self.generate_label("logical_or_end")
+            next_instr_label = self._generate_label("logical_or_next")
+            end_label = self._generate_label("logical_or_end")
             
-            self.emit(Opcode.DUP)
+            self._emit(Opcode.DUP)
             # 如果左操作数为假，则跳转到下一指令，计算右操作数
-            self.emit(Opcode.JUMP_IF_FALSE, next_instr_label)
+            self._emit(Opcode.JUMP_IF_FALSE, next_instr_label)
             
             # 如果左操作数为真，则直接跳转到结尾，结果就是左操作数
-            self.emit(Opcode.JUMP, end_label)
+            self._emit(Opcode.JUMP, end_label)
             
-            self.mark_label(next_instr_label)
+            self._mark_label(next_instr_label)
             # 弹出为假的左操作数，并计算右操作数
-            self.emit(Opcode.POP)
+            self._emit(Opcode.POP)
             self.visit(node.right)
             
-            self.mark_label(end_label)
+            self._mark_label(end_label)
         else:
             self.visit(node.left)
             self.visit(node.right)
 
             match node.op:
                 case Operator.ADD:
-                    self.emit(Opcode.ADD)
+                    self._emit(Opcode.ADD)
                 case Operator.SUBTRACT:
-                    self.emit(Opcode.SUBTRACT)
+                    self._emit(Opcode.SUBTRACT)
                 case Operator.MULTIPLY:
-                    self.emit(Opcode.MULTIPLY)
+                    self._emit(Opcode.MULTIPLY)
                 case Operator.DIVIDE:
-                    self.emit(Opcode.DIVIDE)
+                    self._emit(Opcode.DIVIDE)
                 case Operator.EQUAL:
-                    self.emit(Opcode.EQUAL)
+                    self._emit(Opcode.EQUAL)
                 case Operator.NOT_EQUAL:
-                    self.emit(Opcode.NOT_EQUAL)
+                    self._emit(Opcode.NOT_EQUAL)
                 case Operator.LESS_THAN:
-                    self.emit(Opcode.LESS_THAN)
+                    self._emit(Opcode.LESS_THAN)
                 case Operator.GREATER_THAN:
-                    self.emit(Opcode.GREATER_THAN)
+                    self._emit(Opcode.GREATER_THAN)
                 case Operator.LESS_EQUAL:
-                    self.emit(Opcode.LESS_EQUAL)
+                    self._emit(Opcode.LESS_EQUAL)
                 case Operator.GREATER_EQUAL:
-                    self.emit(Opcode.GREATER_EQUAL)
+                    self._emit(Opcode.GREATER_EQUAL)
                 case _:
                     raise ValueError(f"未知的二元运算符: {node.op}")
 
@@ -298,14 +298,14 @@ class OpcodeGenerator(VisitorBase):
             self.visit(node.init_exp)
         else:
             # 没有初始化，将默认值null压入栈
-            const_index = self.add_constant(VBCNull())
-            self.emit(Opcode.LOAD_CONSTANT, const_index)
+            const_index = self._add_constant(VBCNull())
+            self._emit(Opcode.LOAD_CONSTANT, const_index)
 
         # 根据符号是否有地址来决定是存为局部变量还是全局变量
         if symbol.address is not None:
-            self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+            self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
         else:
-            self.emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
+            self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
 
     def visit_AssignmentNode(self, node: AssignmentNode):
         if isinstance(node.target, NameNode):
@@ -316,20 +316,20 @@ class OpcodeGenerator(VisitorBase):
                 raise ValueError(f"未定义的变量: {node.target.name}")
 
             if symbol.address is not None:
-                self.emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+                self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
             else:
                 # TODO 这里的逻辑应该还需要进一步确认
-                self.emit(Opcode.STORE_GLOBAL_VAR, node.target.name)
+                self._emit(Opcode.STORE_GLOBAL_VAR, node.target.name)
         
         elif isinstance(node.target, GetPropertyNode):
             # 处理对象属性赋值，比如 obj.prop = value 的语法
             self.visit(node.value)
             self.visit(node.target.obj)
 
-            property_name = self.add_constant(VBCString(node.target.property_name.name))
-            self.emit(Opcode.LOAD_CONSTANT, property_name)
+            property_name = self._add_constant(VBCString(node.target.property_name.name))
+            self._emit(Opcode.LOAD_CONSTANT, property_name)
 
-            self.emit(Opcode.SET_PROPERTY)
+            self._emit(Opcode.SET_PROPERTY)
         else:
             raise RuntimeError(f"不支持的赋值目标类型: {type(node.target).__name__}")
 
@@ -337,43 +337,43 @@ class OpcodeGenerator(VisitorBase):
         self.visit(node.expr)
         
         # TODO 完善逻辑，部分数据可能(?)不需要将数据弹出栈顶
-        self.emit(Opcode.POP)
+        self._emit(Opcode.POP)
 
     def visit_IfNode(self, node: IfNode):
         self.visit(node.condition)
         
-        endif_label = self.generate_label("if_end")
+        endif_label = self._generate_label("if_end")
         if node.else_branch:
-            else_label = self.generate_label("else_branch")
+            else_label = self._generate_label("else_branch")
             
             # 条件为假时跳转到else分支
-            self.emit(Opcode.JUMP_IF_FALSE, else_label)
+            self._emit(Opcode.JUMP_IF_FALSE, else_label)
             
             # 条件为真时执行then分支
-            self.emit(Opcode.ENTER_SCOPE)
+            self._emit(Opcode.ENTER_SCOPE)
             self.visit(node.then_branch)
-            self.emit(Opcode.EXIT_SCOPE)
-            self.emit(Opcode.JUMP, endif_label)
+            self._emit(Opcode.EXIT_SCOPE)
+            self._emit(Opcode.JUMP, endif_label)
 
-            self.mark_label(else_label)
-            self.emit(Opcode.ENTER_SCOPE)
+            self._mark_label(else_label)
+            self._emit(Opcode.ENTER_SCOPE)
             self.visit(node.else_branch)
-            self.emit(Opcode.EXIT_SCOPE)
+            self._emit(Opcode.EXIT_SCOPE)
             
         else:
             # 条件为假时跳转到语句结束
-            self.emit(Opcode.JUMP_IF_FALSE, endif_label)
+            self._emit(Opcode.JUMP_IF_FALSE, endif_label)
             
-            self.emit(Opcode.ENTER_SCOPE)
+            self._emit(Opcode.ENTER_SCOPE)
             self.visit(node.then_branch)
-            self.emit(Opcode.EXIT_SCOPE)
+            self._emit(Opcode.EXIT_SCOPE)
             
         # 标记语句结束位置
-        self.mark_label(endif_label)
+        self._mark_label(endif_label)
 
     def visit_WhileNode(self, node: WhileNode):
-        loop_start_label = self.generate_label("while_start")
-        loop_end_label = self.generate_label("while_end")
+        loop_start_label = self._generate_label("while_start")
+        loop_end_label = self._generate_label("while_end")
         
         # 创建循环上下文并推入栈
         loop_context = LoopContext(
@@ -383,24 +383,24 @@ class OpcodeGenerator(VisitorBase):
         )
         self.loop_stack.append(loop_context)
 
-        self.mark_label(loop_start_label)
+        self._mark_label(loop_start_label)
         self.visit(node.condition)
         
         # 条件不满足则跳出循环
-        self.emit(Opcode.JUMP_IF_FALSE, loop_end_label)
+        self._emit(Opcode.JUMP_IF_FALSE, loop_end_label)
 
         self.visit(node.body)
         
-        self.emit(Opcode.JUMP, loop_start_label)
-        self.mark_label(loop_end_label)
+        self._emit(Opcode.JUMP, loop_start_label)
+        self._mark_label(loop_end_label)
         
         # 退出循环时弹出标签栈
         self.loop_stack.pop()
 
     def visit_DoWhileNode(self, node: DoWhileNode):
-        loop_start_label = self.generate_label("do_while_start")
-        loop_end_label = self.generate_label("do_while_end")
-        continue_label = self.generate_label("do_while_continue")
+        loop_start_label = self._generate_label("do_while_start")
+        loop_end_label = self._generate_label("do_while_end")
+        continue_label = self._generate_label("do_while_continue")
 
         loop_context = LoopContext(
             loop_type=LoopType.DO_WHILE,
@@ -409,20 +409,20 @@ class OpcodeGenerator(VisitorBase):
         )
         self.loop_stack.append(loop_context)
 
-        self.mark_label(loop_start_label)
+        self._mark_label(loop_start_label)
         self.visit(node.body)
-        self.mark_label(continue_label)
+        self._mark_label(continue_label)
         self.visit(node.condition)
-        self.emit(Opcode.JUMP_IF_FALSE, loop_end_label)
-        self.emit(Opcode.JUMP, loop_start_label)
-        self.mark_label(loop_end_label)
+        self._emit(Opcode.JUMP_IF_FALSE, loop_end_label)
+        self._emit(Opcode.JUMP, loop_start_label)
+        self._mark_label(loop_end_label)
         
         self.loop_stack.pop()
 
     def visit_ForNode(self, node: ForNode):
-        loop_condition_label = self.generate_label("for_condition")
-        loop_update_label = self.generate_label("for_update")
-        loop_end_label = self.generate_label("for_end")
+        loop_condition_label = self._generate_label("for_condition")
+        loop_update_label = self._generate_label("for_update")
+        loop_end_label = self._generate_label("for_end")
         
         # 创建循环上下文并推入栈
         loop_context = LoopContext(
@@ -437,32 +437,32 @@ class OpcodeGenerator(VisitorBase):
             self.visit(node.init)
             # 如果初始化是表达式语句，需要弹出结果（避免栈积累）
             if not isinstance(node.init, (VarDeclNode, AssignmentNode)):
-                self.emit(Opcode.POP)
+                self._emit(Opcode.POP)
         
         # 条件检查标签
-        self.mark_label(loop_condition_label)
+        self._mark_label(loop_condition_label)
         
         # 检查循环条件
         if node.condition:
             self.visit(node.condition)
-            self.emit(Opcode.JUMP_IF_FALSE, loop_end_label)
+            self._emit(Opcode.JUMP_IF_FALSE, loop_end_label)
         
         self.visit(node.body)
     
-        self.mark_label(loop_update_label)
+        self._mark_label(loop_update_label)
         
         # 更新表达式
         if node.update:
             self.visit(node.update)
             # 如果更新是表达式，需要弹出结果（避免栈积累）
             if not isinstance(node.update, AssignmentNode):
-                self.emit(Opcode.POP)
+                self._emit(Opcode.POP)
         
         # 跳转回条件检查
-        self.emit(Opcode.JUMP, loop_condition_label)
+        self._emit(Opcode.JUMP, loop_condition_label)
         
         # 循环结束标签
-        self.mark_label(loop_end_label)
+        self._mark_label(loop_end_label)
         
         # 退出循环时弹出标签栈
         self.loop_stack.pop()
@@ -472,10 +472,10 @@ class OpcodeGenerator(VisitorBase):
             self.visit(node.value)  # 计算返回值并将其放在栈顶
         else:
             # 如果没有显示的返回值，则返回null
-            const_index = self.add_constant(VBCNull())
-            self.emit(Opcode.LOAD_CONSTANT, const_index)
+            const_index = self._add_constant(VBCNull())
+            self._emit(Opcode.LOAD_CONSTANT, const_index)
         
-        self.emit(Opcode.RETURN)    # 发出返回指令
+        self._emit(Opcode.RETURN)    # 发出返回指令
 
     def visit_ContinueNode(self, node: ContinueNode):
         if not self.loop_stack:
@@ -484,7 +484,7 @@ class OpcodeGenerator(VisitorBase):
         # 获取当前循环上下文并跳转到continue标签
         current_loop = self.loop_stack[-1]
         target_label = current_loop.get_continue_target()
-        self.emit(Opcode.JUMP, target_label)
+        self._emit(Opcode.JUMP, target_label)
 
     def visit_BreakNode(self, node: BreakNode):
         if not self.loop_stack:
@@ -493,7 +493,7 @@ class OpcodeGenerator(VisitorBase):
         # 获取当前循环上下文并跳转到break标签
         current_loop = self.loop_stack[-1]
         target_label = current_loop.get_break_target()
-        self.emit(Opcode.JUMP, target_label)
+        self._emit(Opcode.JUMP, target_label)
 
     def visit_ParamNode(self, node: ParamNode):
         raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
@@ -524,9 +524,9 @@ class OpcodeGenerator(VisitorBase):
 
         # 检查一下编译后的操作码，如果最后没有显式的return，则添加一个return null;
         if not function_op_generator.bytecode or function_op_generator.bytecode[-1][0] != Opcode.RETURN:
-            const_index = function_op_generator.add_constant(VBCNull())
-            function_op_generator.emit(Opcode.LOAD_CONSTANT, const_index)
-            function_op_generator.emit(Opcode.RETURN)
+            const_index = function_op_generator._add_constant(VBCNull())
+            function_op_generator._emit(Opcode.LOAD_CONSTANT, const_index)
+            function_op_generator._emit(Opcode.RETURN)
 
         # 将跳转标签解析为地址
         for i, instruction in enumerate(function_op_generator.bytecode):
@@ -558,9 +558,9 @@ class OpcodeGenerator(VisitorBase):
             lineno_table=function_op_generator.lineno_table
         )
         
-        const_index = self.add_constant(vbc_function)
-        self.emit(Opcode.LOAD_CONSTANT, const_index)
-        self.emit(Opcode.STORE_GLOBAL_VAR, node.name.name)
+        const_index = self._add_constant(vbc_function)
+        self._emit(Opcode.LOAD_CONSTANT, const_index)
+        self._emit(Opcode.STORE_GLOBAL_VAR, node.name.name)
 
     def visit_CallNode(self, node: CallNode):
         if node.kwargs:
@@ -575,7 +575,7 @@ class OpcodeGenerator(VisitorBase):
             self.visit(arg_expr)
         
         num_args = len(node.args)
-        self.emit(Opcode.CALL_FUNCTION, num_args)
+        self._emit(Opcode.CALL_FUNCTION, num_args)
 
     def visit_ClassNode(self, node: ClassNode):
         from verbose_c.compiler.compiler import Compiler
@@ -634,9 +634,9 @@ class OpcodeGenerator(VisitorBase):
 
                 # 检查一下编译后的操作码，如果最后没有显式的return，则添加一个return null;
                 if not method_op_generator.bytecode or method_op_generator.bytecode[-1][0] != Opcode.RETURN:
-                    const_index = method_op_generator.add_constant(VBCNull())
-                    method_op_generator.emit(Opcode.LOAD_CONSTANT, const_index)
-                    method_op_generator.emit(Opcode.RETURN)
+                    const_index = method_op_generator._add_constant(VBCNull())
+                    method_op_generator._emit(Opcode.LOAD_CONSTANT, const_index)
+                    method_op_generator._emit(Opcode.RETURN)
 
                 # 将跳转标签解析为地址
                 for i, instruction in enumerate(method_op_generator.bytecode):
@@ -733,9 +733,9 @@ class OpcodeGenerator(VisitorBase):
         init_op_generator = init_compiler.opcode_generator
 
         if not init_op_generator.bytecode or init_op_generator.bytecode[-1][0] != Opcode.RETURN:
-            const_index = init_op_generator.add_constant(VBCNull())
-            init_op_generator.emit(Opcode.LOAD_CONSTANT, const_index)
-            init_op_generator.emit(Opcode.RETURN)
+            const_index = init_op_generator._add_constant(VBCNull())
+            init_op_generator._emit(Opcode.LOAD_CONSTANT, const_index)
+            init_op_generator._emit(Opcode.RETURN)
 
         for i, instruction in enumerate(init_op_generator.bytecode):
             if len(instruction) == 2:
@@ -761,11 +761,11 @@ class OpcodeGenerator(VisitorBase):
         self.symbol_table = original_table
         
         # 将 VBCClass 对象存入常量池
-        class_index = self.add_constant(vbc_class)
-        self.emit(Opcode.LOAD_CONSTANT, class_index)
+        class_index = self._add_constant(vbc_class)
+        self._emit(Opcode.LOAD_CONSTANT, class_index)
         
         # 将类本身存储在全局变量中
-        self.emit(Opcode.STORE_GLOBAL_VAR, class_name)
+        self._emit(Opcode.STORE_GLOBAL_VAR, class_name)
 
     # def visit_AttributeNode(self, node: AttributeNode):
     #     raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
@@ -786,15 +786,38 @@ class OpcodeGenerator(VisitorBase):
             self.visit(arg_expr)
         
         num_args = len(call_node.args)
-        self.emit(Opcode.NEW_INSTANCE, num_args)
+        self._emit(Opcode.NEW_INSTANCE, num_args)
 
     def visit_GetPropertyNode(self, node: GetPropertyNode):
         self.visit(node.obj)
         
-        property_name = self.add_constant(VBCString(node.property_name.name))
-        self.emit(Opcode.LOAD_CONSTANT, property_name)
+        property_name = self._add_constant(VBCString(node.property_name.name))
+        self._emit(Opcode.LOAD_CONSTANT, property_name)
         
-        self.emit(Opcode.GET_PROPERTY)
+        self._emit(Opcode.GET_PROPERTY)
 
     def visit_SetPropertyNode(self, node: SetPropertyNode):
         raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
+
+    def visit_CastNode(self, node: CastNode):
+        self.visit(node.expression)
+        
+        type_name = node.target_type.type_name.name
+        
+        # TODO 增加自定义数据类型和类的转换
+        RUNTIME_TYPE_MAP = {
+            "void": VBCObjectType.VOID,
+            "char": VBCObjectType.CHAR,
+            "int": VBCObjectType.INT,
+            "long": VBCObjectType.LONG,
+            "long long": VBCObjectType.LONGLONG,
+            "super int": VBCObjectType.NLINT,
+            "float": VBCObjectType.FLOAT,
+            "double": VBCObjectType.DOUBLE,
+            "super float": VBCObjectType.NLFLOAT,
+            "string": VBCObjectType.STRING,
+            "bool": VBCObjectType.BOOL,
+        }
+        
+        target_enum = RUNTIME_TYPE_MAP.get(type_name, VBCObjectType.VOID)
+        self._emit(Opcode.CAST, target_enum)

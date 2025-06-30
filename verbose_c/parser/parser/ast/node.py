@@ -93,6 +93,19 @@ class TypeNode(ASTNode):
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.type_name: NameNode = type_name
     
+class CastNode(ASTNode):
+    """
+    数据类型转换节点
+
+    Args:
+        target_type (TypeNode): 目标类型节点
+        expression (ASTNode): 要转换的表达
+    """
+    def __init__(self, target_type: TypeNode, expression: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.target_type: TypeNode = target_type
+        self.expression: ASTNode = expression
+    
 # 结构和运算
 class RootNode(ASTNode):
     """
