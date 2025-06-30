@@ -10,8 +10,11 @@ class VBCBool(VBCObject):
         super().__init__(VBCObjectType.BOOL)
         self.value: bool = bool(value)
 
+    def __repr__(self):
+        return super().__repr__() + f"(value={self.value})"
+
     def __str__(self):
-        return super().__str__() + f"(value={self.value})"
+        return str(self.value)
 
     def __hash__(self):
         return hash_(self.value)

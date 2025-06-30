@@ -9,15 +9,12 @@ class Type(ABC):
     """
     @abstractmethod
     def __repr__(self) -> str:
-        # 使用 repr 以便调试时能清晰看到类型信息
         pass
 
     def __eq__(self, other):
-        # 默认的相等性判断，子类可以重写以实现更复杂的逻辑（如结构对等）
         return isinstance(other, type(self))
 
     def __hash__(self):
-        # 确保类型对象可以被用在字典的键或集合中
         return hash(repr(self))
 
 class VoidType(Type):

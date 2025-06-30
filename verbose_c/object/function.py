@@ -1,4 +1,5 @@
 
+from typing import Any, Callable
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.object import VBCObject
 
@@ -39,9 +40,11 @@ class VBCBoundMethod(VBCObject):
         self.instance = instance
         self.method = method
 
-    def __repr__(self):
+    def __str__(self):
         return f"<BoundMethod {self.method.name} of {self.instance}>"
-
+    
+    def __repr__(self):
+        return super().__repr__() + f"(instance={self.instance}, method={self.method})"
 class CallFrame:
     """
     调用栈帧，保存函数调用的执行上下文
@@ -56,3 +59,21 @@ class CallFrame:
     def __repr__(self):
         func_name = self.function.name if isinstance(self.function, VBCFunction) else self.function.method.name
         return f"CallFrame(func='{func_name}', return_pc={self.return_pc}, local_vars_count={len(self.local_vars)})"
+
+class VBCNativeFunction(VBCObject):
+    """
+    原生函数
+    """
+    def __init__(self, name: str, py_callable: Callable):
+        super().__init__(VBCObjectType.NATIVE_FUNCTION) # 需要在 enum.py 中添加 NATIVE_FUNCTION
+        self.name = name
+        self.py_callable = py_callable
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self.py_callable(*args, **kwargs)
+
+    def __repr__(self):
+        return super().__repr__() + f"(name={self.name})"
+
+    def __str__(self) -> str:
+        return f"<built-in function {self.name}>"

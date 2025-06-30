@@ -10,7 +10,7 @@ class VBCObject:
             raise TypeError(f"对象类型必须是 {VBCObjectType}")
         self._object_type = object_type
 
-    def __str__(self):
+    def __repr__(self):
         return f"{self._object_type}"
 
     def __eq__(self, value):
@@ -22,6 +22,6 @@ class VBCObject:
     def __bool__(self):
         return True
 
-    def __repr__(self):
+    def __str__(self):
         return f"<VBCObject at {id(self):#x}>"
 

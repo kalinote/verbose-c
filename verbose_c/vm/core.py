@@ -6,8 +6,9 @@ from verbose_c.object.instance import VBCInstance
 from verbose_c.object.object import VBCObject
 from verbose_c.object.t_string import VBCString
 from verbose_c.utils.stack import Stack
-from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame
+from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame, VBCNativeFunction
 from verbose_c.object.t_bool import VBCBool
+from verbose_c.vm.builtins_functions import BUILTIN_FUNCTIONS
 
 # 全局的指令处理器映射
 _vm_handlers = {}
@@ -40,6 +41,12 @@ class VBCVirtualMachine:
         self._constants: list = []
         self._current_function: VBCFunction | None = None # 当前正在执行的函数
 
+        self._register_builtins()
+    
+    def _register_builtins(self):
+        """注册所有内置函数到全局变量中"""
+        for name, py_func in BUILTIN_FUNCTIONS.items():
+            self._global_variables[name] = VBCNativeFunction(name, py_func)
     
     def _fetch_instruction(self) -> Instruction:
         """
@@ -151,7 +158,7 @@ class VBCVirtualMachine:
 
             if self._debug_log_collector is not None:
                 # 记录执行日志
-                stack_str = " -> ".join(str(item) for item in self._stack._items)
+                stack_str = " -> ".join(repr(item) for item in self._stack._items)
                 log_entry = f"PC: {self._pc:04d} | OP: {instruction[0].name:<15}"
                 if len(instruction) > 1:
                     log_entry += f" {instruction[1]:<5}"
@@ -417,6 +424,17 @@ class VBCVirtualMachine:
             self._local_variables = [None] * callable_obj.local_count
             for i, arg in enumerate(args):
                 self._local_variables[i] = arg
+            
+            # 将PC设置为-1，因为循环会自动+1，从而从0开始执行新函数
+            self._pc = -1
+
+        elif isinstance(callable_obj, VBCNativeFunction):
+            args = [self._stack.pop() for _ in range(num_args)]
+            args.reverse()
+            self._stack.pop() # 弹出内置函数对象
+
+            result = callable_obj(*args)
+            self._stack.push(result)
 
         elif isinstance(callable_obj, VBCBoundMethod):
             method = callable_obj.method
@@ -447,12 +465,12 @@ class VBCVirtualMachine:
             self._local_variables[0] = instance
             for i, arg in enumerate(args):
                 self._local_variables[i + 1] = arg
+            
+            # 将PC设置为-1，因为循环会自动+1，从而从0开始执行新函数
+            self._pc = -1
         
         else:
             raise RuntimeError(f"调用的对象不是一个函数或方法: {type(callable_obj)}")
-
-        # 将PC设置为-1，因为循环会自动+1，从而从0开始执行新函数
-        self._pc = -1
 
     @register_instruction(Opcode.LOAD_FUNCTION)
     def __handle_load_function(self):

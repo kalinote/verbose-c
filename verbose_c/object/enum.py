@@ -21,6 +21,7 @@ class VBCObjectType(Enum):
     MODULE = auto()
     STRING = auto()
     FUNCTION = auto()
+    NATIVE_FUNCTION = auto()
     INSTANCE = auto()
     RANGE = auto()
 

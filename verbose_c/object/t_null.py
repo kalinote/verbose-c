@@ -8,8 +8,11 @@ class VBCNull(VBCObject):
     def __init__(self):
         super().__init__(VBCObjectType.NULL)
     
+    def __repr__(self):
+        return super().__repr__() + f"(value=null)"
+    
     def __str__(self):
-        return super().__str__() + f"(value=null)"
+        return "null"
     
     def __hash__(self):
         return hash_(None)

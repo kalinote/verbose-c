@@ -1,5 +1,29 @@
-// --- 运行时错误测试 ---
+/* 内置函数测试 */
+class BuiltinFunctionTest {
+    string v;
 
+    void __init__(string v) {
+        this.v = v;
+    }
+
+    void print(string s) {
+        builtin_print(s);
+    }
+
+    void println(string s) {
+        builtin_println(s);
+    }
+
+    string input(string prompt) {
+        return builtin_input(prompt);
+    }
+
+    void print_v() {
+        this.println(this.v);
+    }
+}
+
+/* 运行时错误测试 */
 double cause_error(int divisor) {
     int x = 100;
     // 除零错误测试
@@ -11,4 +35,10 @@ void level_one() {
     cause_error(0);
 }
 
-level_one();
+BuiltinFunctionTest bft = new BuiltinFunctionTest("构造函数定义字符串");
+bft.println("hello\n\tworld!");
+
+string name = bft.input("你是：");
+bft.print("你好：");
+bft.println(name);
+bft.print_v();

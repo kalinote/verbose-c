@@ -437,6 +437,10 @@ class TypeChecker(VisitorBase):
             if "__init__" not in class_type.methods:
                 default_init_type = FunctionType(param_types=[], return_type=VoidType())
                 class_type.methods["__init__"] = default_init_type
+                # 为默认构造函数创建符号和作用域
+                init_symbol = self.symbol_table.add_symbol("__init__", default_init_type, kind=SymbolKind.FUNCTION)
+                init_symbol.scope = SymbolTable(scope_type=ScopeType.FUNCTION, parent=self.symbol_table)
+                init_symbol.scope.add_symbol('this', class_type, kind=SymbolKind.VARIABLE)
 
 
         for member in node.body.statements:

@@ -112,7 +112,7 @@ def compile_source_file(
         # 执行字节码
         vm_debug_logs = []
         if execute:
-            print("\n执行字节码...")
+            print("\n执行字节码...\n")
             from verbose_c.vm.core import VBCVirtualMachine
             log_collector = vm_debug_logs if debug_vm and log else None
             
@@ -122,7 +122,7 @@ def compile_source_file(
                 constants=compilation_result.constant_pool,
                 source_path=filename
             )
-            print("程序执行完成")
+            print("\n\n程序执行完成")
 
         # 写入日志文件
         if log:
@@ -161,7 +161,7 @@ def compile_source_file(
                 if const or out_all:
                     f.write(f"\n=== 常量池 ===\n")
                     for i, constant in enumerate(compilation_result.constant_pool):
-                        f.write(f"{i:4d}: {constant}\n")
+                        f.write(f"{i:4d}: {repr(constant)}\n")
                 
                 if label or out_all:
                     f.write(f"\n=== 标签 ===\n")
@@ -182,7 +182,7 @@ def compile_source_file(
                         if result.get('constants'):
                             f.write("  常量池:\n")
                             for i, constant in enumerate(result['constants']):
-                                f.write(f"    {i:4d}: {constant}\n")
+                                f.write(f"    {i:4d}: {repr(constant)}\n")
                         if result.get('labels'):
                             f.write("  标签:\n")
                             for label, pos in result['labels'].items():

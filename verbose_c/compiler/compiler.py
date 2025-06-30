@@ -1,8 +1,9 @@
 from verbose_c.compiler.enum import CompilerPass, ScopeType
 from verbose_c.compiler.opcode_generator_visitor import OpcodeGenerator
-from verbose_c.compiler.symbol import SymbolTable
+from verbose_c.compiler.symbol import SymbolTable, SymbolKind
 from verbose_c.compiler.type_checker_visitor import TypeChecker
 from verbose_c.parser.parser.ast.node import ASTNode
+from verbose_c.vm.builtins_functions import BUILTIN_FUNCTION_SIGNATURES
 
 
 class Compiler:
@@ -19,6 +20,10 @@ class Compiler:
         # 符号表
         self._symbol_table = symbol_table or SymbolTable(scope_type=self._scope_type)
         
+        # 加载内置函数
+        if self._scope_type == ScopeType.GLOBAL:
+            self._populate_builtins()
+
         # 类型检查
         self._type_checker = TypeChecker(self._symbol_table, source_path=self._source_path)
         # 操作码生成器
@@ -27,6 +32,10 @@ class Compiler:
         self._bytecode = []
         self._constant_pool = []
         self._errors = []
+
+    def _populate_builtins(self):
+        for name, signature in BUILTIN_FUNCTION_SIGNATURES.items():
+            self._symbol_table.add_symbol(name, signature, SymbolKind.FUNCTION)
 
     @property
     def bytecode(self):

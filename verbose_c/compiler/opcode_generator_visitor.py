@@ -154,7 +154,9 @@ class OpcodeGenerator(VisitorBase):
         self.emit(Opcode.LOAD_CONSTANT, const_index)
     
     def visit_StringNode(self, node: StringNode):
-        vbc_str = VBCString(node.value)
+        # 去掉首尾的引号，得到原始内容
+        raw_content = node.value[1:-1]
+        vbc_str = VBCString(raw_content)
         const_index = self.add_constant(vbc_str)
         self.emit(Opcode.LOAD_CONSTANT, const_index)
     
