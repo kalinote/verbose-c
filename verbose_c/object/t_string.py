@@ -86,3 +86,6 @@ class VBCString(VBCObject):
 
     def __pos__(self):
         return self
+
+    def __len__(self):
+        return len(self.value)

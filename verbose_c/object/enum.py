@@ -4,27 +4,25 @@ class VBCObjectType(Enum):
     """
     类与对象类型
     """
-    CUSTOM = auto()
-    VOID = auto()
-    CLASS = auto()
-    CHAR = auto()
-    SHORT = auto()
-    INT = auto()
-    LONG = auto()
-    LONGLONG = auto()
-    NLINT = auto()
-    FLOAT = auto()
-    DOUBLE = auto()
-    NLFLOAT = auto()
-    BOOL = auto()
-    NULL = auto()
-    LIST = auto()
-    MAP = auto()
-    MODULE = auto()
-    STRING = auto()
-    FUNCTION = auto()
-    NATIVE_FUNCTION = auto()
-    INSTANCE = auto()
-    RANGE = auto()
-
-    
+    CUSTOM = "custom"
+    VOID = "void"
+    CLASS = "class"
+    CHAR = "char"
+    SHORT = "short"
+    INT = "int"
+    LONG = "long"
+    LONGLONG = "long long"
+    NLINT = "super long"
+    FLOAT = "float"
+    DOUBLE = "double"
+    NLFLOAT = "super double"
+    BOOL = "bool"
+    NULL = "null"
+    LIST = "list"
+    MAP = "map"
+    MODULE = "module"
+    STRING = "string"
+    FUNCTION = "function"
+    NATIVE_FUNCTION = "native_function"
+    INSTANCE = "instance"
+    RANGE = "range"
