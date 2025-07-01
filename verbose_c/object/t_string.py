@@ -59,8 +59,6 @@ class VBCString(VBCObject):
 
     def __add__(self, other):
         if isinstance(other, VBCString):
-            # 直接用 self.value (已经是干净的) 来构造新的 VBCString
-            # 新的 VBCString 的 __init__ 会再次调用 _unescape，但对一个干净的字符串调用是安全的
             return VBCString(self.value + other.value)
 
         raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "+" 运算符')

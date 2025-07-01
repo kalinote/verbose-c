@@ -20,6 +20,11 @@ class VBCClass(VBCObject):
     def __str__(self):
         return f"<Class {self._name}>"
 
+    def _gc_walk(self):
+        yield from self._super_class
+        yield from self._methods.values()
+        yield from self._fields.values()
+
     def create_instance(self) -> VBCInstance:
         """
         实例化类

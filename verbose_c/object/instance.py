@@ -20,6 +20,10 @@ class VBCInstance(VBCObject):
     def __repr__(self):
         return super().__repr__() + f"(instance of {self.class_._name})"
 
+    def _gc_walk(self):
+        yield self.class_
+        yield from self.fields.values()
+
     def get_attribute(self, name: str) -> 'VBCObject | None':
         """
         获取实例属性

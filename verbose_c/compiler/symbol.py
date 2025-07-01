@@ -42,10 +42,21 @@ class SymbolTable:
         self._symbols: dict[str, Symbol] = {}
         self._parent: 'SymbolTable' | None = parent
         self._next_local_address: int = 0 # 用于分配局部变量的栈帧索引
+        self._nested_scopes: list['SymbolTable'] = [] # 新增：存储直接嵌套的子作用域
 
         if parent:
             # 继承父作用域的地址计数器，确保地址连续分配
             self._next_local_address = parent._next_local_address
+
+    def add_nested_scope(self, scope: 'SymbolTable'):
+        """添加一个嵌套的子作用域"""
+        self._nested_scopes.append(scope)
+
+    def get_nested_scope(self, index: int):
+        return self._nested_scopes[index] if index < self.get_nested_scope_length() else None
+    
+    def get_nested_scope_length(self):
+        return len(self._nested_scopes)
 
     def add_symbol(self, name: str, type_: Type, kind: SymbolKind = SymbolKind.VARIABLE) -> Symbol:
         """

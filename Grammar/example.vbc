@@ -1,2 +1,58 @@
-string s = "hello world!";
-builtin_println(len(s));
+// 全局变量
+int global_var = 100;
+
+// 测试函数
+void test_scopes() {
+    builtin_println("--- 开始测试作用域 ---");
+
+    // 1. 独立的块作用域
+    {
+        int block_var = 10;
+        builtin_println(global_var + block_var); // 应该输出 110
+    }
+
+    // 2. if-else 作用域
+    if (true) {
+        int if_var = 20;
+        builtin_println(global_var + if_var); // 应该输出 120
+    } else {
+        int else_var = 30; // 这段代码不应执行
+        builtin_println(global_var + else_var);
+    }
+
+    // 3. while 循环作用域
+    int i = 0;
+    while (i < 2) {
+        int while_var = i + 40;
+        builtin_println(global_var + while_var); // 应该输出 140, 141
+        i = i + 1;
+    }
+
+    // 4. do-while 循环作用域
+    int j = 0;
+    do {
+        int do_while_var = j + 50;
+        builtin_println(global_var + do_while_var); // 应该输出 150
+        j = j + 1;
+    } while (j < 1);
+
+    // 5. for 循环作用域
+    for (int k = 0; k < 2; k = k + 1) {
+        int for_body_var = k + 60;
+        // 嵌套 if
+        if (k == 0) {
+            int nested_if_var = 70;
+            builtin_println(global_var + for_body_var + nested_if_var); // 应该输出 230
+        } else {
+            builtin_println(global_var + for_body_var); // 应该输出 161
+        }
+    }
+
+    builtin_println("--- 作用域测试结束 ---");
+}
+
+void main() {
+    test_scopes();
+}
+
+main();

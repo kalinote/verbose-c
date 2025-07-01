@@ -9,6 +9,7 @@ class VBCObject:
         if not isinstance(object_type, VBCObjectType):
             raise TypeError(f"对象类型必须是 {VBCObjectType}")
         self._object_type = object_type
+        self._gc_marked = False
 
     def __repr__(self):
         return f"{self._object_type}"

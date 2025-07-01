@@ -290,6 +290,7 @@ class TypeChecker(VisitorBase):
     def visit_BlockNode(self, node: BlockNode) -> Type:
         original_table = self.symbol_table
         block_table = SymbolTable(scope_type=ScopeType.BLOCK, parent=original_table)
+        original_table.add_nested_scope(block_table)
         self.symbol_table = block_table
 
         for statement in node.statements:
@@ -340,6 +341,7 @@ class TypeChecker(VisitorBase):
     def visit_ForNode(self, node: ForNode) -> Type:
         original_table = self.symbol_table
         for_table = SymbolTable(scope_type=ScopeType.BLOCK, parent=original_table)
+        original_table.add_nested_scope(for_table)
         self.symbol_table = for_table
 
         if node.init:
@@ -394,9 +396,8 @@ class TypeChecker(VisitorBase):
         original_return_type = self.current_function_return_type
         self.current_function_return_type = return_type
 
-        # 手动处理函数体顶层块，避免 visit_BlockNode 创建不必要的额外作用域
-        for statement in node.body.statements:
-            self.visit(statement)
+        # 直接访问函数体 BlockNode，利用 visit_BlockNode 的逻辑来创建和链接作用域
+        self.visit(node.body)
 
         self.current_function_return_type = original_return_type
         self.symbol_table = original_table
@@ -488,8 +489,12 @@ class TypeChecker(VisitorBase):
                 class_type.methods["__init__"] = default_init_type
                 # 为默认构造函数创建符号和作用域
                 init_symbol = self.symbol_table.add_symbol("__init__", default_init_type, kind=SymbolKind.FUNCTION)
-                init_symbol.scope = SymbolTable(scope_type=ScopeType.FUNCTION, parent=self.symbol_table)
-                init_symbol.scope.add_symbol('this', class_type, kind=SymbolKind.VARIABLE)
+                func_table = SymbolTable(scope_type=ScopeType.FUNCTION, parent=self.symbol_table)
+                init_symbol.scope = func_table
+                func_table.add_symbol('this', class_type, kind=SymbolKind.VARIABLE)
+                # 为空的 body 创建一个空的 block scope，以保持与用户定义函数的一致性
+                empty_block_scope = SymbolTable(scope_type=ScopeType.BLOCK, parent=func_table)
+                func_table.add_nested_scope(empty_block_scope)
 
 
         for member in node.body.statements:
@@ -518,9 +523,8 @@ class TypeChecker(VisitorBase):
                 original_return_type = self.current_function_return_type
                 self.current_function_return_type = method_type.return_type
 
-                # 手动处理方法体顶层块，避免 visit_BlockNode 创建不必要的额外作用域
-                for statement in member.body.statements:
-                    self.visit(statement)
+                # 直接访问方法体 BlockNode，利用 visit_BlockNode 的逻辑来创建和链接作用域
+                self.visit(member.body)
 
                 self.current_function_return_type = original_return_type
                 self.symbol_table = original_method_scope_parent_table

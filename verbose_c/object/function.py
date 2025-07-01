@@ -25,6 +25,9 @@ class VBCFunction(VBCObject):
     def __str__(self):
         return super().__str__() + f"(name={self.name})"
 
+    def _gc_walk(self):
+        yield from self.constants
+
 class VBCBoundMethod(VBCObject):
     """
     绑定方法对象，将一个实例和该实例的一个方法绑定在一起。
@@ -45,6 +48,11 @@ class VBCBoundMethod(VBCObject):
     
     def __repr__(self):
         return super().__repr__() + f"(instance={self.instance}, method={self.method})"
+    
+    def _gc_walk(self):
+        yield self.instance
+        yield self.method
+    
 class CallFrame:
     """
     调用栈帧，保存函数调用的执行上下文

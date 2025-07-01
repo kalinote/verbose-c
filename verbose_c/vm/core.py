@@ -11,6 +11,7 @@ from verbose_c.object.t_string import VBCString
 from verbose_c.utils.stack import Stack
 from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame, VBCNativeFunction
 from verbose_c.object.t_bool import VBCBool
+from verbose_c.vm.gc import GarbageCollector
 from verbose_c.vm.builtins_functions import BUILTIN_FUNCTIONS
 
 # 全局的指令处理器映射
@@ -44,12 +45,20 @@ class VBCVirtualMachine:
         self._constants: list = []
         self._current_function: VBCFunction | None = None # 当前正在执行的函数
 
+        self.gc = GarbageCollector(self)
+
         self._register_builtins()
     
+    def _allocate(self, obj):
+        """将对象注册到GC，然后返回该对象。"""
+        if isinstance(obj, VBCObject):
+            self.gc.allocate(obj)
+        return obj
+
     def _register_builtins(self):
         """注册所有内置函数到全局变量中"""
         for name, py_func in BUILTIN_FUNCTIONS.items():
-            self._global_variables[name] = VBCNativeFunction(name, py_func)
+            self._global_variables[name] = self._allocate(VBCNativeFunction(name, py_func))
     
     def _fetch_instruction(self) -> Instruction:
         """
@@ -135,7 +144,37 @@ class VBCVirtualMachine:
         full_message = f"{error_type_name}: {error_message}"
 
         return VBCRuntimeError(full_message, traceback_frames)
+
+    def get_roots(self) -> list:
+        """
+        收集并返回所有根对象，供GC进行标记。
+        """
+        roots = []
         
+        # 1. 全局变量
+        roots.extend(self._global_variables.values())
+        
+        # 2. 当前常量池
+        roots.extend(self._constants)
+        
+        # 3. 操作数栈
+        roots.extend(self._stack._items)
+        
+        # 4. 当前局部变量
+        roots.extend(self._local_variables)
+        
+        # 5. 当前正在执行的函数
+        if self._current_function:
+            roots.append(self._current_function)
+            
+        # 6. 调用栈中的所有帧
+        for frame in self._call_stack:
+            roots.append(frame.function)
+            roots.extend(frame.local_vars)
+            roots.extend(frame.constants)
+            
+        return roots
+
     def excute(self, bytecode, constants, source_path: str | None = None):
         """
         虚拟机指令执行循环
@@ -516,7 +555,7 @@ class VBCVirtualMachine:
         
         # 规则 2: 转换为字符串类型
         elif target_type_enum == VBCObjectType.STRING:
-            new_obj = VBCString(str(source_obj))
+            new_obj = self._allocate(VBCString(str(source_obj)))
 
         # 规则 3: 转换为布尔类型
         elif target_type_enum == VBCObjectType.BOOL:
@@ -559,7 +598,7 @@ class VBCVirtualMachine:
 
         # 如果获取到的是一个方法，则创建一个绑定方法对象
         if isinstance(attribute, VBCFunction):
-            bound_method = VBCBoundMethod(instance_obj, attribute)
+            bound_method = self._allocate(VBCBoundMethod(instance_obj, attribute))
             self._stack.push(bound_method)
         else:
             self._stack.push(attribute)
@@ -594,7 +633,7 @@ class VBCVirtualMachine:
         if not isinstance(class_obj, VBCClass):
             raise TypeError(f"new 操作的目标不是一个类: {type(class_obj).__name__}")
 
-        instance = class_obj.create_instance()
+        instance = self._allocate(class_obj.create_instance())
         init_method = class_obj.lookup_method("__init__")
         
         args = [self._stack.pop() for _ in range(num_args)]

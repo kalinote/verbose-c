@@ -57,6 +57,7 @@ class OpcodeGenerator(VisitorBase):
         self.next_label_id = 0
         self.loop_stack: list[LoopContext] = []  # 循环标签栈，后续支持嵌套循环和多层跳出
         self.function_compilation_results = {} # 存储函数编译结果
+        self._nested_scope_indices: dict[SymbolTable, int] = {} # 跟踪每个父作用域下嵌套作用域的访问索引
 
     def visit(self, node: ASTNode):
         self.current_line = node.start_line
@@ -276,14 +277,20 @@ class OpcodeGenerator(VisitorBase):
 
     def visit_BlockNode(self, node: BlockNode):
         original_symbol_table = self.symbol_table
-        block_symbol_table = SymbolTable(scope_type=ScopeType.BLOCK, parent=original_symbol_table)
-        block_symbol_table._next_local_address = original_symbol_table._next_local_address
+
+        current_index = self._nested_scope_indices.get(original_symbol_table, 0)
+
+        if current_index >= original_symbol_table.get_nested_scope_length():
+            raise RuntimeError(f"内部错误: OpcodeGenerator在BlockNode中找不到对应的嵌套作用域。父作用域: {original_symbol_table._scope_type}, 当前索引: {current_index}, 可用作用域数量: {len(original_symbol_table._nested_scopes)}")
+
+        block_symbol_table = original_symbol_table.get_nested_scope(current_index)
         self.symbol_table = block_symbol_table
-        
+
+        self._nested_scope_indices[original_symbol_table] = current_index + 1
+
         for statement in node.statements:
             self.visit(statement)
-        
-        original_symbol_table._next_local_address = self.symbol_table._next_local_address
+
         self.symbol_table = original_symbol_table
 
     def visit_VarDeclNode(self, node: VarDeclNode):
@@ -420,6 +427,19 @@ class OpcodeGenerator(VisitorBase):
         self.loop_stack.pop()
 
     def visit_ForNode(self, node: ForNode):
+        # --- 作用域切换逻辑 ---
+        original_symbol_table = self.symbol_table
+        
+        # 获取 for 循环对应的作用域
+        current_index = self._nested_scope_indices.get(original_symbol_table, 0)
+        if current_index >= len(original_symbol_table._nested_scopes):
+            raise RuntimeError(f"内部错误: OpcodeGenerator在ForNode中找不到对应的嵌套作用域。")
+        
+        for_table = original_symbol_table._nested_scopes[current_index]
+        self.symbol_table = for_table
+        self._nested_scope_indices[original_symbol_table] = current_index + 1
+        # --- 作用域切换逻辑结束 ---
+
         loop_condition_label = self._generate_label("for_condition")
         loop_update_label = self._generate_label("for_update")
         loop_end_label = self._generate_label("for_end")
@@ -466,6 +486,9 @@ class OpcodeGenerator(VisitorBase):
         
         # 退出循环时弹出标签栈
         self.loop_stack.pop()
+
+        # --- 恢复作用域 ---
+        self.symbol_table = original_symbol_table
 
     def visit_ReturnNode(self, node: ReturnNode):
         if node.value:
