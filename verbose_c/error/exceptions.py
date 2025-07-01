@@ -9,7 +9,7 @@ class TracebackFrame:
     filepath: str
     line: int
     scope_name: str
-    source_line: str | None = None # 可选，用于显示出错行的源码
+    source_line_context: list[str] | None = None
 
 class VBCError(Exception):
     """所有 VBC 解释器错误的基类"""

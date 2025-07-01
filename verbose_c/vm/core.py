@@ -114,7 +114,8 @@ class VBCVirtualMachine:
                 TracebackFrame(
                     filepath=self._current_function.source_path or "<unknown>",
                     line=line,
-                    scope_name=self._current_function.name
+                    scope_name=self._current_function.name,
+                    source_line_context=["TODO: 在这里填充源代码上下文"]
                 )
             )
 
@@ -131,7 +132,8 @@ class VBCVirtualMachine:
                     TracebackFrame(
                         filepath=func.source_path or "<unknown>",
                         line=line,
-                        scope_name=func.name
+                        scope_name=func.name,
+                        source_line_context=["TODO: 在这里填充源代码上下文"]
                     )
                 )
         
@@ -175,7 +177,7 @@ class VBCVirtualMachine:
             
         return roots
 
-    def excute(self, bytecode, constants, source_path: str | None = None):
+    def excute(self, bytecode, constants, source_path: str | None = None, lineno_table: list[tuple[int, int]] | None = None):
         """
         虚拟机指令执行循环
         """
@@ -186,11 +188,11 @@ class VBCVirtualMachine:
 
         # 为顶层模块创建一个伪函数对象，作为调用栈的根
         module_func = VBCFunction(
-            name="<module>",
+            name="<module:entry>",
             bytecode=bytecode,
             constants=constants,
             source_path=source_path,
-            # TODO: 顶层模块也应该有行号表
+            lineno_table=lineno_table
         )
         self._current_function = module_func
         

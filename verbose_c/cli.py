@@ -71,8 +71,10 @@ def format_runtime_error(error: VBCRuntimeError):
     """
     print("错误栈跟踪:")
     for frame in error.traceback:
-        print(f'  在文件 "{frame.filepath}" 中, 第 {frame.line} 行, {frame.scope_name} 中')
-        # TODO: 增加打印源码行的功能
+        print(f'  在文件 "{frame.filepath}" 中, 第 {frame.line} 行, {frame.scope_name} 中:')
+        for source in frame.source_line_context:
+            print(f"    {source}")
+        # TODO: 增加打印源码行和箭头的功能
     print(error.message)
 
 
@@ -120,7 +122,8 @@ def compile_source_file(
             vm.excute(
                 bytecode=compilation_result.bytecode, 
                 constants=compilation_result.constant_pool,
-                source_path=filename
+                source_path=filename,
+                lineno_table=compilation_result.lineno_table,
             )
             print("\n\n程序执行完成")
 

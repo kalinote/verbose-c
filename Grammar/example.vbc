@@ -3,6 +3,7 @@ int global_var = 100;
 
 // 测试函数
 void test_scopes() {
+    int a = (int)(20 / 0);
     builtin_println("--- 开始测试作用域 ---");
 
     // 1. 独立的块作用域

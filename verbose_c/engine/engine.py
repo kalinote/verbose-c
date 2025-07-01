@@ -27,6 +27,7 @@ class CompilerOutput:
     tokens: list[Token] | None = None
     ast_node: ASTNode | None = None
     processed_code: str | None = None
+    lineno_table: list[tuple[int, int]] | None = None
 
 
 def generate_parser(grammar_path: str, output_path: str, log_path: str | None = None):
@@ -153,5 +154,6 @@ def compile_module(
         labels=opcode_gen.labels,
         tokens=tokenizer.tokens if need_tokens else None,
         ast_node=ast_node if need_ast else None,
-        processed_code=processed_code if need_processed_code else None
+        processed_code=processed_code if need_processed_code else None,
+        lineno_table=opcode_gen.lineno_table
     )
