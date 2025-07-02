@@ -567,6 +567,22 @@ class TypeChecker(VisitorBase):
         return VoidType()
 
     def visit_GetPropertyNode(self, node: GetPropertyNode) -> Type:
+        # 检查super节点的获取属性
+        if isinstance(node.obj, SuperNode):
+            super_class_type = self.visit(node.obj)
+            if not isinstance(super_class_type, ClassType):
+                return ErrorType()
+
+            prop_name = node.property_name.name
+            if prop_name in super_class_type.methods:
+                return super_class_type.methods[prop_name]
+            
+            if prop_name in super_class_type.fields:
+                return super_class_type.fields[prop_name]
+
+            self.errors.append(f"属性错误: 父类 '{super_class_type.name}' 没有名为 '{prop_name}' 的属性, 在 {node.start_line} 行")
+            return ErrorType()
+        
         obj_type = self.visit(node.obj)
         if not isinstance(obj_type, ClassType):
             self.errors.append(f"类型错误: 只有类的实例才能访问属性, 而不是 '{obj_type}', 在 {node.start_line} 行")
@@ -621,3 +637,18 @@ class TypeChecker(VisitorBase):
             return ErrorType()
         
         return target_type
+
+    def visit_SuperNode(self, node: SuperNode) -> Type:
+        if self.current_class_type is None:
+            self.errors.append(f"语法错误: 'super' 只能在类的方法内部使用, 在 {node.start_line} 行")
+            return ErrorType()
+
+        if not self.current_class_type.super_class:
+            self.errors.append(f"类型错误: 类 '{self.current_class_type.name}' 没有父类，无法使用 'super', 在 {node.start_line} 行")
+            return ErrorType()
+
+        super_class_type = self.current_class_type.super_class[0]
+        
+        setattr(node, 'type_', super_class_type)
+        return super_class_type
+    

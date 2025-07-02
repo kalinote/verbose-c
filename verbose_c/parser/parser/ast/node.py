@@ -436,3 +436,10 @@ class SetPropertyNode(ASTNode):
         self.obj: ASTNode = obj
         self.property_name: NameNode = property_name
         self.value: ASTNode = value
+
+class SuperNode(ASTNode):
+    """
+    super 关键字的节点。
+    """
+    def __init__(self, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)

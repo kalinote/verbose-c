@@ -154,6 +154,6 @@ def compile_module(
         labels=opcode_gen.labels,
         tokens=tokenizer.tokens if need_tokens else None,
         ast_node=ast_node if need_ast else None,
-        processed_code=processed_code if need_processed_code else None,
+        processed_code=processed_code if need_processed_code else source_code,
         lineno_table=opcode_gen.lineno_table
     )

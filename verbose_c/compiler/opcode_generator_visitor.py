@@ -839,6 +839,16 @@ class OpcodeGenerator(VisitorBase):
         self._emit(Opcode.NEW_INSTANCE, num_args)
 
     def visit_GetPropertyNode(self, node: GetPropertyNode):
+        # 单独处理super
+        if isinstance(node.obj, SuperNode):
+            self.visit(node.obj)
+            
+            property_name = self._add_constant(VBCString(node.property_name.name))
+            self._emit(Opcode.LOAD_CONSTANT, property_name)
+            
+            self._emit(Opcode.SUPER_GET)
+            return
+        
         self.visit(node.obj)
         
         property_name = self._add_constant(VBCString(node.property_name.name))
@@ -871,3 +881,31 @@ class OpcodeGenerator(VisitorBase):
         
         target_enum = RUNTIME_TYPE_MAP.get(type_name, VBCObjectType.VOID)
         self._emit(Opcode.CAST, target_enum)
+
+    def visit_SuperNode(self, node: SuperNode):
+        this_symbol = self.symbol_table.lookup('this')
+        if this_symbol is None or this_symbol.address != 0:
+            raise RuntimeError("内部错误: 在处理 'super' 时无法找到 'this' 实例")
+        self._emit(Opcode.LOAD_LOCAL_VAR, 0)
+
+        class_scope = self.symbol_table
+        while class_scope is not None and class_scope._scope_type != ScopeType.CLASS:
+            class_scope = class_scope._parent
+        
+        if class_scope is None:
+            raise RuntimeError("内部错误: 在处理 'super' 时无法找到类作用域")
+
+        class_symbol_scope = class_scope._parent
+        if class_symbol_scope is None:
+            raise RuntimeError("内部错误: 类作用域没有父作用域")
+
+        class_name = None
+        for sym in class_symbol_scope._symbols.values():
+            if sym.scope is class_scope:
+                class_name = sym.name
+                break
+        
+        if class_name is None:
+            raise RuntimeError("内部错误: 无法反向解析当前类的名称")
+
+        self._emit(Opcode.LOAD_GLOBAL_VAR, class_name)

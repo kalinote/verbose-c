@@ -97,6 +97,7 @@ func_call_param[list[ASTNode]]: head=expr tail=(',' expr)* { [head] + [t[1] for 
 atom:
     | b=('true' | 'false') { BoolNode(b.string, LOCATIONS) }
     | 'null' { NullNode(LOCATIONS) }
+    | 'super' { SuperNode(LOCATIONS) }
     | NAME { NameNode(name.string, LOCATIONS) }
     | NUMBER { NumberNode(number.string, LOCATIONS) }
     | STRING { StringNode(string.string, LOCATIONS) }

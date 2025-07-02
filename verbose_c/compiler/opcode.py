@@ -59,6 +59,7 @@ class Opcode(Enum):
     GET_PROPERTY        = 0x90  # 获取对象属性
     SET_PROPERTY        = 0x91  # 设置对象属性
     NEW_INSTANCE        = 0x92  # 创建新实例
+    SUPER_GET           = 0x93  # super属性调用
     
     # === 扩展指令类 (0xA0-0xFF) ===
     NOP                 = 0xA0  # 空操作

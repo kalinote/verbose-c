@@ -684,6 +684,47 @@ class VBCVirtualMachine:
 
         self._pc = -1
 
+    @register_instruction(Opcode.SUPER_GET)
+    def __handle_super_get(self):
+        """
+        处理 super.method() 调用。
+        从栈上获取 this 实例、当前类和属性名，
+        然后从当前类的父类开始查找方法。
+        """
+        property_name_obj = self._stack.pop()
+        current_class = self._stack.pop()
+        instance_obj = self._stack.pop()
+
+        if not isinstance(property_name_obj, VBCString):
+            raise TypeError(f"SUPER_GET 指令: 属性名期望 {type(VBCString)} 得到 {type(property_name_obj).__name__}")
+        
+        if not isinstance(current_class, VBCClass):
+            raise TypeError(f"SUPER_GET 指令: 当前类期望 {type(VBCClass)} 得到 {type(current_class).__name__}")
+
+        if not isinstance(instance_obj, VBCInstance):
+            raise TypeError(f"SUPER_GET 指令: 实例期望 {type(VBCInstance)} 得到 {type(instance_obj).__name__}")
+
+        property_name = property_name_obj.value
+
+        # 检查当前类是否有父类
+        if not current_class._super_class:
+            raise AttributeError(f"类 '{current_class._name}' 没有父类，无法执行 super 调用")
+
+        # 从父类开始查找方法 (目前只支持单继承)
+        super_class = current_class._super_class[0]
+        method = super_class.lookup_method(property_name)
+
+        if method is None:
+            raise AttributeError(f"父类 '{super_class._name}' 中没有名为 '{property_name}' 的方法")
+
+        # 如果获取到的是一个方法，则创建一个绑定方法对象
+        if isinstance(method, VBCFunction):
+            bound_method = self._allocate(VBCBoundMethod(instance_obj, method))
+            self._stack.push(bound_method)
+        else:
+            # super 理论上只能用于调用方法，但为了健壮性，我们也可以处理字段访问
+            self._stack.push(method)
+
     ## 扩展指令类
     @register_instruction(Opcode.NOP)
     def __handle_nop(self):
