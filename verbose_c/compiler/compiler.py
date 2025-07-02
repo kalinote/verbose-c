@@ -1,9 +1,12 @@
 from verbose_c.compiler.enum import CompilerPass, ScopeType
+from verbose_c.compiler.enum import CompilerPass, ScopeType
 from verbose_c.compiler.opcode_generator_visitor import OpcodeGenerator
 from verbose_c.compiler.symbol import SymbolTable, SymbolKind
 from verbose_c.compiler.type_checker_visitor import TypeChecker
+from verbose_c.object.enum import VBCObjectType
 from verbose_c.parser.parser.ast.node import ASTNode
-from verbose_c.vm.builtins_functions import BUILTIN_FUNCTION_SIGNATURES
+from verbose_c.typing.types import IntegerType
+from verbose_c.vm.builtins_functions import BUILTIN_FUNCTION_SIGNATURES, BUILTIN_CONSTANTS
 from verbose_c.error import VBCCompileError
 
 
@@ -34,8 +37,13 @@ class Compiler:
         self._constant_pool = []
 
     def _populate_builtins(self):
+        # 加载内置函数
         for name, signature in BUILTIN_FUNCTION_SIGNATURES.items():
             self._symbol_table.add_symbol(name, signature, SymbolKind.FUNCTION)
+        # 加载内置常量
+        for name in BUILTIN_CONSTANTS.keys():
+            # 所有IO常量都是整数类型
+            self._symbol_table.add_symbol(name, IntegerType(VBCObjectType.INT), SymbolKind.VARIABLE)
 
     @property
     def bytecode(self):

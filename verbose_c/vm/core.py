@@ -12,7 +12,7 @@ from verbose_c.utils.stack import Stack
 from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame, VBCNativeFunction
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.vm.gc import GarbageCollector
-from verbose_c.vm.builtins_functions import BUILTIN_FUNCTIONS
+from verbose_c.vm.builtins_functions import BUILTIN_FUNCTIONS, BUILTIN_CONSTANTS
 
 # 全局的指令处理器映射
 _vm_handlers = {}
@@ -59,6 +59,8 @@ class VBCVirtualMachine:
         """注册所有内置函数到全局变量中"""
         for name, py_func in BUILTIN_FUNCTIONS.items():
             self._global_variables[name] = self._allocate(VBCNativeFunction(name, py_func))
+        for name, vbc_obj in BUILTIN_CONSTANTS.items():
+            self._global_variables[name] = self._allocate(vbc_obj)
     
     def _fetch_instruction(self) -> Instruction:
         """

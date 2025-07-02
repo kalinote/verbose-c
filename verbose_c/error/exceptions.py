@@ -36,3 +36,8 @@ class VBCRuntimeError(VBCError):
         super().__init__(message)
         self.message = message
         self.traceback = traceback
+
+
+class VBCIOError(VBCRuntimeError):
+    """I/O 相关异常"""
+    pass
