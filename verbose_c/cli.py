@@ -69,7 +69,7 @@ def format_runtime_error(error: VBCRuntimeError):
     """
     格式化并打印 VBCRuntimeError，模仿 Python 的 traceback 格式。
     """
-    print("错误栈跟踪:")
+    print("错误跟踪:")
     for frame in error.traceback:
         print(f'  在文件 "{frame.filepath}" 中, 第 {frame.line} 行, {frame.scope_name} 中:')
         for source in frame.source_line_context:
@@ -124,6 +124,7 @@ def compile_source_file(
                 constants=compilation_result.constant_pool,
                 source_path=filename,
                 lineno_table=compilation_result.lineno_table,
+                source_code=compilation_result.processed_code.split("\n")
             )
             print("\n\n程序执行完成")
 
