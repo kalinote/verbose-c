@@ -609,9 +609,36 @@ class OpcodeGenerator(VisitorBase):
         class_symbol = self.symbol_table.lookup(class_name)
         if not (class_symbol and class_symbol.scope):
             raise RuntimeError(f"内部错误: TypeChecker未能正确创建或链接类 '{class_name}' 的作用域")
+        
+        class_type_info = class_symbol.type_
+        super_class_objects = []
+        if isinstance(class_type_info, ClassType):
+            for super_type in class_type_info.super_class:
+                super_symbol = self.symbol_table.lookup(super_type.name)
+                if super_symbol and isinstance(super_symbol.type_, ClassType):
+                    pass
+        
         self.symbol_table = class_symbol.scope
 
-        vbc_class = VBCClass(name=class_name, super_class=[])
+        class_name = node.name.name
+        class_symbol = self.symbol_table.lookup(class_name)
+        class_type_info = class_symbol.type_
+        
+        super_class_objects = []
+        if isinstance(class_type_info, ClassType):
+            for super_type in class_type_info.super_class:
+                # 遍历常量池，找到匹配的 VBCClass 对象
+                found_super = None
+                for const in self.constant_pool:
+                    if isinstance(const, VBCClass) and const._name == super_type.name:
+                        found_super = const
+                        break
+                if found_super:
+                    super_class_objects.append(found_super)
+                else:
+                    raise RuntimeError(f"编译错误: 未找到父类 '{super_type.name}' 的定义。请确保父类在子类之前定义。")
+
+        vbc_class = VBCClass(name=class_name, super_class=super_class_objects)
         
         user_init_node: FunctionNode | None = None
         for statement in node.body.statements:

@@ -112,6 +112,7 @@ do_while_statement[DoWhileNode]: 'do' '{' b=func_block '}' 'while' '(' c=expr ')
 for_statement[ForNode]: 'for' '(' i=(for_var_decl | expr)? ';' c=expr? ';' u=expr? ')' '{' b=func_block '}' { ForNode(i, c, u, b, LOCATIONS) }
 
 # 类与对象
-class_definition[ClassNode]: "class" n=NAME "{" cb=class_body "}" { ClassNode(NameNode(n.string, LOCATIONS), cb, [], LOCATIONS) }
+class_definition[ClassNode]: "class" n=NAME e=class_extends? "{" cb=class_body "}" { ClassNode(NameNode(n.string, LOCATIONS), cb, e, LOCATIONS) }
+class_extends[list[NameNode]]: "extends" n=NAME l=("," NAME)* { [NameNode(n.string, LOCATIONS)] + [NameNode(name[1].string, LOCATIONS) for name in l] }
 class_body[BlockNode]: m=(var_decl | function)* { BlockNode(m or [], LOCATIONS) }
 new_instance[NewInstanceNode]: 'new' c=member_expr { NewInstanceNode(c, LOCATIONS) }

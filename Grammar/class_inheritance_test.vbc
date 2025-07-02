@@ -1,0 +1,43 @@
+class Parent {
+    string name;
+
+    void __init__() {
+        this.name = "Parent";
+    }
+
+    void say_hello() {
+        builtin_println("Hello from " + this.name);
+    }
+
+    void speak() {
+        builtin_println("Parent is speaking.");
+    }
+}
+
+class Child extends Parent {
+    string child_name;
+
+    void __init__() {
+        this.name = "Child"; // 重写父类字段
+        this.child_name = "I am a child";
+    }
+
+    // 重写父类方法
+    void speak() {
+        builtin_println("Child is speaking.");
+    }
+}
+
+void main() {
+    Parent p = new Parent();
+    p.say_hello(); // 输出: Hello from Parent
+    p.speak();     // 输出: Parent is speaking.
+
+    builtin_println("----------");
+
+    Child c = new Child();
+    c.say_hello(); // 继承的方法，输出: Hello from Child
+    c.speak();     // 重写的方法，输出: Child is speaking.
+}
+
+main();

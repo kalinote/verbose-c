@@ -91,10 +91,41 @@ class ClassType(Type):
     """
     代表类类型，包含其名称、字段和方法。
     """
-    def __init__(self, name: str, fields: dict[str, 'Type'] | None = None, methods: dict[str, 'FunctionType'] | None = None):
+    def __init__(
+                self,
+                name: str,
+                # fields: dict[str, 'Type'] | None = None,
+                # methods: dict[str, 'FunctionType'] | None = None,
+                super_class: list['ClassType'] = []
+            ):
         self.name = name
-        self.fields = fields or {}
-        self.methods = methods or {}
+        self.super_class: list['ClassType'] = super_class   # 父类列表
+        self.mro: list['ClassType'] = []                    # 方法解析顺序列表
+        self.fields = {}
+        self.methods = {}
+        
+        self._compute_mro()
+
+    def _compute_mro(self):
+        """
+        计算方法解析顺序
+        """
+        mro = [self]
+        visited_names = {self.name}
+
+        temp_mro = []
+        if self.super_class:
+            for sc in self.super_class:
+                for base_class in sc.mro:
+                    if base_class.name not in visited_names:
+                        visited_names.add(base_class.name)
+                        temp_mro.append(base_class)
+        
+        mro.extend(temp_mro)
+        self.mro = mro
+
+    def is_subclass_of(self, other: 'ClassType') -> bool:
+        return other in self.mro
 
     def __repr__(self) -> str:
         return f"Class({self.name})"

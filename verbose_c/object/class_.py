@@ -10,7 +10,7 @@ class VBCClass(VBCObject):
     def __init__(self, name: str, super_class: list["VBCClass"] = [], methods: dict[str, VBCObject] = {}, fields: dict[str, VBCObject] = {}):
         super().__init__(VBCObjectType.CLASS)
         self._name: str = name                                  # 类名
-        self._super_class: list["VBCClass"] = super_class       # 父类名列表
+        self._super_class: list["VBCClass"] = super_class       # 父类
         self._methods: dict[str, VBCObject] = {}                # 方法字典
         self._fields: dict[str, VBCObject] = {}                 # 字段字典
 

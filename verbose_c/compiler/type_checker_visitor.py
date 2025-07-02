@@ -452,7 +452,26 @@ class TypeChecker(VisitorBase):
     def visit_ClassNode(self, node: ClassNode) -> Type:
         class_name = node.name.name
         
-        class_type = ClassType(class_name)
+        # 先解析父类
+        super_class: list[ClassType] = []
+        if node.base_classes: # 假设 AST 节点有 super_classes 列表
+            for super_class_node in node.base_classes:
+                super_class_name = super_class_node.name
+                symbol = self.symbol_table.lookup(super_class_name)
+                
+                # 验证父类是否存在且为类类型
+                if not symbol or not isinstance(symbol.type_, ClassType):
+                    self.errors.append(f"类型错误: '{super_class_name}' 不是一个有效的基类, 在 {super_class_node.start_line} 行")
+                    continue # 跳过无效的父类
+
+                # 检查是否重复继承
+                if symbol.type_ in super_class:
+                    self.errors.append(f"语法错误: 重复的基类 '{super_class_name}', 在 {super_class_node.start_line} 行")
+                    continue
+
+                super_class.append(symbol.type_)
+        
+        class_type = ClassType(class_name, super_class=super_class)
         class_symbol = None
         try:
             class_symbol = self.symbol_table.add_symbol(class_name, class_type, kind=SymbolKind.CLASS)
@@ -471,6 +490,19 @@ class TypeChecker(VisitorBase):
         self.current_class_type = class_type if isinstance(class_type, ClassType) else None
 
         if isinstance(class_type, ClassType):
+            # 先处理父类成员
+            for base_class in reversed(class_type.mro):
+                if base_class is class_type: # 跳过自身
+                    continue
+                
+                # 合并字段
+                for field_name, field_type in base_class.fields.items():
+                    class_type.fields[field_name] = field_type
+                    
+                # 合并方法
+                for method_name, method_type in base_class.methods.items():
+                    class_type.methods[method_name] = method_type
+            
             for member in node.body.statements:
                 if isinstance(member, VarDeclNode): # 字段
                     field_type = self.resolve_type_node(member.var_type)
