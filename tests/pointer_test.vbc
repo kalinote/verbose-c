@@ -1,34 +1,40 @@
-// 指针功能测试文件
+int main() {
+    int a = 10;
+    int* p = null;
 
-// 1. 基本指针声明
-int *p1;
-char *name;
+    write(STDOUT, "--- Initial values ---\n");
+    write(STDOUT, "Value of a: ");
+    write(STDOUT, (string)a);
+    write(STDOUT, "\n");
+    write(STDOUT, "Value of p: ");
+    write(STDOUT, p);
+    write(STDOUT, "\n");
 
-// 2. 带初始化的指针声明
-int *p2 = null;
+    // --- Test 1: Address-of operator (&) ---
+    p = &a;
+    write(STDOUT, "\n--- After p = &a ---\n");
+    write(STDOUT, "Value of p: ");
+    write(STDOUT, p);
+    write(STDOUT, "\n");
 
-// 3. 多级指针声明
-int **pp;
-char **argv;
+    // --- Test 2: Dereference operator (*) for reading ---
+    int b = *p;
+    write(STDOUT, "\n--- After b = *p ---\n");
+    write(STDOUT, "Value of b: ");
+    write(STDOUT, b);
+    write(STDOUT, "\n");
 
-// 4. 函数参数中的指针
-void set_value(int *ptr) {
-    // some logic here
+    // --- Test 3: Dereference operator (*) for writing ---
+    *p = 20;
+    write(STDOUT, "\n--- After *p = 20 ---\n");
+    write(STDOUT, "Value of a: ");
+    write(STDOUT, a);
+    write(STDOUT, "\n");
+    write(STDOUT, "Value of *p: ");
+    write(STDOUT, *p);
+    write(STDOUT, "\n");
+
+    return 0;
 }
 
-// 5. 函数返回指针
-char * get_name() {
-    return (char *)"pointer";
-}
-
-// 6. 复杂类型指针
-long long * address;
-
-// 7. 混合测试
-class PointerTest {
-    int * member_ptr;
-
-    void test_method(char **data) {
-        int *** ppp = null;
-    }
-}
+main();

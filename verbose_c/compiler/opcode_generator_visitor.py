@@ -195,9 +195,35 @@ class OpcodeGenerator(VisitorBase):
         
     # 表达式
     def visit_UnaryOpNode(self, node: UnaryOpNode):
-        self.visit(node.expr)
+        # 取地址只能对标识符进行，所以不需要计算表达式
+        if node.op == Operator.ADDRESS_OF:
+            if not isinstance(node.expr, NameNode):
+                raise RuntimeError(f"内部错误: 取地址操作的目标不是一个有效的标识符, 在 {node.start_line} 行")
+            
+            symbol = self.symbol_table.lookup(node.expr.name)
+            if symbol is None:
+                raise RuntimeError(f"内部错误: 无法找到符号 '{node.expr.name}', 在 {node.start_line} 行")
+
+            identifier = symbol.address if symbol.address is not None else symbol.name
+            if isinstance(symbol.type_, IntegerType):
+                target_type_enum = symbol.type_.kind
+            if isinstance(symbol.type_, FloatType):
+                target_type_enum = symbol.type_.kind
+            if isinstance(symbol.type_, StringType):
+                target_type_enum = VBCObjectType.STRING
+            if isinstance(symbol.type_, BoolType):
+                target_type_enum = VBCObjectType.BOOL
+            if isinstance(symbol.type_, PointerType):
+                target_type_enum = VBCObjectType.POINTER
+            if isinstance(symbol.type_, ClassType):
+                target_type_enum = VBCObjectType.INSTANCE
+            self._emit(Opcode.LOAD_ADDRESS, (identifier, target_type_enum))
+            return
         
-        if node.op == Operator.SUBTRACT:
+        self.visit(node.expr)
+        if node.op == Operator.DEREFERENCE:
+            self._emit(Opcode.LOAD_BY_POINTER)
+        elif node.op == Operator.SUBTRACT:
             self._emit(Opcode.UNARY_MINUS)
         elif node.op == Operator.ADD:
             # TODO 检查这条分支是否有必要？ (+a 就是 a)
@@ -301,7 +327,7 @@ class OpcodeGenerator(VisitorBase):
         if node.init_exp:
             # 仍然需要向初始化表达式传递类型信息，以处理数字字面量
             if isinstance(symbol.type_, (IntegerType, FloatType)):
-                 setattr(node.init_exp, 'inferred_type', symbol.type_.kind)
+                setattr(node.init_exp, 'inferred_type', symbol.type_.kind)
             self.visit(node.init_exp)
         else:
             # 没有初始化，将默认值null压入栈
@@ -315,6 +341,14 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
 
     def visit_AssignmentNode(self, node: AssignmentNode):
+        # 解引用赋值
+        if isinstance(node.target, UnaryOpNode) and node.target.op == Operator.DEREFERENCE:
+            self.visit(node.value)
+            self.visit(node.target.expr)
+            self._emit(Opcode.STORE_BY_POINTER)
+            return
+
+        # 普通变量赋值
         if isinstance(node.target, NameNode):
             self.visit(node.value)
 
@@ -322,14 +356,14 @@ class OpcodeGenerator(VisitorBase):
             if symbol is None:
                 raise ValueError(f"未定义的变量: {node.target.name}")
 
+            # TODO: 这里的赋值逻辑需要调整以支持值更新而不是重复分配。
             if symbol.address is not None:
                 self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
             else:
-                # TODO 这里的逻辑应该还需要进一步确认
                 self._emit(Opcode.STORE_GLOBAL_VAR, node.target.name)
         
+        # 属性赋值
         elif isinstance(node.target, GetPropertyNode):
-            # 处理对象属性赋值，比如 obj.prop = value 的语法
             self.visit(node.value)
             self.visit(node.target.obj)
 
@@ -339,6 +373,7 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.SET_PROPERTY)
         else:
             raise RuntimeError(f"不支持的赋值目标类型: {type(node.target).__name__}")
+
 
     def visit_ExprStmtNode(self, node: ExprStmtNode):
         self.visit(node.expr)

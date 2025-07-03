@@ -40,7 +40,7 @@ BUILTIN_FUNCTION_SIGNATURES = {
         return_type=StringType()
     ),
     'write': FunctionType(
-        param_types=[IntegerType(VBCObjectType.INT), StringType()],
+        param_types=[IntegerType(VBCObjectType.INT), AnyType()],
         return_type=IntegerType(VBCObjectType.INT)
     ),
     'close': FunctionType(

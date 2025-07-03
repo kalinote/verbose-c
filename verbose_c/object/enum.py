@@ -18,6 +18,7 @@ class VBCObjectType(Enum):
     NLFLOAT = "super double"
     BOOL = "bool"
     NULL = "null"
+    POINTER = "pointer"
     LIST = "list"
     MAP = "map"
     MODULE = "module"

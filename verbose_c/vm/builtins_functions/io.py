@@ -22,8 +22,8 @@ def native_read(fd_obj: VBCInteger, count_obj: VBCInteger):
 
 def native_write(fd_obj: VBCInteger, data_obj: VBCString):
     try:
-        # 将字符串编码为字节进行写入
-        write_bytes = data_obj.value.encode('utf-8')
+        string_to_write = str(data_obj)
+        write_bytes = string_to_write.encode('utf-8')
         bytes_written = os.write(fd_obj.value, write_bytes)
         return VBCInteger(bytes_written)
     except OSError as e:

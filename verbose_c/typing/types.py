@@ -68,6 +68,21 @@ class BoolType(Type):
     def __repr__(self) -> str:
         return "Bool"
 
+class PointerType(Type):
+    """
+    代表指针类型，例如 int*
+    """
+    def __init__(self, base_type: 'Type'):
+        self.base_type = base_type  # 指针指向的基础类型
+
+    def __repr__(self) -> str:
+        return f"Pointer({repr(self.base_type)})"
+
+    def __eq__(self, other):
+        if not isinstance(other, PointerType):
+            return False
+        return self.base_type == other.base_type
+
 # --- 复合类型 ---
 
 class FunctionType(Type):

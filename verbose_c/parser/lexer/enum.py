@@ -49,7 +49,7 @@ class TokenType(Enum):
     LESS       = ("<", r"<")                            # 小于
     GREATER    = (">", r">")                            # 大于
     NOT        = ("!", r"!")                            # 逻辑非
-    BIT_AND    = ("&", r"&")                            # 按位与
+    AMPERSAND  = ("&", r"&")                            # 按位与
     BIT_OR     = ("|", r"\|")                           # 按位或
     BIT_XOR    = ("^", r"\^")                           # 按位异或
     BIT_NOT    = ("~", r"~")                            # 按位取反
@@ -126,6 +126,8 @@ class Operator(Enum):
     MULTIPLY = "*"
     DIVIDE = "/"
     NOT = "!"
+    ADDRESS_OF = "&"
+    DEREFERENCE = "*"
 
     def __str__(self):
         return self.value 

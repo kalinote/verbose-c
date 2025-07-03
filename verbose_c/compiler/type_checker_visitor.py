@@ -6,7 +6,7 @@ from verbose_c.parser.parser.ast.node import *
 from verbose_c.compiler.symbol import SymbolTable, SymbolKind
 from verbose_c.typing.types import (
     Type, VoidType, NullType, IntegerType, FloatType, StringType, BoolType,
-    FunctionType, ClassType, AnyType, ErrorType
+    PointerType, FunctionType, ClassType, AnyType, ErrorType
 )
 from verbose_c.object.enum import VBCObjectType
 
@@ -58,31 +58,43 @@ class TypeChecker(VisitorBase):
 
     def resolve_type_node(self, type_node: TypeNode) -> Type:
         """
-        将 AST 中的 TypeNode 转换为 Type 对象。
+        将 AST 中的 TypeNode 转换为 Type 对象，支持指针。
         """
         type_name = type_node.type_name.name
-        builtin_type = BUILTIN_TYPE_MAP.get(type_name)
-        if builtin_type:
-            return builtin_type
-        symbol = self.symbol_table.lookup(type_name)
-        if symbol and isinstance(symbol.type_, ClassType):
-            return symbol.type_
-        self.errors.append(f"未知类型 '{type_name}', 在 {type_node.start_line} 行")
-        return ErrorType()
+        base_type: Type | None = BUILTIN_TYPE_MAP.get(type_name)
+
+        if not base_type:
+            symbol = self.symbol_table.lookup(type_name)
+            if symbol and isinstance(symbol.type_, ClassType):
+                base_type = symbol.type_
+        
+        if not base_type:
+            self.errors.append(f"未知类型 '{type_name}', 在 {type_node.start_line} 行")
+            return ErrorType()
+
+        # 根据指针级别，递归创建 PointerType
+        final_type = base_type
+        for _ in range(type_node.pointer_level):
+            final_type = PointerType(final_type)
+        
+        return final_type
 
     def _is_assignable(self, target_type: Type, source_type: Type) -> bool:
         """
         检查 source_type 是否能安全地赋值给 target_type。
         """
-        # 规则1 null 赋值给任何类型的变量
+        # 规则1: null 可以赋值给任何指针类型或对象类型
+        # 其他类型的暂时还是不允许赋值null了
         if isinstance(source_type, NullType):
-            return True
+            if isinstance(target_type, (PointerType, ClassType)):
+                return True
+            return False
 
         # 规则2: 类型完全相同
         if target_type == source_type:
             return True
         
-        # TODO 规则3: 允许任何类型赋值给 AnyType
+        # 规则3: 允许任何类型赋值给 AnyType
         if isinstance(target_type, AnyType):
             return True
 
@@ -95,6 +107,11 @@ class TypeChecker(VisitorBase):
             target_priority = TYPE_PROMOTION_PRIORITY.get(target_type.kind, -1)
             source_priority = TYPE_PROMOTION_PRIORITY.get(source_type.kind, -1)
             return target_priority >= source_priority
+            
+        # 规则6: 允许 void* 和其他指针类型互相赋值
+        if isinstance(target_type, PointerType) and isinstance(source_type, PointerType):
+            if isinstance(target_type.base_type, VoidType) or isinstance(source_type.base_type, VoidType):
+                return True
 
         return False
 
@@ -183,6 +200,28 @@ class TypeChecker(VisitorBase):
         return symbol.type_
 
     def visit_UnaryOpNode(self, node: UnaryOpNode) -> Type:
+        if node.op == Operator.DEREFERENCE:
+            operand_type = self.visit(node.expr)
+            if isinstance(operand_type, ErrorType):
+                return ErrorType()
+            if not isinstance(operand_type, PointerType):
+                self.errors.append(f"类型错误: 解引用操作符 '*' 只能用于指针类型, 而不是 '{operand_type}', 在 {node.start_line} 行")
+                return ErrorType()
+            # 解引用的结果是其基础类型
+            return operand_type.base_type
+
+        if node.op == Operator.ADDRESS_OF:
+            # 取地址操作符只能用于变量名
+            if not isinstance(node.expr, NameNode):
+                self.errors.append(f"语法错误: 取地址操作符 '&' 只能用于变量, 在 {node.start_line} 行")
+                return ErrorType()
+            
+            operand_type = self.visit(node.expr)
+            if isinstance(operand_type, ErrorType):
+                return ErrorType()
+            
+            return PointerType(operand_type)
+
         operand_type = self.visit(node.expr)
         if isinstance(operand_type, ErrorType):
             return ErrorType()
@@ -194,6 +233,7 @@ class TypeChecker(VisitorBase):
             return operand_type
 
         if node.op == Operator.NOT:
+            # 注意：C语言允许对指针和整数进行逻辑非操作，这里我们先保持严格，只允许布尔
             if not isinstance(operand_type, BoolType):
                 self.errors.append(f"类型错误: 操作符 '!' 只能用于布尔类型, 而不是 '{operand_type}', 在 {node.start_line} 行")
                 return ErrorType()
@@ -201,6 +241,7 @@ class TypeChecker(VisitorBase):
 
         self.errors.append(f"内部错误: 未知的一元操作符 '{node.op.value}', 在 {node.start_line} 行")
         return ErrorType()
+
 
     def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
         left_type = self.visit(node.left)
@@ -211,7 +252,7 @@ class TypeChecker(VisitorBase):
 
         op = node.op
 
-        # --- 算术运算 ---
+        # 算术运算
         if op in (Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE):
             # 规则 1: 字符串拼接
             if op == Operator.ADD and isinstance(left_type, StringType) and isinstance(right_type, StringType):
@@ -235,18 +276,18 @@ class TypeChecker(VisitorBase):
             self.errors.append(f"类型错误: 操作符 '{op.value}' 不能用于类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
             return ErrorType()
 
-        # --- 比较运算 ---
+        # 比较运算
         if op in (Operator.GREATER_THAN, Operator.GREATER_EQUAL, Operator.LESS_THAN, Operator.LESS_EQUAL, Operator.EQUAL, Operator.NOT_EQUAL):
             # 允许数字之间，或相同类型之间比较
             is_numeric = isinstance(left_type, (IntegerType, FloatType)) and isinstance(right_type, (IntegerType, FloatType))
             is_same_type = type(left_type) is type(right_type)
 
             if not (is_numeric or is_same_type):
-                 self.errors.append(f"类型错误: 无法比较不兼容的类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
-                 return ErrorType()
+                self.errors.append(f"类型错误: 无法比较不兼容的类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                return ErrorType()
             return BoolType()
 
-        # --- 逻辑运算 ---
+        # 逻辑运算
         if op in (Operator.LOGICAL_AND, Operator.LOGICAL_OR):
             if not (isinstance(left_type, BoolType) and isinstance(right_type, BoolType)):
                 self.errors.append(f"类型错误: 逻辑操作符 '{op.value}' 的操作数必须是布尔类型, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
@@ -276,6 +317,21 @@ class TypeChecker(VisitorBase):
         return VoidType()
 
     def visit_AssignmentNode(self, node: AssignmentNode) -> Type:
+        if isinstance(node.target, UnaryOpNode) and node.target.op == Operator.DEREFERENCE:
+            pointer_type = self.visit(node.target.expr)
+            if not isinstance(pointer_type, PointerType):
+                self.errors.append(f"类型错误: 赋值目标不是一个指针，无法解引用, 在 {node.start_line} 行")
+                return ErrorType()
+            
+            target_type = pointer_type.base_type
+            value_type = self.visit(node.value)
+
+            if not self._is_assignable(target_type, value_type):
+                self.errors.append(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的指针目标, 在 {node.start_line} 行")
+                return ErrorType()
+            
+            return value_type
+        
         target_type = self.visit(node.target)
         if isinstance(target_type, ErrorType):
             return ErrorType()

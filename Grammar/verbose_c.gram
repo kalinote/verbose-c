@@ -40,7 +40,7 @@ var_decl[VarDeclNode]: t=type_name n=NAME v=('=' expr)? ';' { VarDeclNode(t, Nam
 for_var_decl[VarDeclNode]: t=type_name n=NAME v=('=' expr)? { VarDeclNode(t, NameNode(n.string, LOCATIONS), v[1] if v else None, LOCATIONS) }
 var_assign[AssignmentNode]: n=member_expr '=' v=expr ';' { AssignmentNode(n, v, LOCATIONS) }
 type_name[TypeNode]:
-      | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(!'(') s='*'* { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), len(s), LOCATIONS) }
+      | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(!'(') &(!('=' | ';' | ')' | ',')) s='*'* { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), len(s), LOCATIONS) }
       | t=(SOFT_KEYWORD | NAME) s='*'* { TypeNode(NameNode(t.string, LOCATIONS), len(s), LOCATIONS) }
 
 # 表达式作为语句
@@ -76,7 +76,6 @@ multiplicative:
     | multiplicative '*' factor { BinaryOpNode(multiplicative, Operator.MULTIPLY, factor, LOCATIONS) }
     | multiplicative '/' factor { BinaryOpNode(multiplicative, Operator.DIVIDE, factor, LOCATIONS) }
     | factor
-
 factor:
     | '(' type_name ')' expr { CastNode(type_name, expr, LOCATIONS) } 
     | '(' expr ')' { expr }
@@ -87,10 +86,12 @@ unary:
     | '-' factor { UnaryOpNode(Operator.SUBTRACT, factor, LOCATIONS) }
     | '+' factor { UnaryOpNode(Operator.ADD, factor, LOCATIONS) }
     | '!' factor { UnaryOpNode(Operator.NOT, factor, LOCATIONS) }
+    | '&' factor { UnaryOpNode(Operator.ADDRESS_OF, factor, LOCATIONS) }
 
 member_expr:
     | member_expr '.' property=NAME { GetPropertyNode(member_expr, NameNode(property.string, LOCATIONS), LOCATIONS) }
     | member_expr '(' args=func_call_param? ')' { CallNode(member_expr, args or [], {}, LOCATIONS) }
+    | '*' member_expr { UnaryOpNode(Operator.DEREFERENCE, member_expr, LOCATIONS) }
     | atom
 func_call_param[list[ASTNode]]: head=expr tail=(',' expr)* { [head] + [t[1] for t in tail] }
 

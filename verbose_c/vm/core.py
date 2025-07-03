@@ -1,5 +1,6 @@
 import bisect
 from verbose_c.compiler.opcode import Instruction, Opcode
+from verbose_c.compiler.symbol import Symbol
 from verbose_c.error import VBCRuntimeError, TracebackFrame
 from verbose_c.object.class_ import VBCClass
 from verbose_c.object.enum import VBCObjectType
@@ -7,12 +8,14 @@ from verbose_c.object.instance import VBCInstance
 from verbose_c.object.object import VBCObject
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
+from verbose_c.object.t_pointer import VBCPointer
 from verbose_c.object.t_string import VBCString
 from verbose_c.utils.stack import Stack
 from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame, VBCNativeFunction
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.vm.gc import GarbageCollector
 from verbose_c.vm.builtins_functions import BUILTIN_FUNCTIONS, BUILTIN_CONSTANTS
+from verbose_c.vm.memory import MemoryManager
 
 # 全局的指令处理器映射
 _vm_handlers = {}
@@ -45,6 +48,10 @@ class VBCVirtualMachine:
         self._constants: list = []
         self._current_function: VBCFunction | None = None # 当前正在执行的函数
 
+        # 内存管理
+        self.memory = MemoryManager()
+
+        # 垃圾回收
         self.gc = GarbageCollector(self)
 
         self._register_builtins()
@@ -56,11 +63,18 @@ class VBCVirtualMachine:
         return obj
 
     def _register_builtins(self):
-        """注册所有内置函数到全局变量中"""
+        """注册所有内置函数和常量到内存，并将其地址存入全局变量表"""
+        # 注册内置函数
         for name, py_func in BUILTIN_FUNCTIONS.items():
-            self._global_variables[name] = self._allocate(VBCNativeFunction(name, py_func))
+            native_func = self._allocate(VBCNativeFunction(name, py_func))
+            address = self.memory.allocate(native_func)
+            self._global_variables[name] = address
+        
+        # 注册内置常量
         for name, vbc_obj in BUILTIN_CONSTANTS.items():
-            self._global_variables[name] = self._allocate(vbc_obj)
+            allocated_obj = self._allocate(vbc_obj)
+            address = self.memory.allocate(allocated_obj)
+            self._global_variables[name] = address
     
     def _fetch_instruction(self) -> Instruction:
         """
@@ -217,9 +231,10 @@ class VBCVirtualMachine:
                 stack_str = " -> ".join(repr(item) for item in self._stack._items)
                 log_entry = f"PC: {self._pc:04d} | OP: {instruction[0].name:<15}"
                 if len(instruction) > 1:
-                    log_entry += f" {instruction[1]:<5}"
+                    operand_str = repr(instruction[1])
+                    log_entry += f" {operand_str:<20}"
                 else:
-                    log_entry += "      "
+                    log_entry += " " * 21 # 保持对齐
                 log_entry += f"| STACK: [{stack_str}]"
                 self._debug_log_collector.append(log_entry)
 
@@ -257,7 +272,7 @@ class VBCVirtualMachine:
     ## 变量操作类
     @register_instruction(Opcode.STORE_LOCAL_VAR)
     def __handle_store_local_var(self, operand):
-        """存储栈顶值到局部变量"""
+        """将栈顶值存入内存，并将其地址存储到局部变量"""
         if operand is None:
             raise RuntimeError("STORE_LOCAL_VAR 指令缺少地址操作数")
         
@@ -265,46 +280,43 @@ class VBCVirtualMachine:
             raise RuntimeError("栈为空，无法存储到局部变量")
         
         value = self._stack.pop()
+        address = self.memory.allocate(value)
         
         while len(self._local_variables) <= operand:
             self._local_variables.append(None)
         
-        self._local_variables[operand] = value
+        self._local_variables[operand] = address
 
     @register_instruction(Opcode.LOAD_LOCAL_VAR)
     def __handle_load_local_var(self, operand):
-        """加载局部变量值到栈顶"""
+        """根据地址加载局部变量，并从内存中读取其值压入栈顶"""
         if operand is None:
             raise RuntimeError("LOAD_LOCAL_VAR 指令缺少地址操作数")
         
-        if operand < 0:
-            raise RuntimeError(f"局部变量地址无效: {operand}")
-        
-        # 如果地址超出已分配范围，则视为未初始化
-        if operand >= len(self._local_variables):
+        if operand < 0 or operand >= len(self._local_variables) or self._local_variables[operand] is None:
             raise RuntimeError(f"访问未初始化的局部变量: 地址 {operand}")
         
-        value = self._local_variables[operand]
-        if value is None:
-            raise RuntimeError(f"访问未初始化的局部变量: 地址 {operand}")
+        address = self._local_variables[operand]
+        value = self.memory.read(address)
         
         self._stack.push(value)
 
     @register_instruction(Opcode.LOAD_GLOBAL_VAR)
     def __handle_load_global_var(self, operand):
-        """加载全局变量值到栈顶"""
+        """根据名称加载全局变量，并从内存中读取其值压入栈顶"""
         if operand is None:
             raise RuntimeError("LOAD_GLOBAL_VAR 指令缺少变量名操作数")
         
         if operand not in self._global_variables:
             raise RuntimeError(f"未定义的全局变量: {operand}")
         
-        value = self._global_variables[operand]
+        address = self._global_variables[operand]
+        value = self.memory.read(address)
         self._stack.push(value)
 
     @register_instruction(Opcode.STORE_GLOBAL_VAR)
     def __handle_store_global_var(self, operand):
-        """存储栈顶值到全局变量"""
+        """将栈顶值存入内存，并将其地址存储到全局变量"""
         if operand is None:
             raise RuntimeError("STORE_GLOBAL_VAR 指令缺少变量名操作数")
         
@@ -312,9 +324,9 @@ class VBCVirtualMachine:
             raise RuntimeError("栈为空，无法存储到全局变量")
         
         value = self._stack.pop()
-        
-        self._global_variables[operand] = value
-    
+        address = self.memory.allocate(value)
+        self._global_variables[operand] = address
+
 
     ## 算术运算类指令
     @register_instruction(Opcode.ADD)
@@ -589,6 +601,52 @@ class VBCVirtualMachine:
     @register_instruction(Opcode.FREE_OBJECT)
     def __handle_free_object(self):
         pass
+
+    @register_instruction(Opcode.LOAD_ADDRESS)
+    def __handle_load_address(self, operand):
+        """
+        根据编译器提供的标识符和类型，创建指针对象。
+        """
+        identifier, target_type_enum = operand
+        
+        # 根据标识符类型判断是局部变量还是全局变量
+        if isinstance(identifier, int): # 局部变量，标识符是地址索引
+            address = self._local_variables[identifier]
+        else: # 全局变量，标识符是名称
+            address = self._global_variables[identifier]
+        
+        if address is None:
+            raise RuntimeError(f"试图获取未初始化变量 '{identifier}' 的地址")
+
+        pointer = self._allocate(VBCPointer(address, target_type_enum))
+        self._stack.push(pointer)
+
+    @register_instruction(Opcode.LOAD_BY_POINTER)
+    def __handle_load_by_pointer(self):
+        """
+        从栈顶弹出一个指针，读取其指向地址的值，然后将该值压入栈顶。
+        """
+        pointer = self._stack.pop()
+        if not isinstance(pointer, VBCPointer):
+            raise TypeError(f"解引用操作的目标必须是指针，而不是 {type(pointer).__name__}")
+        
+        value = self.memory.read(pointer.address)
+        self._stack.push(value)
+
+    @register_instruction(Opcode.STORE_BY_POINTER)
+    def __handle_store_by_pointer(self):
+        """
+        从栈顶依次弹出指针和值，并将值写入指针指向的地址。
+        """
+        pointer = self._stack.pop()
+        value = self._stack.pop()
+
+        if not isinstance(pointer, VBCPointer):
+            raise TypeError(f"解引用赋值的目标必须是指针，而不是 {type(pointer).__name__}")
+            
+        self.memory.write(pointer.address, value)
+        # 赋值表达式本身也有值，C语言中是赋的那个值
+        self._stack.push(value)
 
     ## 对象与类操作类
     @register_instruction(Opcode.GET_PROPERTY)

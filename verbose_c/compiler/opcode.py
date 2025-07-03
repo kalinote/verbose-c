@@ -15,8 +15,8 @@ class Opcode(Enum):
     # === 变量操作类 (0x10-0x1F) ===
     STORE_LOCAL_VAR     = 0x10  # 存储到局部变量
     LOAD_LOCAL_VAR      = 0x11  # 加载局部变量到栈顶
-    LOAD_GLOBAL_VAR     = 0x12  # 加载全局变量
-    STORE_GLOBAL_VAR    = 0x13  # 存储到全局变量
+    STORE_GLOBAL_VAR    = 0x12  # 存储到全局变量
+    LOAD_GLOBAL_VAR     = 0x13  # 加载全局变量
     
     # === 算术运算类 (0x20-0x2F) ===
     ADD                 = 0x20  # 加法运算
@@ -54,6 +54,9 @@ class Opcode(Enum):
     # === 内存管理类 (0x80-0x8F) ===
     ALLOC_OBJECT        = 0x80  # 分配对象内存
     FREE_OBJECT         = 0x81  # 释放对象内存
+    LOAD_ADDRESS        = 0x82  # 取变量地址 (&a)
+    LOAD_BY_POINTER     = 0x83  # 通过指针加载值 (*p)
+    STORE_BY_POINTER    = 0x84  # 通过指针存储值 (*p = v)
     
     # === 对象与类操作类 (0x90-0x9F) ===
     GET_PROPERTY        = 0x90  # 获取对象属性
