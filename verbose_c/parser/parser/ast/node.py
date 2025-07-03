@@ -88,10 +88,12 @@ class TypeNode(ASTNode):
     
     Args:
         type_name (NameNode): 类型名称节点
+        pointer_level (int): 指针级别，0为非指针
     """
-    def __init__(self, type_name: NameNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+    def __init__(self, type_name: NameNode, pointer_level: int = 0, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.type_name: NameNode = type_name
+        self.pointer_level: int = pointer_level
     
 class CastNode(ASTNode):
     """

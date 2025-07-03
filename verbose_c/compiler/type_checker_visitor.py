@@ -74,19 +74,23 @@ class TypeChecker(VisitorBase):
         """
         检查 source_type 是否能安全地赋值给 target_type。
         """
-        # 规则1: 类型完全相同
+        # 规则1 null 赋值给任何类型的变量
+        if isinstance(source_type, NullType):
+            return True
+
+        # 规则2: 类型完全相同
         if target_type == source_type:
             return True
         
-        # TODO 规则2: 允许任何类型赋值给 AnyType
+        # TODO 规则3: 允许任何类型赋值给 AnyType
         if isinstance(target_type, AnyType):
             return True
 
-        # 规则3: 允许整数赋值给浮点数 (提升)
+        # 规则4: 允许整数赋值给浮点数 (提升)
         if isinstance(target_type, FloatType) and isinstance(source_type, IntegerType):
             return True
             
-        # 规则4: 允许低精度数字赋值给高精度数字
+        # 规则5: 允许低精度数字赋值给高精度数字
         if isinstance(target_type, (IntegerType, FloatType)) and isinstance(source_type, (IntegerType, FloatType)):
             target_priority = TYPE_PROMOTION_PRIORITY.get(target_type.kind, -1)
             source_priority = TYPE_PROMOTION_PRIORITY.get(source_type.kind, -1)
@@ -132,14 +136,13 @@ class TypeChecker(VisitorBase):
             return True
             
         # TODO 规则 7: 允许对象类型之间的向上和向下转型。
-        # 这需要等继承实现后再添加。
-        # if isinstance(target_type, ClassType) and isinstance(source_type, ClassType):
-        #     # 向上转型总是安全的
-        #     if source_type.is_subclass_of(target_type):
-        #         return True
-        #     # 向下转型是允许的，但可能在运行时失败
-        #     if target_type.is_subclass_of(source_type):
-        #         return True
+        if isinstance(target_type, ClassType) and isinstance(source_type, ClassType):
+            # 向上转型总是安全的
+            if source_type.is_subclass_of(target_type):
+                return True
+            # 向下转型是允许的，但实际可能有问题，需要进一步分析
+            if target_type.is_subclass_of(source_type):
+                return True
 
         return False
 
@@ -651,4 +654,3 @@ class TypeChecker(VisitorBase):
         
         setattr(node, 'type_', super_class_type)
         return super_class_type
-    

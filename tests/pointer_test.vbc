@@ -1,0 +1,34 @@
+// 指针功能测试文件
+
+// 1. 基本指针声明
+int *p1;
+char *name;
+
+// 2. 带初始化的指针声明
+int *p2 = null;
+
+// 3. 多级指针声明
+int **pp;
+char **argv;
+
+// 4. 函数参数中的指针
+void set_value(int *ptr) {
+    // some logic here
+}
+
+// 5. 函数返回指针
+char * get_name() {
+    return (char *)"pointer";
+}
+
+// 6. 复杂类型指针
+long long * address;
+
+// 7. 混合测试
+class PointerTest {
+    int * member_ptr;
+
+    void test_method(char **data) {
+        int *** ppp = null;
+    }
+}

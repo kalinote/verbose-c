@@ -40,8 +40,8 @@ var_decl[VarDeclNode]: t=type_name n=NAME v=('=' expr)? ';' { VarDeclNode(t, Nam
 for_var_decl[VarDeclNode]: t=type_name n=NAME v=('=' expr)? { VarDeclNode(t, NameNode(n.string, LOCATIONS), v[1] if v else None, LOCATIONS) }
 var_assign[AssignmentNode]: n=member_expr '=' v=expr ';' { AssignmentNode(n, v, LOCATIONS) }
 type_name[TypeNode]:
-      | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(NAME) { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), LOCATIONS) }
-      | t=(SOFT_KEYWORD | NAME) { TypeNode(NameNode(t.string, LOCATIONS), LOCATIONS) }
+      | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(!'(') s='*'* { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), len(s), LOCATIONS) }
+      | t=(SOFT_KEYWORD | NAME) s='*'* { TypeNode(NameNode(t.string, LOCATIONS), len(s), LOCATIONS) }
 
 # 表达式作为语句
 expression_as_statement[ExprStmtNode]: e=expr ';' { ExprStmtNode(e, LOCATIONS) }
