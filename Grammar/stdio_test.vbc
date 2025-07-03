@@ -1,0 +1,13 @@
+// 测试使用底层 write/read 函数进行标准输入输出 (stdio)
+
+// STDOUT 的文件描述符是 1
+write(STDOUT, "Hello from verbose-c using write() on STDOUT!\n");
+write(STDOUT, "Please enter your name: ");
+
+// STDIN 的文件描述符是 0
+// 从标准输入读取最多 1024 个字节
+string name = read(STDIN, 1024);
+
+write(STDOUT, "\nHello, ");
+write(STDOUT, name);
+write(STDOUT, "Welcome to the new I/O system!\n");

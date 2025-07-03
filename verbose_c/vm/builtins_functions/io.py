@@ -1,5 +1,6 @@
 # verbose_c/vm/builtins_functions/io.py
 import os
+import sys
 from verbose_c.object.t_integer import VBCInteger
 from verbose_c.object.t_string import VBCString
 from verbose_c.error.exceptions import VBCIOError
@@ -44,12 +45,20 @@ def native_lseek(fd_obj: VBCInteger, offset_obj: VBCInteger, whence_obj: VBCInte
 
 # 导出所有 I/O 相关的常量
 IO_CONSTANTS = {
+    # 标准文件描述符
+    'STDIN': VBCInteger(sys.stdin.fileno()),
+    'STDOUT': VBCInteger(sys.stdout.fileno()),
+    'STDERR': VBCInteger(sys.stderr.fileno()),
+
+    # 文件打开标志
     'O_RDONLY': VBCInteger(os.O_RDONLY),
     'O_WRONLY': VBCInteger(os.O_WRONLY),
     'O_RDWR': VBCInteger(os.O_RDWR),
     'O_CREAT': VBCInteger(os.O_CREAT),
     'O_APPEND': VBCInteger(os.O_APPEND),
     'O_TRUNC': VBCInteger(os.O_TRUNC),
+
+    # lseek `whence` 参数
     'SEEK_SET': VBCInteger(os.SEEK_SET),
     'SEEK_CUR': VBCInteger(os.SEEK_CUR),
     'SEEK_END': VBCInteger(os.SEEK_END),
