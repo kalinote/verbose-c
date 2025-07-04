@@ -906,10 +906,10 @@ class OpcodeGenerator(VisitorBase):
             "int": VBCObjectType.INT,
             "long": VBCObjectType.LONG,
             "long long": VBCObjectType.LONGLONG,
-            "super int": VBCObjectType.NLINT,
+            "unlimited int": VBCObjectType.NLINT,
             "float": VBCObjectType.FLOAT,
             "double": VBCObjectType.DOUBLE,
-            "super float": VBCObjectType.NLFLOAT,
+            "unlimited float": VBCObjectType.NLFLOAT,
             "string": VBCObjectType.STRING,
             "bool": VBCObjectType.BOOL,
         }

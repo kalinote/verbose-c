@@ -18,10 +18,10 @@ BUILTIN_TYPE_MAP: dict[str, Type] = {
     "int": IntegerType(VBCObjectType.INT),
     "long": IntegerType(VBCObjectType.LONG),
     "long long": IntegerType(VBCObjectType.LONGLONG),
-    "super int": IntegerType(VBCObjectType.NLINT),
+    "unlimited int": IntegerType(VBCObjectType.NLINT),
     "float": FloatType(VBCObjectType.FLOAT),
     "double": FloatType(VBCObjectType.DOUBLE),
-    "super float": FloatType(VBCObjectType.NLFLOAT),
+    "unlimited float": FloatType(VBCObjectType.NLFLOAT),
     "string": StringType(),
     "bool": BoolType(),
 }
