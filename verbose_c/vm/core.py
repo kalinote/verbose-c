@@ -1,11 +1,10 @@
 import bisect
 from verbose_c.compiler.opcode import Instruction, Opcode
-from verbose_c.compiler.symbol import Symbol
 from verbose_c.error import VBCRuntimeError, TracebackFrame
 from verbose_c.object.class_ import VBCClass
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.instance import VBCInstance
-from verbose_c.object.object import VBCObject
+from verbose_c.object.object import VBCObject, VBCObjectWithGC
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
 from verbose_c.object.t_pointer import VBCPointer
@@ -32,10 +31,10 @@ class VBCVirtualMachine:
     verbose-c 虚拟机核心功能
     """
     
-    def __init__(self, debug_log_collector: list = None):
+    def __init__(self, debug_log_collector: list | None = None):
         self._stack: Stack = Stack()            # 栈
         self._pc = 0                            # 程序计数器
-        self._local_variables = []              # 局部变量（使用列表按索引访问）
+        self._local_variables: list[VBCObject | int | None] = []              # 局部变量（使用列表按索引访问）
         self._global_variables = {}             # 全局变量
         self._call_stack: list[CallFrame] = []  # 调用栈
         self._scope_stack = []                  # 作用域栈，用于嵌套作用域管理
@@ -58,7 +57,7 @@ class VBCVirtualMachine:
     
     def _allocate(self, obj):
         """将对象注册到GC，然后返回该对象。"""
-        if isinstance(obj, VBCObject):
+        if isinstance(obj, VBCObjectWithGC):
             self.gc.allocate(obj)
         return obj
 
@@ -476,6 +475,9 @@ class VBCVirtualMachine:
             args.reverse()
             self._stack.pop() # 弹出函数对象
 
+            if self._current_function is None:
+                raise RuntimeError("当前函数为空")
+
             call_frame = CallFrame(
                 function=self._current_function, 
                 return_pc=self._pc, 
@@ -514,6 +516,9 @@ class VBCVirtualMachine:
             args = [self._stack.pop() for _ in range(num_args)]
             args.reverse()
             self._stack.pop() # 弹出绑定方法对象
+
+            if self._current_function is None:
+                raise RuntimeError("当前函数为空")
 
             call_frame = CallFrame(
                 function=self._current_function, 
@@ -617,6 +622,8 @@ class VBCVirtualMachine:
         
         if address is None:
             raise RuntimeError(f"试图获取未初始化变量 '{identifier}' 的地址")
+        if not isinstance(address, int):
+            raise TypeError(f"试图获取非整数地址: {type(address).__name__}")
 
         pointer = self._allocate(VBCPointer(address, target_type_enum))
         self._stack.push(pointer)
@@ -720,6 +727,9 @@ class VBCVirtualMachine:
 
         if num_args != init_method.param_count:
             raise RuntimeError(f"构造函数 '{class_obj._name}.__init__' 期望 {init_method.param_count} 个参数，但提供了 {num_args} 个")
+
+        if self._current_function is None:
+            raise RuntimeError("当前函数为空")
 
         call_frame = CallFrame(
             function=self._current_function,

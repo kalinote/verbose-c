@@ -72,7 +72,7 @@ def format_runtime_error(error: VBCRuntimeError):
     print("错误跟踪:")
     for frame in error.traceback:
         print(f'  在文件 "{frame.filepath}" 中, 第 {frame.line} 行, {frame.scope_name} 中:')
-        for source in frame.source_line_context:
+        for source in frame.source_line_context or []:
             print(f"    {source}")
         # TODO: 增加打印源码行和箭头的功能
     print(error.message)

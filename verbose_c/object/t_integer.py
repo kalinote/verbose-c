@@ -19,7 +19,7 @@ class VBCInteger(VBCObject):
     
     def __init__(self, value: int, type_: VBCObjectType = VBCObjectType.INT):
         if not type_ in VBCInteger.bit_width.keys():
-            raise ValueError(f"类型必须是 <{', '.join(VBCInteger.bit_width.keys())}> 之一")
+            raise ValueError(f"类型必须是 <{', '.join(str(key) for key in VBCInteger.bit_width.keys())}> 之一")
         
         super().__init__(type_)
         if not isinstance(value, int):

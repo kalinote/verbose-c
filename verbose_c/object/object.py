@@ -9,7 +9,6 @@ class VBCObject:
         if not isinstance(object_type, VBCObjectType):
             raise TypeError(f"对象类型必须是 {VBCObjectType}")
         self._object_type = object_type
-        self._gc_marked = False
 
     def __repr__(self):
         return f"{self._object_type}"
@@ -26,3 +25,10 @@ class VBCObject:
     def __str__(self):
         return f"<VBCObject at {id(self):#x}>"
 
+class VBCObjectWithGC(VBCObject):
+    def __init__(self, object_type: VBCObjectType):
+        super().__init__(object_type)
+        self._gc_marked = False
+    
+    def _gc_walk(self):
+        yield self

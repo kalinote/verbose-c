@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING
-from verbose_c.object.object import VBCObject
+from verbose_c.object.object import VBCObjectWithGC
 
 if TYPE_CHECKING:
     from verbose_c.vm.core import VBCVirtualMachine
@@ -10,10 +10,10 @@ class GarbageCollector:
     """
     def __init__(self, vm: 'VBCVirtualMachine'):
         self.vm = vm
-        self.heap: list['VBCObject'] = []
+        self.heap: list['VBCObjectWithGC'] = []
         self.threshold = 1000  # 初始分配阈值
 
-    def allocate(self, obj: 'VBCObject') -> None:
+    def allocate(self, obj: 'VBCObjectWithGC') -> None:
         """
         分配一个新对象，并检查是否需要触发GC。
         """
@@ -47,7 +47,7 @@ class GarbageCollector:
             obj = worklist.pop()
 
             # 如果不是VBCObject对象，或者已经标记过，则跳过
-            if not isinstance(obj, VBCObject) or obj._gc_marked:
+            if not isinstance(obj, VBCObjectWithGC) or obj._gc_marked:
                 continue
 
             obj._gc_marked = True

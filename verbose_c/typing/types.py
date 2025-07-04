@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Sequence
 from verbose_c.object.enum import VBCObjectType
 
 # --- 基础类型 ---
@@ -111,11 +112,11 @@ class ClassType(Type):
                 name: str,
                 # fields: dict[str, 'Type'] | None = None,
                 # methods: dict[str, 'FunctionType'] | None = None,
-                super_class: list['ClassType'] = []
+                super_class: Sequence['ClassType'] = []
             ):
         self.name = name
-        self.super_class: list['ClassType'] = super_class   # 父类列表
-        self.mro: list['ClassType'] = []                    # 方法解析顺序列表
+        self.super_class: Sequence['ClassType'] = super_class   # 父类列表
+        self.mro: Sequence['ClassType'] = []                    # 方法解析顺序列表
         self.fields = {}
         self.methods = {}
         

@@ -26,7 +26,7 @@ class CompilerOutput:
     labels: dict[str, int] = field(default_factory=dict)
     tokens: list[Token] | None = None
     ast_node: ASTNode | None = None
-    processed_code: str | None = None
+    processed_code: str = ""
     lineno_table: list[tuple[int, int]] | None = None
 
 
@@ -122,7 +122,15 @@ def compile_module(
         generate_parser(grammar_file, default_parser_output, log_parser_gen_path)
 
     spec = importlib.util.spec_from_file_location("parser", default_parser_output)
+    
+    if spec is None:
+        raise ImportError(f"无法加载解析器模块: {default_parser_output}")
+    
     parser_module = importlib.util.module_from_spec(spec)
+    
+    if spec.loader is None or parser_module is None:
+        raise ImportError(f"无法加载解析器模块: {default_parser_output}")
+    
     spec.loader.exec_module(parser_module)
 
     # 预处理源代码

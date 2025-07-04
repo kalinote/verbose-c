@@ -1,14 +1,14 @@
 
 from typing import Any, Callable
 from verbose_c.object.enum import VBCObjectType
-from verbose_c.object.object import VBCObject
+from verbose_c.object.object import VBCObject, VBCObjectWithGC
 
 
-class VBCFunction(VBCObject):
+class VBCFunction(VBCObjectWithGC):
     """
     函数对象类
     """
-    def __init__(self, name: str, bytecode: list = None, constants: list = [], param_count: int = 0, 
+    def __init__(self, name: str, bytecode: list | None = None, constants: list = [], param_count: int = 0, 
                     local_count: int = 0, source_path: str | None = None, lineno_table: list | None = None):
         super().__init__(VBCObjectType.FUNCTION)
         self.name = name                # 函数名
@@ -28,7 +28,7 @@ class VBCFunction(VBCObject):
     def _gc_walk(self):
         yield from self.constants
 
-class VBCBoundMethod(VBCObject):
+class VBCBoundMethod(VBCObjectWithGC):
     """
     绑定方法对象，将一个实例和该实例的一个方法绑定在一起。
     """

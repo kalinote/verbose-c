@@ -1,9 +1,9 @@
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.instance import VBCInstance
-from verbose_c.object.object import VBCObject
+from verbose_c.object.object import VBCObject, VBCObjectWithGC
 
 
-class VBCClass(VBCObject):
+class VBCClass(VBCObjectWithGC):
     """
     verbose-c 类类
     """
