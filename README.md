@@ -1,20 +1,79 @@
-# verbose-c
+# Verbose-C
 
-自己动手实现一个类C语言语法解释器，用于学习目的
+一个用Python实现的类C语言编译器和虚拟机，支持从源代码编译到字节码并执行。项目采用完整的编译器架构，包含词法分析、语法分析、语义分析、代码生成和虚拟机执行等完整流程。
+
+## 项目简介
+
+Verbose-C 是一个教学性质的编程语言实现，旨在展示现代编译器的完整工作流程。该项目实现了：
+
+- **自制解析器生成器 (PPG)**: 基于PEG语法的解析器自动生成工具
+- **完整编译流程**: 预处理 → 词法分析 → 语法分析 → 语义分析 → 代码生成
+- **字节码虚拟机**: 基于栈的虚拟机，支持垃圾回收和内存管理
+- **类C语法**: 支持函数、变量、控制流、指针、类等核心语言特性
+
+## 工作原理
+
+### 1. 编译阶段
+```
+源代码(.vbc) → 预处理 → 词法分析 → 语法分析 → AST → 语义分析 → 字节码生成
+```
+
+- **预处理器**: 处理宏定义和条件编译
+- **词法分析器**: 将源代码转换为Token序列
+- **语法分析器**: 通过自制的PEG解析器生成器从语法文件自动生成
+- **语义分析**: 类型检查、符号表管理、作用域分析
+- **代码生成**: 生成针对自定义虚拟机的字节码指令
+
+### 2. 执行阶段
+```
+字节码 → 虚拟机加载 → 指令执行 → 内存管理 → 垃圾回收
+```
+
+- **虚拟机**: 基于栈的字节码解释器
+- **内存管理**: 支持指针操作和动态内存分配
+- **垃圾回收**: 自动内存回收机制
+- **内置函数**: 提供I/O、类型检查等基础功能
+
+### 3. 支持的语言特性
+
+- **数据类型**: int、float、bool、string、指针、类
+- **控制流**: if/else、while、do-while、for循环
+- **函数**: 函数定义、调用、参数传递、返回值
+- **面向对象**: 类定义、继承、实例化
+- **指针操作**: 取地址(&)、解引用(*)
+- **内置函数**: typeof()、len()、文件I/O函数等
 
 ## 安装依赖环境
+
 使用 Python 3.13 及以上版本
 
 ```bash
 pip install -r requirement.txt
 ```
 
-## 运行方法
+## 使用方法
+
+### 运行源代码文件
 ```bash
-python -m verbose_c.cli .\test.vrbc 
+python -m verbose_c.cli example.vbc
 ```
 
-## 编译方法
+### 编译并输出详细信息
 ```bash
-nuitka .\verbose_c\cli.py --follow-imports --standalone
+python -m verbose_c.cli example.vbc --log output.log --out-all
+```
+
+### 重新生成解析器
+```bash
+python -m verbose_c.cli --compile-parser
+```
+
+### 调试虚拟机执行
+```bash
+python -m verbose_c.cli example.vbc --debug-vm --log debug.log
+```
+
+## 编译为可执行文件
+```bash
+nuitka verbose_c/cli.py --follow-imports --standalone
 ```

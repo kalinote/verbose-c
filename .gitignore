@@ -11,3 +11,6 @@ htmlcov/
 .coverage
 coverage.xml
 *.log
+
+.cursorindexingignore
+.specstory
