@@ -125,7 +125,7 @@ class OpcodeGenerator(VisitorBase):
     def visit_NumberNode(self, node: NumberNode):
         target_type = getattr(node, "inferred_type", None)
         if target_type is None:
-            # TODO 自动类型推断可能需要进一步完善？
+            # 如果没有推断类型，使用默认类型
             if isinstance(node.value, int):
                 target_type = VBCObjectType.INT
             elif isinstance(node.value, float):
@@ -133,11 +133,7 @@ class OpcodeGenerator(VisitorBase):
             else:
                 raise TypeError(f"未知的 NumberNode 值类型: {type(node.value).__name__}")
 
-        if not ((isinstance(node.value, int) and target_type in VBCInteger.bit_width.keys()) or \
-            (isinstance(node.value, float) and target_type in VBCFloat.bit_width.keys())):
-            raise TypeError(f"NumberNode 的值类型({type(node.value).__name__})与预期类型({target_type})不匹配, 在行: {node.start_line}, 列: {node.start_column}")
-
-        # TODO 处理float和double类型
+        # 生成对应的VBC对象
         if target_type in VBCInteger.bit_width.keys():
             vbc_int = VBCInteger(node.value, target_type)
             const_index = self._add_constant(vbc_int)
