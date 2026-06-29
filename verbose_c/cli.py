@@ -71,7 +71,7 @@ def main():
             safe_name = re.sub(r'[^A-Za-z0-9._-]', '_', args.filename)
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             os.makedirs("dumps", exist_ok=True)
-            dump_path = os.path.join("dumps", f"{safe_name}_{timestamp}.dump")
+            dump_path = os.path.join("dumps", f"{safe_name}_{timestamp}.md")
 
         compile_source_file(
             filename=args.filename,
@@ -152,69 +152,124 @@ def compile_source_file(
 
         if dump_path:
             with open(dump_path, 'w', encoding='utf-8') as f:
-                f.write("# Verbose-C Dump\n")
-                f.write(f"# 源文件: {filename}\n")
-                f.write(f"# 生成时间: " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n\n")
+                f.write(f"# {filename} Verbose-C Dump\n\n")
+                toc_lines = [
+                    "- [基本信息](#基本信息)"
+                ]
+                if dump_preprocess and compilation_result.processed_code:
+                    toc_lines.append("- [预处理代码](#预处理代码)")
+                if dump_tokens and compilation_result.tokens:
+                    toc_lines.append("- [Token 序列](#token-序列)")
+                if dump_ast and compilation_result.ast_node:
+                    toc_lines.append("- [AST 结构](#ast-结构)")
+                if dump_opcode:
+                    toc_lines.append("- [操作码](#操作码)")
+                if dump_const:
+                    toc_lines.append("- [常量池](#常量池)")
+                if dump_label:
+                    toc_lines.append("- [标签](#标签)")
+                if dump_opcode and compilation_result.function_compilation_results:
+                    toc_lines.append("- [函数编译结果](#函数编译结果)")
+                if dump_vm and vm_debug_logs:
+                    toc_lines.append("- [虚拟机执行记录](#虚拟机执行记录)")
+
+                f.write("## 目录\n\n")
+                f.write("\n".join(toc_lines))
+                f.write("\n\n")
+                f.write("## 基本信息\n\n")
+                f.write(f"- 源文件: `{filename}`\n")
+                f.write(f"- 生成时间: `{time.strftime('%Y-%m-%d %H:%M:%S')}`\n\n")
 
                 if dump_preprocess and compilation_result.processed_code:
-                    f.write("\n=== 预处理代码 ===\n")
+                    f.write("## 预处理代码\n\n")
+                    f.write("```c\n")
                     f.write(compilation_result.processed_code)
-                    f.write("\n")
+                    if not compilation_result.processed_code.endswith("\n"):
+                        f.write("\n")
+                    f.write("```\n\n")
 
                 if dump_tokens and compilation_result.tokens:
-                    f.write("\n=== Token序列 ===\n")
+                    f.write("## Token 序列\n\n")
+                    f.write("```text\n")
                     for token in compilation_result.tokens:
                         f.write(f"{token}\n")
+                    f.write("```\n\n")
 
                 if dump_ast and compilation_result.ast_node:
                     from verbose_c.parser.parser.parser import ast_dump
-                    f.write("\n=== AST结构 ===\n")
+                    f.write("## AST 结构\n\n")
+                    f.write("```text\n")
                     f.write(ast_dump(compilation_result.ast_node, indent=4))
-                    f.write("\n")
+                    f.write("\n```\n\n")
 
                 if dump_opcode:
-                    f.write("\n=== 操作码 ===\n")
+                    f.write("## 操作码\n\n")
+                    f.write("| 索引 | 指令 |\n")
+                    f.write("| --- | --- |\n")
                     for i, instruction in enumerate(compilation_result.bytecode):
                         if len(instruction) == 1:
-                            f.write(f"{i:4d}: {instruction[0].name}\n")
+                            f.write(f"| {i} | `{instruction[0].name}` |\n")
                         else:
-                            f.write(f"{i:4d}: {instruction[0].name} {instruction[1]}\n")
+                            opcode_text = f"{instruction[0].name} {instruction[1]!r}"
+                            opcode_text = opcode_text.replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|").replace("\n", "<br>")
+                            f.write(f"| {i} | `{opcode_text}` |\n")
+                    f.write("\n")
 
                 if dump_const:
-                    f.write(f"\n=== 常量池 ===\n")
+                    f.write("## 常量池\n\n")
+                    f.write("| 索引 | 值 |\n")
+                    f.write("| --- | --- |\n")
                     for i, constant in enumerate(compilation_result.constant_pool):
-                        f.write(f"{i:4d}: {repr(constant)}\n")
+                        constant_text = repr(constant).replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|").replace("\n", "<br>")
+                        f.write(f"| {i} | `{constant_text}` |\n")
+                    f.write("\n")
 
                 if dump_label:
-                    f.write(f"\n=== 标签 ===\n")
+                    f.write("## 标签\n\n")
+                    f.write("| 标签 | 位置 |\n")
+                    f.write("| --- | --- |\n")
                     for lbl, pos in compilation_result.labels.items():
-                        f.write(f"{lbl}: {pos}\n")
+                        f.write(f"| `{lbl}` | {pos} |\n")
+                    f.write("\n")
 
                 if dump_opcode and compilation_result.function_compilation_results:
-                    f.write("\n\n" + "=" * 15 + " 函数编译结果 " + "=" * 15 + "\n")
+                    f.write("## 函数编译结果\n\n")
                     for func_name, result in compilation_result.function_compilation_results.items():
-                        f.write(f"\n--- 函数: {func_name} ---\n")
+                        f.write(f"### 函数 `{func_name}`\n\n")
                         if result.get('bytecode'):
-                            f.write("  操作码:\n")
+                            f.write("#### 操作码\n\n")
+                            f.write("| 索引 | 指令 |\n")
+                            f.write("| --- | --- |\n")
                             for i, instruction in enumerate(result['bytecode']):
                                 if len(instruction) == 1:
-                                    f.write(f"    {i:4d}: {instruction[0].name}\n")
+                                    f.write(f"| {i} | `{instruction[0].name}` |\n")
                                 else:
-                                    f.write(f"    {i:4d}: {instruction[0].name} {instruction[1]}\n")
+                                    opcode_text = f"{instruction[0].name} {instruction[1]!r}"
+                                    opcode_text = opcode_text.replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|").replace("\n", "<br>")
+                                    f.write(f"| {i} | `{opcode_text}` |\n")
+                            f.write("\n")
                         if result.get('constants'):
-                            f.write("  常量池:\n")
+                            f.write("#### 常量池\n\n")
+                            f.write("| 索引 | 值 |\n")
+                            f.write("| --- | --- |\n")
                             for i, constant in enumerate(result['constants']):
-                                f.write(f"    {i:4d}: {repr(constant)}\n")
+                                constant_text = repr(constant).replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|").replace("\n", "<br>")
+                                f.write(f"| {i} | `{constant_text}` |\n")
+                            f.write("\n")
                         if result.get('labels'):
-                            f.write("  标签:\n")
+                            f.write("#### 标签\n\n")
+                            f.write("| 标签 | 位置 |\n")
+                            f.write("| --- | --- |\n")
                             for label, pos in result['labels'].items():
-                                f.write(f"    {label}: {pos}\n")
-                    f.write("\n" + "=" * 40 + "\n")
+                                f.write(f"| `{label}` | {pos} |\n")
+                            f.write("\n")
 
                 if dump_vm and vm_debug_logs:
-                    f.write("\n=== 虚拟机执行记录 ===\n")
+                    f.write("## 虚拟机执行记录\n\n")
+                    f.write("```text\n")
                     for log_entry in vm_debug_logs:
                         f.write(log_entry + "\n")
+                    f.write("```\n")
 
     except VBCRuntimeError as e:
         format_runtime_error(e)
