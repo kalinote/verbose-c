@@ -60,7 +60,7 @@ python -m verbose_c.cli example.vbc
 
 ### 编译并输出详细信息
 ```bash
-python -m verbose_c.cli example.vbc --log output.log --out-all
+python -m verbose_c.cli example.vbc --log all
 ```
 
 ### 重新生成解析器
@@ -70,7 +70,7 @@ python -m verbose_c.cli --compile-parser
 
 ### 调试虚拟机执行
 ```bash
-python -m verbose_c.cli example.vbc --debug-vm --log debug.log
+python -m verbose_c.cli example.vbc --debug-vm --log all
 ```
 
 ## 编译为可执行文件
