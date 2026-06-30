@@ -38,11 +38,13 @@ class SymbolKind(Enum):
     FUNCTION: 函数
     CLASS: 类
     PARAMETER: 参数
+    TYPE_ALIAS: 类型别名(typedef)
     """
     VARIABLE = auto()
     FUNCTION = auto()
     CLASS = auto()
     PARAMETER = auto()
+    TYPE_ALIAS = auto()
 
 class LoopType(Enum):
     """

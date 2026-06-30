@@ -111,9 +111,26 @@ class OpcodeGenerator(VisitorBase):
         """标记标签位置"""
         self.labels[label] = len(self.bytecode)
 
+    def _runtime_type_enum_from_type(self, type_obj: Type | None):
+        """把编译期 Type 映射为运行时 CAST 所需的对象类型枚举。"""
+        if isinstance(type_obj, IntegerType):
+            return type_obj.kind
+        if isinstance(type_obj, FloatType):
+            return type_obj.kind
+        if isinstance(type_obj, BoolType):
+            return VBCObjectType.BOOL
+        return None
+
+    def _emit_implicit_cast_if_needed(self, expr_node: ASTNode):
+        """根据类型检查阶段标记，为表达式补发隐式 CAST 指令。"""
+        target_type = getattr(expr_node, "_implicit_cast_target", None)
+        target_enum = self._runtime_type_enum_from_type(target_type)
+        if target_enum is not None:
+            self._emit(Opcode.CAST, target_enum)
+
     # 基本数据类型
     def visit_NameNode(self, node: NameNode): 
-        symbol = self.symbol_table.lookup(node.name)
+        symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None:
             raise Exception(f"未定义的标识符: {node.name}, 在行: {node.start_line}, 列: {node.start_column}")
 
@@ -196,7 +213,7 @@ class OpcodeGenerator(VisitorBase):
             if not isinstance(node.expr, NameNode):
                 raise RuntimeError(f"内部错误: 取地址操作的目标不是一个有效的标识符, 在 {node.start_line} 行")
             
-            symbol = self.symbol_table.lookup(node.expr.name)
+            symbol = self.symbol_table.lookup_value(node.expr.name)
             if symbol is None:
                 raise RuntimeError(f"内部错误: 无法找到符号 '{node.expr.name}', 在 {node.start_line} 行")
 
@@ -316,7 +333,8 @@ class OpcodeGenerator(VisitorBase):
         self.symbol_table = original_symbol_table
 
     def visit_VarDeclNode(self, node: VarDeclNode):
-        symbol = self.symbol_table.lookup(node.name.name)
+        """生成变量声明字节码，并在初始化边界执行隐式转换。"""
+        symbol = self.symbol_table.lookup_value(node.name.name)
         if symbol is None:
             raise RuntimeError(f"内部错误: 无法找到已由类型检查器验证的符号 '{node.name.name}'")
 
@@ -325,6 +343,7 @@ class OpcodeGenerator(VisitorBase):
             if isinstance(symbol.type_, (IntegerType, FloatType)):
                 setattr(node.init_exp, 'inferred_type', symbol.type_.kind)
             self.visit(node.init_exp)
+            self._emit_implicit_cast_if_needed(node.init_exp)
         else:
             # 没有初始化，将默认值null压入栈
             const_index = self._add_constant(VBCNull())
@@ -337,9 +356,11 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
 
     def visit_AssignmentNode(self, node: AssignmentNode):
+        """生成赋值字节码，并在赋值边界执行隐式转换。"""
         # 解引用赋值
         if isinstance(node.target, UnaryOpNode) and node.target.op == Operator.DEREFERENCE:
             self.visit(node.value)
+            self._emit_implicit_cast_if_needed(node.value)
             self.visit(node.target.expr)
             self._emit(Opcode.STORE_BY_POINTER)
             return
@@ -347,12 +368,13 @@ class OpcodeGenerator(VisitorBase):
         # 普通变量赋值
         if isinstance(node.target, NameNode):
             self.visit(node.value)
+            self._emit_implicit_cast_if_needed(node.value)
 
-            symbol = self.symbol_table.lookup(node.target.name)
+            symbol = self.symbol_table.lookup_value(node.target.name)
             if symbol is None:
                 raise ValueError(f"未定义的变量: {node.target.name}")
 
-            # TODO: 这里的赋值逻辑需要调整以支持值更新而不是重复分配。
+            self._emit(Opcode.DUP)
             if symbol.address is not None:
                 self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
             else:
@@ -361,6 +383,7 @@ class OpcodeGenerator(VisitorBase):
         # 属性赋值
         elif isinstance(node.target, GetPropertyNode):
             self.visit(node.value)
+            self._emit_implicit_cast_if_needed(node.value)
             self.visit(node.target.obj)
 
             property_name = self._add_constant(VBCString(node.target.property_name.name))
@@ -487,7 +510,7 @@ class OpcodeGenerator(VisitorBase):
         if node.init:
             self.visit(node.init)
             # 如果初始化是表达式语句，需要弹出结果（避免栈积累）
-            if not isinstance(node.init, (VarDeclNode, AssignmentNode)):
+            if not isinstance(node.init, VarDeclNode):
                 self._emit(Opcode.POP)
         
         # 条件检查标签
@@ -506,7 +529,7 @@ class OpcodeGenerator(VisitorBase):
         if node.update:
             self.visit(node.update)
             # 如果更新是表达式，需要弹出结果（避免栈积累）
-            if not isinstance(node.update, AssignmentNode):
+            if not isinstance(node.update, VarDeclNode):
                 self._emit(Opcode.POP)
         
         # 跳转回条件检查
@@ -522,8 +545,10 @@ class OpcodeGenerator(VisitorBase):
         self.symbol_table = original_symbol_table
 
     def visit_ReturnNode(self, node: ReturnNode):
+        """生成 return 字节码，并在返回边界执行隐式转换。"""
         if node.value:
             self.visit(node.value)  # 计算返回值并将其放在栈顶
+            self._emit_implicit_cast_if_needed(node.value)
         else:
             # 如果没有显示的返回值，则返回null
             const_index = self._add_constant(VBCNull())
@@ -556,7 +581,7 @@ class OpcodeGenerator(VisitorBase):
         from verbose_c.compiler.compiler import Compiler
         from verbose_c.compiler.enum import CompilerPass
         
-        func_symbol = self.symbol_table.lookup(node.name.name)
+        func_symbol = self.symbol_table.lookup_value(node.name.name)
         if not isinstance(func_symbol.type_, FunctionType):
             raise RuntimeError(f"内部错误: 期望找到函数类型，但找到了 {func_symbol.type_}")
         
@@ -617,6 +642,7 @@ class OpcodeGenerator(VisitorBase):
         self._emit(Opcode.STORE_GLOBAL_VAR, node.name.name)
 
     def visit_CallNode(self, node: CallNode):
+        """生成函数调用字节码，并在实参边界执行隐式转换。"""
         if node.kwargs:
             # TODO 实现关键词参数
             # 高级功能，后续添加，现在不做实现
@@ -627,6 +653,7 @@ class OpcodeGenerator(VisitorBase):
         
         for arg_expr in node.args:
             self.visit(arg_expr)
+            self._emit_implicit_cast_if_needed(arg_expr)
         
         num_args = len(node.args)
         self._emit(Opcode.CALL_FUNCTION, num_args)
@@ -637,7 +664,7 @@ class OpcodeGenerator(VisitorBase):
         class_name = node.name.name
         
         original_table = self.symbol_table
-        class_symbol = self.symbol_table.lookup(class_name)
+        class_symbol = self.symbol_table.lookup_value(class_name)
         if not (class_symbol and class_symbol.scope):
             raise RuntimeError(f"内部错误: TypeChecker未能正确创建或链接类 '{class_name}' 的作用域")
         
@@ -645,14 +672,14 @@ class OpcodeGenerator(VisitorBase):
         super_class_objects = []
         if isinstance(class_type_info, ClassType):
             for super_type in class_type_info.super_class:
-                super_symbol = self.symbol_table.lookup(super_type.name)
+                super_symbol = self.symbol_table.lookup_value(super_type.name)
                 if super_symbol and isinstance(super_symbol.type_, ClassType):
                     pass
         
         self.symbol_table = class_symbol.scope
 
         class_name = node.name.name
-        class_symbol = self.symbol_table.lookup(class_name)
+        class_symbol = self.symbol_table.lookup_value(class_name)
         class_type_info = class_symbol.type_
         
         super_class_objects = []
@@ -687,14 +714,14 @@ class OpcodeGenerator(VisitorBase):
                     continue
                 
                 original_method_table = self.symbol_table
-                method_symbol = self.symbol_table.lookup(method_name)
+                method_symbol = self.symbol_table.lookup_value(method_name)
                 if not (method_symbol and method_symbol.scope):
                     raise RuntimeError(f"内部错误: TypeChecker未能正确创建或链接方法 '{method_name}' 的作用域")
                 
                 method_symbol_table = method_symbol.scope
 
                 # 从符号中获取类型信息
-                class_type = original_method_table.lookup(class_name).type_
+                class_type = original_method_table.lookup_value(class_name).type_
                 method_type = method_symbol.type_
                 if not isinstance(method_type, FunctionType):
                     raise RuntimeError(f"内部错误: 无法找到方法 '{method_name}' 的类型")
@@ -784,7 +811,7 @@ class OpcodeGenerator(VisitorBase):
         )
 
         original_init_table = self.symbol_table
-        init_symbol = self.symbol_table.lookup("__init__")
+        init_symbol = self.symbol_table.lookup_value("__init__")
         
         # 如果用户定义了__init__，则其符号有关联的作用域，否则为默认构造函数创建一个临时的空作用域
         if not (init_symbol and init_symbol.scope):
@@ -793,7 +820,7 @@ class OpcodeGenerator(VisitorBase):
         init_symbol_table = init_symbol.scope
 
         # 在父作用域（original_init_table）中查找类符号
-        class_symbol = original_init_table.lookup(class_name)
+        class_symbol = original_init_table.lookup_value(class_name)
         if not class_symbol or not isinstance(class_symbol.type_, ClassType):
             raise RuntimeError(f"内部错误: 无法在类作用域的父作用域中找到类本身的类型符号")
         class_type = class_symbol.type_
@@ -852,6 +879,7 @@ class OpcodeGenerator(VisitorBase):
     #     raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
 
     def visit_NewInstanceNode(self, node: NewInstanceNode):
+        """生成实例化调用字节码，并在构造参数边界执行隐式转换。"""
         call_node = node.class_call
         
         if not isinstance(call_node, CallNode):
@@ -865,6 +893,7 @@ class OpcodeGenerator(VisitorBase):
         
         for arg_expr in call_node.args:
             self.visit(arg_expr)
+            self._emit_implicit_cast_if_needed(arg_expr)
         
         num_args = len(call_node.args)
         self._emit(Opcode.NEW_INSTANCE, num_args)
@@ -891,30 +920,37 @@ class OpcodeGenerator(VisitorBase):
         raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
 
     def visit_CastNode(self, node: CastNode):
+        """生成显式类型转换字节码（含指针目标类型）。"""
         self.visit(node.expression)
         
-        type_name = node.target_type.type_name.name
-        
-        # TODO 增加自定义数据类型和类的转换
-        RUNTIME_TYPE_MAP = {
-            "void": VBCObjectType.VOID,
-            "char": VBCObjectType.CHAR,
-            "int": VBCObjectType.INT,
-            "long": VBCObjectType.LONG,
-            "long long": VBCObjectType.LONGLONG,
-            "unlimited int": VBCObjectType.NLINT,
-            "float": VBCObjectType.FLOAT,
-            "double": VBCObjectType.DOUBLE,
-            "unlimited float": VBCObjectType.NLFLOAT,
-            "string": VBCObjectType.STRING,
-            "bool": VBCObjectType.BOOL,
-        }
-        
-        target_enum = RUNTIME_TYPE_MAP.get(type_name, VBCObjectType.VOID)
+        if node.target_type.pointer_level > 0:
+            target_enum = VBCObjectType.POINTER
+        else:
+            type_name = node.target_type.type_name.name
+            # TODO 增加自定义数据类型和类的转换
+            RUNTIME_TYPE_MAP = {
+                "void": VBCObjectType.VOID,
+                "char": VBCObjectType.CHAR,
+                "int": VBCObjectType.INT,
+                "long": VBCObjectType.LONG,
+                "long long": VBCObjectType.LONGLONG,
+                "unlimited int": VBCObjectType.NLINT,
+                "float": VBCObjectType.FLOAT,
+                "double": VBCObjectType.DOUBLE,
+                "unlimited float": VBCObjectType.NLFLOAT,
+                "string": VBCObjectType.STRING,
+                "bool": VBCObjectType.BOOL,
+            }
+            target_enum = RUNTIME_TYPE_MAP.get(type_name, VBCObjectType.VOID)
         self._emit(Opcode.CAST, target_enum)
 
+    def visit_ParenOrCastNode(self, node: ParenOrCastNode):
+        if node.resolved_node is None:
+            raise RuntimeError(f"内部错误: ParenOrCastNode 在代码生成前未完成语义消歧, 在 {node.start_line} 行")
+        self.visit(node.resolved_node)
+
     def visit_SuperNode(self, node: SuperNode):
-        this_symbol = self.symbol_table.lookup('this')
+        this_symbol = self.symbol_table.lookup_value('this')
         if this_symbol is None or this_symbol.address != 0:
             raise RuntimeError("内部错误: 在处理 'super' 时无法找到 'this' 实例")
         self._emit(Opcode.LOAD_LOCAL_VAR, 0)

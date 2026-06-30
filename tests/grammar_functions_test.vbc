@@ -1,0 +1,31 @@
+// 测试点：函数定义、形参列表、函数调用、有返回值 return 和空 return。
+
+int add(int left, int right) {
+    return left + right;
+}
+
+bool is_positive(int value) {
+    return value > 0;
+}
+
+void touch() {
+    return;
+}
+
+int main() {
+    write(STDOUT, "\n=== Functions Grammar Test ===\n");
+
+    int total = add(1, 2);
+    bool ok = is_positive(total);
+    touch();
+
+    write(STDOUT, "add(1, 2) = ");
+    write(STDOUT, total);
+    write(STDOUT, "\nis_positive(total) = ");
+    write(STDOUT, ok);
+    write(STDOUT, "\ntouch() called\n");
+
+    return total;
+}
+
+main();

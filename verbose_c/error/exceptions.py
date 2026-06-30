@@ -21,8 +21,9 @@ class VBCError(Exception):
 
 class VBCCompileError(VBCError):
     """编译时错误"""
-    def __init__(self, message, line: int | None = None, filepath: str | None = None):
+    def __init__(self, message, line: int | None = None, filepath: str | None = None, warnings: list[str] | None = None):
         super().__init__(message, line, filepath)
+        self.warnings = warnings or []
 
 class VBCRuntimeError(VBCError):
     """

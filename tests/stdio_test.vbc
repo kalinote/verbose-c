@@ -1,7 +1,7 @@
-// 测试使用底层 write/read 函数进行标准输入输出 (stdio)
+// 测试点：使用内置 STDIN/STDOUT 常量与 read/write 函数完成标准输入输出。
 
 // STDOUT 的文件描述符是 1
-write(STDOUT, "Hello from verbose-c using write() on STDOUT!\n");
+write(STDOUT, "\n=== Standard I/O Test ===\n");
 write(STDOUT, "Please enter your name: ");
 
 // STDIN 的文件描述符是 0

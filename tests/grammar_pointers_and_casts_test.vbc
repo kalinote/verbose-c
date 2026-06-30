@@ -1,0 +1,39 @@
+// 测试点：多级指针、取地址、解引用、null 比较和基础类型/指针类型转换。
+
+int main() {
+    write(STDOUT, "\n=== Pointers and Casts Grammar Test ===\n");
+
+    int value = 7;
+    int* pointer = &value;
+    int** pointer_to_pointer = &pointer;
+    int copy = *pointer;
+
+    write(STDOUT, "Initial value: ");
+    write(STDOUT, value);
+    write(STDOUT, ", copy: ");
+    write(STDOUT, copy);
+    write(STDOUT, "\n");
+
+    *pointer = copy + 1;
+    **pointer_to_pointer = *pointer + 1;
+    write(STDOUT, "value after multi-level pointer write: ");
+    write(STDOUT, value);
+    write(STDOUT, "\n");
+
+    int from_float = (int)3.5;
+    string text_value = (string)value;
+    int* same_pointer = (int*)pointer;
+    bool has_pointer = same_pointer != null;
+
+    write(STDOUT, "float to int: ");
+    write(STDOUT, from_float);
+    write(STDOUT, "\nvalue to string: ");
+    write(STDOUT, text_value);
+    write(STDOUT, "\npointer is not null: ");
+    write(STDOUT, has_pointer);
+    write(STDOUT, "\n");
+
+    return value;
+}
+
+main();

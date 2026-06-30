@@ -1,0 +1,18 @@
+// 测试点：类型命名空间与值命名空间分离，变量名与内置类型名同名时类型解析仍正确。
+
+int main() {
+    write(STDOUT, "\n=== Type Namespace Shadowing Test ===\n");
+
+    int string = 12;
+    string text = (string)string;
+
+    write(STDOUT, "Variable string: ");
+    write(STDOUT, string);
+    write(STDOUT, "\nConverted text: ");
+    write(STDOUT, text);
+    write(STDOUT, "\n");
+
+    return string;
+}
+
+main();

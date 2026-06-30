@@ -1,0 +1,48 @@
+// 测试点：独立代码块、嵌套代码块、普通赋值、链式赋值和赋值表达式。
+
+int main() {
+    write(STDOUT, "\n=== Blocks and Assignments Grammar Test ===\n");
+
+    int outer = 1;
+    int inner = 0;
+
+    {
+        int scoped = outer + 1;
+        inner = scoped;
+        {
+            int nested = inner + scoped;
+            outer = nested;
+        }
+    }
+    write(STDOUT, "outer after nested blocks: ");
+    write(STDOUT, outer);
+    write(STDOUT, ", inner: ");
+    write(STDOUT, inner);
+    write(STDOUT, "\n");
+
+    outer = inner = outer + 1;
+    write(STDOUT, "outer after chained assignment: ");
+    write(STDOUT, outer);
+    write(STDOUT, ", inner: ");
+    write(STDOUT, inner);
+    write(STDOUT, "\n");
+
+    outer = (inner = outer + 2);
+    write(STDOUT, "outer after assignment expression: ");
+    write(STDOUT, outer);
+    write(STDOUT, ", inner: ");
+    write(STDOUT, inner);
+    write(STDOUT, "\n");
+
+    return outer;
+}
+
+{
+    int top_level_block_value = 1;
+    top_level_block_value = top_level_block_value + 1;
+    write(STDOUT, "\nTop-level standalone block value: ");
+    write(STDOUT, top_level_block_value);
+    write(STDOUT, "\n");
+}
+
+main();

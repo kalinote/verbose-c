@@ -57,9 +57,14 @@ class Compiler:
     def opcode_generator(self):
         return self._opcode_generator
 
+    @property
+    def warnings(self):
+        """暴露类型检查阶段收集到的编译告警。"""
+        return self._type_checker.warnings
+
     def compile(self):
         """
-        执行编译
+        执行类型检查与字节码生成，并在错误时抛出编译异常。
         
         - TODO 编译完成后的字节码优化
         """
@@ -75,7 +80,7 @@ class Compiler:
             if self._type_checker.errors:
                 # 将所有收集到的错误信息合并，并抛出异常
                 combined_error_message = "\n".join(self._type_checker.errors)
-                raise VBCCompileError(combined_error_message, filepath=self._source_path)
+                raise VBCCompileError(combined_error_message, filepath=self._source_path, warnings=self._type_checker.warnings)
         
         if run_all or CompilerPass.GENERATE_CODE in passes:
             # 代码生成

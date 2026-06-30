@@ -107,6 +107,22 @@ class CastNode(ASTNode):
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.target_type: TypeNode = target_type
         self.expression: ASTNode = expression
+
+class ParenOrCastNode(ASTNode):
+    """
+    括号表达式与类型转换的歧义节点。
+
+    语法层保留歧义，交由语义阶段统一判定为：
+    1) CastNode
+    2) 普通表达式组合
+    
+    例: (a) + b 其中a可能为类型(对b的强制转换)或普通表达式(对a的括号运算)
+    """
+    def __init__(self, target_type: TypeNode, expression: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.target_type: TypeNode = target_type
+        self.expression: ASTNode = expression
+        self.resolved_node: ASTNode | None = None
     
 # 结构和运算
 class RootNode(ASTNode):

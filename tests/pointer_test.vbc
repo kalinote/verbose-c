@@ -1,36 +1,35 @@
+// 测试点：指针声明、null 初始化、取地址、解引用读取与解引用写入。
+
 int main() {
     int a = 10;
     int* p = null;
 
-    write(STDOUT, "--- Initial values ---\n");
-    write(STDOUT, "Value of a: ");
+    write(STDOUT, "\n=== Pointer Execution Test ===\n");
+    write(STDOUT, "Initial a: ");
     write(STDOUT, (string)a);
     write(STDOUT, "\n");
-    write(STDOUT, "Value of p: ");
+    write(STDOUT, "Initial p: ");
     write(STDOUT, p);
     write(STDOUT, "\n");
 
-    // --- Test 1: Address-of operator (&) ---
+    // 取地址运算符 (&)
     p = &a;
-    write(STDOUT, "\n--- After p = &a ---\n");
-    write(STDOUT, "Value of p: ");
+    write(STDOUT, "\np after p = &a: ");
     write(STDOUT, p);
     write(STDOUT, "\n");
 
-    // --- Test 2: Dereference operator (*) for reading ---
+    // 解引用读取 (*)
     int b = *p;
-    write(STDOUT, "\n--- After b = *p ---\n");
-    write(STDOUT, "Value of b: ");
+    write(STDOUT, "\nb after b = *p: ");
     write(STDOUT, b);
     write(STDOUT, "\n");
 
-    // --- Test 3: Dereference operator (*) for writing ---
+    // 解引用写入 (*)
     *p = 20;
-    write(STDOUT, "\n--- After *p = 20 ---\n");
-    write(STDOUT, "Value of a: ");
+    write(STDOUT, "\na after *p = 20: ");
     write(STDOUT, a);
     write(STDOUT, "\n");
-    write(STDOUT, "Value of *p: ");
+    write(STDOUT, "Current *p: ");
     write(STDOUT, *p);
     write(STDOUT, "\n");
 

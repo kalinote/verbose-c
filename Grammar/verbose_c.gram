@@ -77,7 +77,7 @@ multiplicative:
     | multiplicative '/' factor { BinaryOpNode(multiplicative, Operator.DIVIDE, factor, LOCATIONS) }
     | factor
 factor:
-    | '(' type_name ')' expr { CastNode(type_name, expr, LOCATIONS) } 
+    | '(' type_name ')' expr { ParenOrCastNode(type_name, expr, LOCATIONS) } 
     | '(' expr ')' { expr }
     | unary
     | new_instance

@@ -1,0 +1,29 @@
+// 测试点：括号表达式与 cast 语法歧义消解，确保 (name)+x / (name)-x / (name)*x 不被识别为 cast。
+
+int main() {
+    write(STDOUT, "\n=== Cast/Parentheses Ambiguity Regression Test ===\n");
+
+    int left = 6;
+    int right = 3;
+
+    int plus_value = (left) + (right);
+    int minus_value = (left) - (right);
+    int multiply_value = (left) * (right);
+
+    write(STDOUT, "plus_value: ");
+    write(STDOUT, plus_value);
+    write(STDOUT, "\nminus_value: ");
+    write(STDOUT, minus_value);
+    write(STDOUT, "\nmultiply_value: ");
+    write(STDOUT, multiply_value);
+    write(STDOUT, "\n");
+
+    int cast_value = (int)3.5;
+    write(STDOUT, "cast_value: ");
+    write(STDOUT, cast_value);
+    write(STDOUT, "\n");
+
+    return plus_value + minus_value + multiply_value + cast_value;
+}
+
+main();

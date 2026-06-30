@@ -1,0 +1,44 @@
+// 测试点：字面量、算术优先级、比较、逻辑运算、一元运算和类型转换。
+
+int main() {
+    write(STDOUT, "\n=== Expressions Grammar Test ===\n");
+
+    int base = 10;
+    int mixed = base + 2 * 3 - (4 / 2);
+    bool same = mixed == 14;
+    bool different = mixed != base;
+    bool ordered = mixed >= base && base <= mixed;
+    bool combined = same || different && !ordered;
+    float ratio = 1.5e2;
+    string label = "expressions";
+    string as_text = (string)mixed;
+
+    write(STDOUT, "label: ");
+    write(STDOUT, label);
+    write(STDOUT, "\nInitial mixed: ");
+    write(STDOUT, as_text);
+    write(STDOUT, "\nsame: ");
+    write(STDOUT, same);
+    write(STDOUT, "\ndifferent: ");
+    write(STDOUT, different);
+    write(STDOUT, "\nordered: ");
+    write(STDOUT, ordered);
+    write(STDOUT, "\ncombined: ");
+    write(STDOUT, combined);
+    write(STDOUT, "\n");
+
+    mixed = +mixed + -base;
+    combined = combined || (ratio > 10.0);
+
+    write(STDOUT, "mixed after unary operations: ");
+    write(STDOUT, (string)mixed);
+    write(STDOUT, "\nratio: ");
+    write(STDOUT, ratio);
+    write(STDOUT, "\nFinal combined: ");
+    write(STDOUT, combined);
+    write(STDOUT, "\n");
+
+    return mixed;
+}
+
+main();

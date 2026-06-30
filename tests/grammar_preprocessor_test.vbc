@@ -1,0 +1,39 @@
+// 测试点：#include 导入宏、普通宏、函数式宏和反斜杠续行宏需要先由预处理器展开。
+
+#include "preprocessor_imported_macros.inc"
+#define START_VALUE 3
+#define STEP_VALUE 2
+#define ADD(left, right) ((left) + (right))
+#define BUILD_TOTAL(base) \
+    ADD(base, STEP_VALUE)
+
+int main() {
+    write(STDOUT, "\n=== Preprocessor Grammar Test ===\n");
+
+    int total = BUILD_TOTAL(START_VALUE);
+    write(STDOUT, "total after local macro expansion: ");
+    write(STDOUT, total);
+    write(STDOUT, "\n");
+
+    total = IMPORTED_ADD(total, IMPORTED_VALUE);
+    bool ok = total == 9;
+    string text = (string)total;
+
+    write(STDOUT, "total after imported macro calculation: ");
+    write(STDOUT, text);
+    write(STDOUT, "\nok: ");
+    write(STDOUT, ok);
+    write(STDOUT, "\n");
+
+    if (ok) {
+        total = ADD(total, IMPORTED_STEP);
+    }
+
+    write(STDOUT, "Final total: ");
+    write(STDOUT, total);
+    write(STDOUT, "\n");
+
+    return total;
+}
+
+main();

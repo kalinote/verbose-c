@@ -48,28 +48,38 @@ class TypeChecker(VisitorBase):
         self.symbol_table = symbol_table
         self.source_path = source_path
         self.errors: list[str] = []
+        self.warnings: list[str] = []
         self.loop_level = 0
         self.current_function_return_type: Type | None = None   # 跟踪当前函数返回类型
         self.current_class_type: ClassType | None = None # 跟踪当前类上下文
+        self._register_builtin_types()
+
+    def _register_builtin_types(self):
+        """
+        将内置类型注册到类型命名空间。
+        TODO: 后续接入 typedef 或自定义类型系统时，统一通过类型命名空间解析。
+        """
+        for type_name, type_obj in BUILTIN_TYPE_MAP.items():
+            try:
+                self.symbol_table.add_type_symbol(type_name, type_obj)
+            except NameError:
+                # 多次初始化同一作用域时允许幂等。
+                continue
 
     def visit(self, node: ASTNode) -> Type:
         """重写 visit 方法以提供更精确的类型提示"""
         return super().visit(node)
 
-    def resolve_type_node(self, type_node: TypeNode) -> Type:
+    def resolve_type_node(self, type_node: TypeNode, report_error: bool = True) -> Type:
         """
         将 AST 中的 TypeNode 转换为 Type 对象，支持指针。
         """
         type_name = type_node.type_name.name
-        base_type: Type | None = BUILTIN_TYPE_MAP.get(type_name)
-
-        if not base_type:
-            symbol = self.symbol_table.lookup(type_name)
-            if symbol and isinstance(symbol.type_, ClassType):
-                base_type = symbol.type_
+        base_type: Type | None = self.symbol_table.lookup_type(type_name)
         
         if not base_type:
-            self.errors.append(f"未知类型 '{type_name}', 在 {type_node.start_line} 行")
+            if report_error:
+                self.errors.append(f"未知类型 '{type_name}', 在 {type_node.start_line} 行")
             return ErrorType()
 
         # 根据指针级别，递归创建 PointerType
@@ -98,22 +108,52 @@ class TypeChecker(VisitorBase):
         if isinstance(target_type, AnyType):
             return True
 
-        # 规则4: 允许整数赋值给浮点数 (提升)
-        if isinstance(target_type, FloatType) and isinstance(source_type, IntegerType):
+        # 规则4: C 标准下，算术类型之间允许隐式赋值
+        if isinstance(target_type, (IntegerType, FloatType, BoolType)) and isinstance(source_type, (IntegerType, FloatType, BoolType)):
             return True
             
-        # 规则5: 允许低精度数字赋值给高精度数字
-        if isinstance(target_type, (IntegerType, FloatType)) and isinstance(source_type, (IntegerType, FloatType)):
-            target_priority = TYPE_PROMOTION_PRIORITY.get(target_type.kind, -1)
-            source_priority = TYPE_PROMOTION_PRIORITY.get(source_type.kind, -1)
-            return target_priority >= source_priority
-            
-        # 规则6: 允许 void* 和其他指针类型互相赋值
+        # 规则5: 允许 void* 和其他指针类型互相赋值
         if isinstance(target_type, PointerType) and isinstance(source_type, PointerType):
             if isinstance(target_type.base_type, VoidType) or isinstance(source_type.base_type, VoidType):
                 return True
 
         return False
+
+    def _numeric_rank(self, type_: Type) -> int:
+        """返回数值类型的隐式转换优先级，用于判断是否窄化。"""
+        if isinstance(type_, BoolType):
+            return 0
+        if isinstance(type_, IntegerType):
+            return int(TYPE_PROMOTION_PRIORITY.get(type_.kind, 0))
+        if isinstance(type_, FloatType):
+            return int(TYPE_PROMOTION_PRIORITY.get(type_.kind, 0))
+        return -1
+
+    def _warn_implicit_conversion_if_needed(self, target_type: Type, source_type: Type, line: int | None, context: str):
+        """在发生可能丢失信息的隐式转换时记录编译告警。"""
+        if target_type == source_type:
+            return
+
+        if isinstance(target_type, IntegerType) and isinstance(source_type, FloatType):
+            self.warnings.append(
+                f"类型警告: {context} 发生隐式转换 '{source_type}' -> '{target_type}'，可能丢失小数部分, 在 {line} 行"
+            )
+            return
+
+        if isinstance(target_type, (IntegerType, FloatType, BoolType)) and isinstance(source_type, (IntegerType, FloatType, BoolType)):
+            target_rank = self._numeric_rank(target_type)
+            source_rank = self._numeric_rank(source_type)
+            if target_rank < source_rank:
+                self.warnings.append(
+                    f"类型警告: {context} 发生隐式窄化转换 '{source_type}' -> '{target_type}'，可能丢失精度, 在 {line} 行"
+                )
+
+    def _mark_implicit_cast_if_needed(self, expr_node: ASTNode, target_type: Type, source_type: Type):
+        """给表达式打标记，提示代码生成阶段插入隐式 CAST。"""
+        if target_type == source_type:
+            return
+        if isinstance(target_type, (IntegerType, FloatType, BoolType)) and isinstance(source_type, (IntegerType, FloatType, BoolType)):
+            setattr(expr_node, "_implicit_cast_target", target_type)
 
     def _is_castable(self, target_type: Type, source_type: Type) -> bool:
         """
@@ -193,7 +233,7 @@ class TypeChecker(VisitorBase):
         return NullType()
 
     def visit_NameNode(self, node: NameNode) -> Type:
-        symbol = self.symbol_table.lookup(node.name)
+        symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None:
             self.errors.append(f"命名错误: '{node.name}' 未定义, 在 {node.start_line} 行")
             return ErrorType()
@@ -244,6 +284,7 @@ class TypeChecker(VisitorBase):
 
 
     def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
+        """检查二元表达式类型并推导结果类型。"""
         left_type = self.visit(node.left)
         right_type = self.visit(node.right)
 
@@ -278,6 +319,15 @@ class TypeChecker(VisitorBase):
 
         # 比较运算
         if op in (Operator.GREATER_THAN, Operator.GREATER_EQUAL, Operator.LESS_THAN, Operator.LESS_EQUAL, Operator.EQUAL, Operator.NOT_EQUAL):
+            # C 语义: 指针与 null 允许做相等/不等比较
+            if op in (Operator.EQUAL, Operator.NOT_EQUAL):
+                pointer_null_compare = (
+                    (isinstance(left_type, PointerType) and isinstance(right_type, NullType)) or
+                    (isinstance(left_type, NullType) and isinstance(right_type, PointerType))
+                )
+                if pointer_null_compare:
+                    return BoolType()
+
             # 允许数字之间，或相同类型之间比较
             is_numeric = isinstance(left_type, (IntegerType, FloatType)) and isinstance(right_type, (IntegerType, FloatType))
             is_same_type = type(left_type) is type(right_type)
@@ -299,6 +349,7 @@ class TypeChecker(VisitorBase):
 
     # 语句的类型检查
     def visit_VarDeclNode(self, node: VarDeclNode) -> Type:
+        """检查变量声明初始化的类型兼容，并记录必要的隐式转换信息。"""
         declared_type = self.resolve_type_node(node.var_type)
         
         if node.init_exp:
@@ -308,6 +359,9 @@ class TypeChecker(VisitorBase):
 
             if not self._is_assignable(declared_type, init_type):
                 self.errors.append(f"类型错误: 不能将类型 '{init_type}' 的值赋给类型为 '{declared_type}' 的变量 '{node.name.name}', 在 {node.start_line} 行")
+            else:
+                self._warn_implicit_conversion_if_needed(declared_type, init_type, node.start_line, f"变量 '{node.name.name}' 初始化")
+                self._mark_implicit_cast_if_needed(node.init_exp, declared_type, init_type)
 
         try:
             self.symbol_table.add_symbol(node.name.name, declared_type, kind=SymbolKind.VARIABLE)
@@ -317,6 +371,7 @@ class TypeChecker(VisitorBase):
         return VoidType()
 
     def visit_AssignmentNode(self, node: AssignmentNode) -> Type:
+        """检查赋值语句类型兼容，并记录赋值边界的隐式转换信息。"""
         if isinstance(node.target, UnaryOpNode) and node.target.op == Operator.DEREFERENCE:
             pointer_type = self.visit(node.target.expr)
             if not isinstance(pointer_type, PointerType):
@@ -329,8 +384,9 @@ class TypeChecker(VisitorBase):
             if not self._is_assignable(target_type, value_type):
                 self.errors.append(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的指针目标, 在 {node.start_line} 行")
                 return ErrorType()
-            
-            return value_type
+            self._warn_implicit_conversion_if_needed(target_type, value_type, node.start_line, "指针解引用赋值")
+            self._mark_implicit_cast_if_needed(node.value, target_type, value_type)
+            return target_type
         
         target_type = self.visit(node.target)
         if isinstance(target_type, ErrorType):
@@ -343,8 +399,9 @@ class TypeChecker(VisitorBase):
         if not self._is_assignable(target_type, value_type):
             self.errors.append(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的目标, 在 {node.start_line} 行")
             return ErrorType()
-
-        return value_type
+        self._warn_implicit_conversion_if_needed(target_type, value_type, node.start_line, "赋值")
+        self._mark_implicit_cast_if_needed(node.value, target_type, value_type)
+        return target_type
 
     def visit_BlockNode(self, node: BlockNode) -> Type:
         original_table = self.symbol_table
@@ -464,6 +521,7 @@ class TypeChecker(VisitorBase):
         return VoidType()
 
     def visit_ReturnNode(self, node: ReturnNode) -> Type:
+        """检查 return 返回值是否符合函数签名，并记录隐式返回转换。"""
         if self.current_function_return_type is None:
             self.errors.append(f"语法错误: 'return' 语句未在函数内, 在 {node.start_line} 行")
             return VoidType()
@@ -482,10 +540,14 @@ class TypeChecker(VisitorBase):
         actual_return_type = self.visit(node.value)
         if not self._is_assignable(self.current_function_return_type, actual_return_type):
             self.errors.append(f"类型错误: 函数应返回 '{self.current_function_return_type}' 类型, 但返回了 '{actual_return_type}' 类型, 在 {node.start_line} 行")
+        else:
+            self._warn_implicit_conversion_if_needed(self.current_function_return_type, actual_return_type, node.start_line, "返回值")
+            self._mark_implicit_cast_if_needed(node.value, self.current_function_return_type, actual_return_type)
 
         return VoidType()
 
     def visit_CallNode(self, node: CallNode) -> Type:
+        """检查函数调用参数类型，并记录参数边界的隐式转换。"""
         # 检查被调用者是否是函数
         callee_type = self.visit(node.name)
         if not isinstance(callee_type, FunctionType):
@@ -505,6 +567,9 @@ class TypeChecker(VisitorBase):
             expected_arg_type = callee_type.param_types[i]
             if not self._is_assignable(expected_arg_type, actual_arg_type):
                 self.errors.append(f"类型错误: 函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型, 在 {arg_node.start_line} 行")
+            else:
+                self._warn_implicit_conversion_if_needed(expected_arg_type, actual_arg_type, arg_node.start_line, f"函数参数 {i+1}")
+                self._mark_implicit_cast_if_needed(arg_node, expected_arg_type, actual_arg_type)
 
         return callee_type.return_type
 
@@ -516,19 +581,19 @@ class TypeChecker(VisitorBase):
         if node.base_classes: # 假设 AST 节点有 super_classes 列表
             for super_class_node in node.base_classes:
                 super_class_name = super_class_node.name
-                symbol = self.symbol_table.lookup(super_class_name)
-                
+                super_class_type = self.symbol_table.lookup_type(super_class_name)
+
                 # 验证父类是否存在且为类类型
-                if not symbol or not isinstance(symbol.type_, ClassType):
+                if not isinstance(super_class_type, ClassType):
                     self.errors.append(f"类型错误: '{super_class_name}' 不是一个有效的基类, 在 {super_class_node.start_line} 行")
                     continue # 跳过无效的父类
 
                 # 检查是否重复继承
-                if symbol.type_ in super_class:
+                if super_class_type in super_class:
                     self.errors.append(f"语法错误: 重复的基类 '{super_class_name}', 在 {super_class_node.start_line} 行")
                     continue
 
-                super_class.append(symbol.type_)
+                super_class.append(super_class_type)
         
         class_type = ClassType(class_name, super_class=super_class)
         class_symbol = None
@@ -574,8 +639,14 @@ class TypeChecker(VisitorBase):
                     class_type.methods[member.name.name] = method_type
                     self.symbol_table.add_symbol(member.name.name, method_type, kind=SymbolKind.FUNCTION)
             
-            # 如果用户没有定义 __init__，则添加一个默认的
-            if "__init__" not in class_type.methods:
+            has_user_defined_init = any(
+                isinstance(member, FunctionNode) and member.name.name == "__init__"
+                for member in node.body.statements
+            )
+
+            # 如果当前类没有显式定义 __init__，则在当前类作用域补一个默认构造函数。
+            # 不能仅依赖 class_type.methods，因为它可能已合并到父类的 __init__。
+            if not has_user_defined_init:
                 default_init_type = FunctionType(param_types=[], return_type=VoidType())
                 class_type.methods["__init__"] = default_init_type
                 # 为默认构造函数创建符号和作用域
@@ -594,7 +665,7 @@ class TypeChecker(VisitorBase):
                 method_name = member.name.name
                 method_type = self.current_class_type.methods[method_name]
 
-                method_symbol = self.symbol_table.lookup(method_name, current_scope_only=True)
+                method_symbol = self.symbol_table.lookup_value(method_name, current_scope_only=True)
 
                 original_method_scope_parent_table = self.symbol_table # 当前是 class_table
                 func_table = SymbolTable(scope_type=ScopeType.FUNCTION, parent=original_method_scope_parent_table)
@@ -657,6 +728,7 @@ class TypeChecker(VisitorBase):
         return ErrorType()
 
     def visit_NewInstanceNode(self, node: NewInstanceNode) -> Type:
+        """检查构造函数调用参数类型，并记录构造参数边界的隐式转换。"""
         class_call = node.class_call
         
         class_type = self.visit(class_call.name)
@@ -677,24 +749,77 @@ class TypeChecker(VisitorBase):
                 expected_arg_type = constructor_type.param_types[i]
                 if not self._is_assignable(expected_arg_type, actual_arg_type):
                     self.errors.append(f"类型错误: 构造函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型, 在 {arg_node.start_line} 行")
+                else:
+                    self._warn_implicit_conversion_if_needed(expected_arg_type, actual_arg_type, arg_node.start_line, f"构造函数参数 {i+1}")
+                    self._mark_implicit_cast_if_needed(arg_node, expected_arg_type, actual_arg_type)
         elif len(class_call.args) > 0:
             self.errors.append(f"构造函数参数错误: 类 '{class_type.name}' 没有定义构造函数, 不能接受参数, 在 {node.start_line} 行")
 
         return class_type
 
-    def visit_CastNode(self, node: CastNode) -> Type:
-        # 获取原始表达式数据类型和目标类型
-        source_type = self.visit(node.expression)
-        target_type = self.resolve_type_node(node.target_type)
+    def visit_ParenOrCastNode(self, node: ParenOrCastNode) -> Type:
+        target_type = self.resolve_type_node(node.target_type, report_error=False)
+        if not isinstance(target_type, ErrorType):
+            cast_node = CastNode(
+                node.target_type,
+                node.expression,
+                start_line=node.start_line,
+                start_column=node.start_column,
+                end_line=node.end_line,
+                end_column=node.end_column
+            )
+            node.resolved_node = cast_node
+            source_type = self.visit(node.expression)
+            if isinstance(source_type, ErrorType):
+                return ErrorType()
+            if not self._is_castable(target_type, source_type):
+                self.errors.append(f"类型错误: 无法将类型 '{source_type}' 强制转换为 '{target_type}', 在 {node.start_line} 行")
+                return ErrorType()
+            return target_type
 
+        expr_node = None
+        if node.target_type.pointer_level == 0:
+            left_name = node.target_type.type_name.name
+            if self.symbol_table.lookup_value(left_name) is not None and isinstance(node.expression, UnaryOpNode):
+                op_map = {
+                    Operator.ADD: Operator.ADD,
+                    Operator.SUBTRACT: Operator.SUBTRACT,
+                    Operator.DEREFERENCE: Operator.MULTIPLY,
+                }
+                mapped_op = op_map.get(node.expression.op)
+                if mapped_op is not None:
+                    left = NameNode(
+                        left_name,
+                        start_line=node.start_line,
+                        start_column=node.start_column,
+                        end_line=node.end_line,
+                        end_column=node.end_column
+                    )
+                    expr_node = BinaryOpNode(
+                        left,
+                        mapped_op,
+                        node.expression.expr,
+                        start_line=node.start_line,
+                        start_column=node.start_column,
+                        end_line=node.end_line,
+                        end_column=node.end_column
+                    )
+
+        if expr_node is not None:
+            node.resolved_node = expr_node
+            return self.visit(expr_node)
+
+        self.resolve_type_node(node.target_type, report_error=True)
+        return ErrorType()
+
+    def visit_CastNode(self, node: CastNode) -> Type:
+        target_type = self.resolve_type_node(node.target_type)
+        source_type = self.visit(node.expression)
         if isinstance(target_type, ErrorType) or isinstance(source_type, ErrorType):
             return ErrorType()
-
-        # 检查类型是否可以转换
         if not self._is_castable(target_type, source_type):
             self.errors.append(f"类型错误: 无法将类型 '{source_type}' 强制转换为 '{target_type}', 在 {node.start_line} 行")
             return ErrorType()
-        
         return target_type
 
     def visit_SuperNode(self, node: SuperNode) -> Type:

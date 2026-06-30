@@ -10,6 +10,7 @@ default_parser_output = "parser.py"
 
 
 def parse_args():
+    """解析命令行参数"""
     parser = argparse.ArgumentParser(
         prog="verbose-c",
         description="Verbose-C Compiler"
@@ -18,14 +19,15 @@ def parse_args():
     parser.add_argument("filename", help="需要编译的文件（.vbc源代码文件或.gram语法文件）")
     parser.add_argument("--log", nargs="?", const="all", help="按模块输出命令行日志（模块: compile, vm, parser, all；默认 all）")
     parser.add_argument("--dump", nargs="?", const="all", help="按模块写入中间产物（模块: preprocess, tokens, ast, opcode, const, label, vm, all；默认 all）")
+    parser.add_argument("--no-warn", help="静默编译告警输出", action="store_true")
     parser.add_argument("-cp", "--compile-parser", help="编译语法文件生成解析器", action="store_true")
     parser.add_argument("--compile-only", help="只编译不执行源代码", action="store_true")
-    parser.add_argument("--debug-vm", help="开启虚拟机调试模式", action="store_true")
     parser.add_argument("-rp", "--refresh-parser", help="重新生成解析器", action="store_true")
     return parser.parse_args()
 
 
 def main():
+    """根据参数组织编译流程并分发到解析器/编译执行入口。"""
     args = parse_args()
     log_modules = set()
     dump_modules = set()
@@ -79,8 +81,8 @@ def main():
             dump_modules=dump_modules,
             dump_path=dump_path,
             execute=not args.compile_only,
-            debug_vm=args.debug_vm,
-            refresh_parser=args.refresh_parser
+            refresh_parser=args.refresh_parser,
+            show_warnings=not args.no_warn
         )
 
 
@@ -99,9 +101,10 @@ def compile_source_file(
         dump_modules=None,
         dump_path=None,
         execute=True,
-        debug_vm=False,
-        refresh_parser=False
+        refresh_parser=False,
+        show_warnings=True
     ):
+    """执行单文件编译/运行，并按需输出 dump 与编译告警。"""
     log_modules = log_modules or set()
     dump_modules = dump_modules or set()
     log_compile = "all" in log_modules or "compile" in log_modules
@@ -115,10 +118,26 @@ def compile_source_file(
     dump_label = dump_all or "label" in dump_modules
     dump_vm = dump_all or "vm" in dump_modules
 
+    compilation_result = None
+    vm_debug_logs = []
+    dump_processed_code = None
+    dump_tokens_data = None
+    captured_error = None
+    compile_warnings = []
+
     if log_compile:
         print(f"编译源代码文件: {filename}")
 
     try:
+        if dump_path and (dump_preprocess or dump_tokens):
+            with open(filename, "r", encoding="utf-8") as source_file:
+                source_code = source_file.read()
+            from verbose_c.preprocessor.preprocessor import Preprocessor
+            dump_processed_code = Preprocessor().process(source_code, filename)
+            if dump_tokens:
+                from verbose_c.parser.lexer.tokenizer import Tokenizer
+                dump_tokens_data = Tokenizer(filename, dump_processed_code).tokens
+
         if log_compile:
             print("调用核心编译引擎...")
         compilation_result = compile_module(
@@ -129,15 +148,19 @@ def compile_source_file(
             need_processed_code=dump_preprocess,
             log_parser_gen_path=None
         )
+        compile_warnings = compilation_result.warnings or []
+        if show_warnings and compile_warnings:
+            for warning_line in compile_warnings:
+                print(f"警告: {warning_line}")
+
         if log_compile:
             print("编译完成。")
 
-        vm_debug_logs = []
         if execute:
             if log_vm:
                 print("\n执行字节码...\n")
             from verbose_c.vm.core import VBCVirtualMachine
-            log_collector = vm_debug_logs if debug_vm and dump_vm and dump_path else None
+            log_collector = vm_debug_logs if dump_vm and dump_path else None
 
             vm = VBCVirtualMachine(debug_log_collector=log_collector)
             vm.excute(
@@ -150,25 +173,62 @@ def compile_source_file(
             if log_vm:
                 print("程序执行完成")
 
+    except VBCRuntimeError as e:
+        captured_error = e
+        format_runtime_error(e)
+    except VBCCompileError as e:
+        captured_error = e
+        print(f"编译错误: 文件 {e.filepath}")
+        for error_line in e.message.split('\n'):
+            print(f"  - {error_line}")
+        compile_warnings = e.warnings or []
+        if show_warnings and compile_warnings:
+            for warning_line in compile_warnings:
+                print(f"警告: {warning_line}")
+    except Exception as e:
+        captured_error = e
+        print(f"发生了一个意外的内部错误: {e}")
+        traceback.print_exc()
+    finally:
         if dump_path:
+            processed_code_to_dump = None
+            if compilation_result is not None and compilation_result.processed_code:
+                processed_code_to_dump = compilation_result.processed_code
+            elif dump_processed_code:
+                processed_code_to_dump = dump_processed_code
+
+            tokens_to_dump = None
+            if compilation_result is not None and compilation_result.tokens:
+                tokens_to_dump = compilation_result.tokens
+            elif dump_tokens_data:
+                tokens_to_dump = dump_tokens_data
+
+            ast_node_to_dump = compilation_result.ast_node if compilation_result is not None else None
+            bytecode_to_dump = compilation_result.bytecode if compilation_result is not None else []
+            const_pool_to_dump = compilation_result.constant_pool if compilation_result is not None else []
+            labels_to_dump = compilation_result.labels if compilation_result is not None else {}
+            function_results_to_dump = compilation_result.function_compilation_results if compilation_result is not None else {}
+
             with open(dump_path, 'w', encoding='utf-8') as f:
                 f.write(f"# {filename} Verbose-C Dump\n\n")
                 toc_lines = [
                     "- [基本信息](#基本信息)"
                 ]
-                if dump_preprocess and compilation_result.processed_code:
+                if captured_error is not None:
+                    toc_lines.append("- [错误信息](#错误信息)")
+                if dump_preprocess and processed_code_to_dump:
                     toc_lines.append("- [预处理代码](#预处理代码)")
-                if dump_tokens and compilation_result.tokens:
+                if dump_tokens and tokens_to_dump:
                     toc_lines.append("- [Token 序列](#token-序列)")
-                if dump_ast and compilation_result.ast_node:
+                if dump_ast and ast_node_to_dump:
                     toc_lines.append("- [AST 结构](#ast-结构)")
-                if dump_opcode:
+                if dump_opcode and bytecode_to_dump:
                     toc_lines.append("- [操作码](#操作码)")
-                if dump_const:
+                if dump_const and const_pool_to_dump:
                     toc_lines.append("- [常量池](#常量池)")
-                if dump_label:
+                if dump_label and labels_to_dump:
                     toc_lines.append("- [标签](#标签)")
-                if dump_opcode and compilation_result.function_compilation_results:
+                if dump_opcode and function_results_to_dump:
                     toc_lines.append("- [函数编译结果](#函数编译结果)")
                 if dump_vm and vm_debug_logs:
                     toc_lines.append("- [虚拟机执行记录](#虚拟机执行记录)")
@@ -178,35 +238,42 @@ def compile_source_file(
                 f.write("\n\n")
                 f.write("## 基本信息\n\n")
                 f.write(f"- 源文件: `{filename}`\n")
-                f.write(f"- 生成时间: `{time.strftime('%Y-%m-%d %H:%M:%S')}`\n\n")
+                f.write(f"- 生成时间: `{time.strftime('%Y-%m-%d %H:%M:%S')}`\n")
+                f.write(f"- 编译结果: `{'失败' if captured_error else '成功'}`\n\n")
 
-                if dump_preprocess and compilation_result.processed_code:
+                if captured_error is not None:
+                    f.write("## 错误信息\n\n")
+                    f.write("```text\n")
+                    f.write(f"{type(captured_error).__name__}: {captured_error}\n")
+                    f.write("```\n\n")
+
+                if dump_preprocess and processed_code_to_dump:
                     f.write("## 预处理代码\n\n")
                     f.write("```c\n")
-                    f.write(compilation_result.processed_code)
-                    if not compilation_result.processed_code.endswith("\n"):
+                    f.write(processed_code_to_dump)
+                    if not processed_code_to_dump.endswith("\n"):
                         f.write("\n")
                     f.write("```\n\n")
 
-                if dump_tokens and compilation_result.tokens:
+                if dump_tokens and tokens_to_dump:
                     f.write("## Token 序列\n\n")
                     f.write("```text\n")
-                    for token in compilation_result.tokens:
+                    for token in tokens_to_dump:
                         f.write(f"{token}\n")
                     f.write("```\n\n")
 
-                if dump_ast and compilation_result.ast_node:
+                if dump_ast and ast_node_to_dump:
                     from verbose_c.parser.parser.parser import ast_dump
                     f.write("## AST 结构\n\n")
                     f.write("```text\n")
-                    f.write(ast_dump(compilation_result.ast_node, indent=4))
+                    f.write(ast_dump(ast_node_to_dump, indent=4))
                     f.write("\n```\n\n")
 
-                if dump_opcode:
+                if dump_opcode and bytecode_to_dump:
                     f.write("## 操作码\n\n")
                     f.write("| 索引 | 指令 |\n")
                     f.write("| --- | --- |\n")
-                    for i, instruction in enumerate(compilation_result.bytecode):
+                    for i, instruction in enumerate(bytecode_to_dump):
                         if len(instruction) == 1:
                             f.write(f"| {i} | `{instruction[0].name}` |\n")
                         else:
@@ -215,26 +282,26 @@ def compile_source_file(
                             f.write(f"| {i} | `{opcode_text}` |\n")
                     f.write("\n")
 
-                if dump_const:
+                if dump_const and const_pool_to_dump:
                     f.write("## 常量池\n\n")
                     f.write("| 索引 | 值 |\n")
                     f.write("| --- | --- |\n")
-                    for i, constant in enumerate(compilation_result.constant_pool):
+                    for i, constant in enumerate(const_pool_to_dump):
                         constant_text = repr(constant).replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|").replace("\n", "<br>")
                         f.write(f"| {i} | `{constant_text}` |\n")
                     f.write("\n")
 
-                if dump_label:
+                if dump_label and labels_to_dump:
                     f.write("## 标签\n\n")
                     f.write("| 标签 | 位置 |\n")
                     f.write("| --- | --- |\n")
-                    for lbl, pos in compilation_result.labels.items():
+                    for lbl, pos in labels_to_dump.items():
                         f.write(f"| `{lbl}` | {pos} |\n")
                     f.write("\n")
 
-                if dump_opcode and compilation_result.function_compilation_results:
+                if dump_opcode and function_results_to_dump:
                     f.write("## 函数编译结果\n\n")
-                    for func_name, result in compilation_result.function_compilation_results.items():
+                    for func_name, result in function_results_to_dump.items():
                         f.write(f"### 函数 `{func_name}`\n\n")
                         if result.get('bytecode'):
                             f.write("#### 操作码\n\n")
@@ -271,15 +338,7 @@ def compile_source_file(
                         f.write(log_entry + "\n")
                     f.write("```\n")
 
-    except VBCRuntimeError as e:
-        format_runtime_error(e)
-    except VBCCompileError as e:
-        print(f"编译错误: 文件 {e.filepath}")
-        for error_line in e.message.split('\n'):
-            print(f"  - {error_line}")
-    except Exception as e:
-        print(f"发生了一个意外的内部错误: {e}")
-        traceback.print_exc()
+            print(f"\n运行记录已保存到：{dump_path}")
 
 
 if __name__ == "__main__":

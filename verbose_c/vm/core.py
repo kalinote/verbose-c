@@ -7,6 +7,7 @@ from verbose_c.object.instance import VBCInstance
 from verbose_c.object.object import VBCObject, VBCObjectWithGC
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
+from verbose_c.object.t_null import VBCNull
 from verbose_c.object.t_pointer import VBCPointer
 from verbose_c.object.t_string import VBCString
 from verbose_c.utils.stack import Stack
@@ -425,6 +426,7 @@ class VBCVirtualMachine:
 
     @register_instruction(Opcode.RETURN)
     def __handle_return(self):
+        """处理函数返回并恢复调用上下文，构造函数返回 this 实例。"""
         if self._stack.is_empty():
             raise RuntimeError("RETURN 指令缺少返回值")
 
@@ -441,7 +443,8 @@ class VBCVirtualMachine:
         
         # 构造函数调用的特殊处理：返回实例 `this` 而不是构造函数的返回值
         if getattr(call_frame, 'is_constructor_call', False):
-            instance = self._local_variables[0] # 'this' 存储在局部变量0
+            instance_address = self._local_variables[0] # 'this' 的地址存储在局部变量0
+            instance = self.memory.read(instance_address)
             self._stack.push(instance)
         else:
             self._stack.push(return_value)
@@ -459,6 +462,7 @@ class VBCVirtualMachine:
     ## 函数调用类指令
     @register_instruction(Opcode.CALL_FUNCTION)
     def __handle_call_function(self, num_args):
+        """处理普通函数、原生函数、绑定方法的调用与栈帧切换。"""
         if num_args is None:
             raise ValueError("CALL_FUNCTION 指令缺少参数数量")
         
@@ -493,7 +497,7 @@ class VBCVirtualMachine:
             self._constants = callable_obj.constants
             self._local_variables = [None] * callable_obj.local_count
             for i, arg in enumerate(args):
-                self._local_variables[i] = arg
+                self._local_variables[i] = self.memory.allocate(arg)
             
             # 将PC设置为-1，因为循环会自动+1，从而从0开始执行新函数
             self._pc = -1
@@ -535,9 +539,9 @@ class VBCVirtualMachine:
             self._constants = method.constants
             self._local_variables = [None] * method.local_count
             
-            self._local_variables[0] = instance
+            self._local_variables[0] = self.memory.allocate(instance)
             for i, arg in enumerate(args):
-                self._local_variables[i + 1] = arg
+                self._local_variables[i + 1] = self.memory.allocate(arg)
             
             # 将PC设置为-1，因为循环会自动+1，从而从0开始执行新函数
             self._pc = -1
@@ -568,6 +572,7 @@ class VBCVirtualMachine:
     ## 类型转换类指令
     @register_instruction(Opcode.CAST)
     def __handle_cast(self, target_type_enum):
+        """按运行时类型枚举执行 C 语义下的显式/隐式转换。"""
         if target_type_enum is None:
             raise RuntimeError("CAST 指令缺少目标类型操作数")
 
@@ -577,7 +582,7 @@ class VBCVirtualMachine:
         # TODO 完善转换规则
         # 规则 1: 转换为数字类型
         if target_type_enum in VBCInteger.bit_width or target_type_enum in VBCFloat.bit_width:
-            if isinstance(source_obj, (VBCInteger, VBCFloat)):
+            if isinstance(source_obj, (VBCInteger, VBCFloat, VBCBool)):
                 value_as_float = float(source_obj.value)
                 if target_type_enum in VBCInteger.bit_width:
                     new_obj = VBCInteger(int(value_as_float), target_type_enum)
@@ -591,6 +596,11 @@ class VBCVirtualMachine:
         # 规则 3: 转换为布尔类型
         elif target_type_enum == VBCObjectType.BOOL:
             new_obj = VBCBool(bool(source_obj))
+
+        # 规则 4: 指针类型转换（仅保留 C 语义下必要的指针/空值转换）
+        elif target_type_enum == VBCObjectType.POINTER:
+            if isinstance(source_obj, (VBCPointer, VBCNull)):
+                new_obj = source_obj
 
         if new_obj is None:
             source_type_name = source_obj._object_type.name
@@ -748,9 +758,9 @@ class VBCVirtualMachine:
         self._constants = init_method.constants
         self._local_variables = [None] * init_method.local_count
 
-        self._local_variables[0] = instance
+        self._local_variables[0] = self.memory.allocate(instance)
         for i, arg in enumerate(args):
-            self._local_variables[i + 1] = arg
+            self._local_variables[i + 1] = self.memory.allocate(arg)
 
         self._pc = -1
 

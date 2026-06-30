@@ -28,6 +28,7 @@ class CompilerOutput:
     ast_node: ASTNode | None = None
     processed_code: str = ""
     lineno_table: list[tuple[int, int]] | None = None
+    warnings: list[str] = field(default_factory=list)
 
 
 def generate_parser(grammar_path: str, output_path: str, log_path: str | None = None):
@@ -163,5 +164,6 @@ def compile_module(
         tokens=tokenizer.tokens if need_tokens else None,
         ast_node=ast_node if need_ast else None,
         processed_code=processed_code if need_processed_code else source_code,
-        lineno_table=opcode_gen.lineno_table
+        lineno_table=opcode_gen.lineno_table,
+        warnings=compiler.warnings
     )

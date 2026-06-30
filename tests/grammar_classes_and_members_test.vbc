@@ -1,0 +1,45 @@
+// 测试点：类定义、属性、方法、多继承、new 实例化、成员访问和 super 调用。
+
+class Entity {
+    int id;
+
+    int get_id() {
+        return id;
+    }
+}
+
+class Named {
+    string name;
+}
+
+class Counter extends Entity, Named {
+    int value;
+
+    int set_value(int next) {
+        value = next;
+        return value;
+    }
+
+    int get_parent_id() {
+        return super.get_id();
+    }
+}
+
+int main() {
+    write(STDOUT, "\n=== Classes and Member Access Grammar Test ===\n");
+
+    Counter counter = new Counter();
+    counter.value = 1;
+    counter.name = "counter";
+    counter.set_value(counter.value + 1);
+
+    write(STDOUT, "counter.name: ");
+    write(STDOUT, counter.name);
+    write(STDOUT, "\ncounter.value: ");
+    write(STDOUT, counter.value);
+    write(STDOUT, "\nset_value call completed\n");
+
+    return counter.value;
+}
+
+main();
