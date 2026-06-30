@@ -62,15 +62,15 @@ class Lexer:
             # 如果是标识符，检查是否是关键字
             if tok_type == TokenType.NAME and value in self.KEYWORDS:
                 # 将关键字作为特殊的标识符处理
-                yield Token(tok_type, value, column=token_start_column, line=token_start_line, is_keyword=True)
+                yield Token(tok_type, value, column=token_start_column, line=token_start_line, path=self.filename, is_keyword=True)
             else:
                 # 其他所有类型的词法单元
-                yield Token(tok_type, value, column=token_start_column, line=token_start_line)
+                yield Token(tok_type, value, column=token_start_column, line=token_start_line, path=self.filename)
 
         # 扫描结束后，附加 END token
         # END token 的起始位置是文件内容的末尾
         # self.column += 1 # 不再需要这个调整
-        yield Token(TokenType.END, TokenType.END.literal, column=self.column, line=self.line)
+        yield Token(TokenType.END, TokenType.END.literal, column=self.column, line=self.line, path=self.filename)
 
     def _update_position(self, text):
         """

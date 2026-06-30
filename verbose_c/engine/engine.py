@@ -1,6 +1,7 @@
 import os
 import importlib.util
 import time
+import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,6 +12,8 @@ from verbose_c.parser.parser.ast.node import ASTNode
 from verbose_c.compiler.compiler import Compiler
 from verbose_c.parser.ppg.build import build_python_parser_and_generator
 from verbose_c.parser.ppg.validator import validate_grammar
+from verbose_c.error import VBCCompileError, VBCRuntimeError
+from verbose_c.engine.recorder import PipelineRecorder, create_dump_path
 
 default_parser_output = "parser.py"
 grammar_file = "Grammar/verbose_c.gram"
@@ -18,9 +21,7 @@ grammar_file = "Grammar/verbose_c.gram"
 
 @dataclass
 class ParserGenerationReport:
-    """
-    用于封装解析器生成过程的结构化信息。
-    """
+    """用于封装解析器生成过程的结构化信息。"""
     grammar_path: str
     output_path: str
     generated_at: str
@@ -36,9 +37,7 @@ class ParserGenerationReport:
 
 @dataclass
 class CompilerOutput:
-    """
-    用于封装单次编译结果的数据类。
-    """
+    """用于封装单次编译结果的数据类。"""
     bytecode: list[tuple[Any, ...]]
     constant_pool: list[Any]
     function_compilation_results: dict[str, Any] = field(default_factory=dict)
@@ -49,6 +48,26 @@ class CompilerOutput:
     lineno_table: list[tuple[int, int]] | None = None
     warnings: list[str] = field(default_factory=list)
     parser_generation_report: ParserGenerationReport | None = None
+
+
+@dataclass
+class CompileContext:
+    """编译流水线各阶段中间产物，失败时保留已完成阶段的数据。"""
+    processed_code: str = ""
+    tokens: list[Token] | None = None
+    ast_node: ASTNode | None = None
+    parser_generation_report: ParserGenerationReport | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RunResult:
+    """单次编译/运行流程的结果。"""
+    success: bool
+    dump_path: str | None = None
+    compilation_output: CompilerOutput | None = None
+    warnings: list[str] = field(default_factory=list)
+    error: Exception | None = None
 
 
 def _build_parser_generation_report(
@@ -98,22 +117,16 @@ def _build_parser_generation_report(
 
 
 def generate_parser(grammar_path: str, output_path: str) -> ParserGenerationReport:
-    """
-    根据语法文件生成解析器，并返回生成报告。
-
-    Args:
-        grammar_path (str): 语法文件的路径 (.gram)。
-        output_path (str): 生成的解析器文件路径 (.py)。
-    """
+    """根据语法文件生成解析器，并返回生成报告。"""
     t0 = time.time()
     grammar, parser, tokenizer, gen = build_python_parser_and_generator(
         grammar_path,
         output_path
     )
     t1 = time.time()
-    
+
     validate_grammar(grammar)
-    report = _build_parser_generation_report(
+    return _build_parser_generation_report(
         grammar_path,
         output_path,
         grammar,
@@ -122,72 +135,217 @@ def generate_parser(grammar_path: str, output_path: str) -> ParserGenerationRepo
         gen,
         t1 - t0
     )
-    return report
+
+
+def ensure_parser(refresh_parser: bool = False) -> ParserGenerationReport | None:
+    """若 parser.py 不存在或需要刷新，则生成解析器并返回报告。"""
+    if refresh_parser or not os.path.exists(default_parser_output):
+        return generate_parser(grammar_file, default_parser_output)
+    return None
+
+
+def _load_parser_module():
+    spec = importlib.util.spec_from_file_location("parser", default_parser_output)
+    if spec is None:
+        raise ImportError(f"无法加载解析器模块: {default_parser_output}")
+
+    parser_module = importlib.util.module_from_spec(spec)
+    if spec.loader is None or parser_module is None:
+        raise ImportError(f"无法加载解析器模块: {default_parser_output}")
+
+    spec.loader.exec_module(parser_module)
+    return parser_module
 
 
 def compile_module(
-    file_path: str, 
+    file_path: str,
     refresh_parser: bool = False,
-    need_tokens: bool = False,
-    need_ast: bool = False,
-    need_processed_code: bool = False
+    recorder: PipelineRecorder | None = None,
 ) -> CompilerOutput:
     """
-    编译单个模块文件，返回编译结果。
+    编译单个模块文件，分阶段执行并在每阶段完成后通知 recorder。
 
     Args:
         file_path (str): 要编译的源文件路径。
         refresh_parser (bool): 是否强制重新生成解析器。
-    Returns:
-        CompilerOutput: 包含字节码等编译结果的对象。
+        recorder (PipelineRecorder | None): 输出记录器。
     """
-    parser_generation_report = None
-    if refresh_parser or not os.path.exists(default_parser_output):
-        parser_generation_report = generate_parser(grammar_file, default_parser_output)
+    context = CompileContext()
 
-    spec = importlib.util.spec_from_file_location("parser", default_parser_output)
-    
-    if spec is None:
-        raise ImportError(f"无法加载解析器模块: {default_parser_output}")
-    
-    parser_module = importlib.util.module_from_spec(spec)
-    
-    if spec.loader is None or parser_module is None:
-        raise ImportError(f"无法加载解析器模块: {default_parser_output}")
-    
-    spec.loader.exec_module(parser_module)
+    report = ensure_parser(refresh_parser)
+    if report is not None:
+        context.parser_generation_report = report
+        if recorder:
+            recorder.on_parser_generated(report)
 
-    # 预处理源代码
+    parser_module = _load_parser_module()
+
     with open(file_path, "r", encoding="utf-8") as f:
         source_code = f.read()
-    
-    preprocessor = Preprocessor()
-    processed_code = preprocessor.process(source_code, file_path)
 
-    # 词法分析和语法分析
+    processed_code = Preprocessor().process(source_code, file_path)
+    context.processed_code = processed_code
+    if recorder:
+        recorder.on_preprocessed(processed_code)
+
     tokenizer = Tokenizer(file_path, processed_code)
+    context.tokens = tokenizer.tokens
+    if recorder:
+        recorder.on_tokens(tokenizer.tokens)
+
     parser = parser_module.GeneratedParser(tokenizer)
     ast_node = parser.start()
-
     if ast_node is None:
         error_report = parser.get_error_report() if parser.has_errors() else "未知的解析错误"
         raise SyntaxError(f"在文件 {file_path} 中解析失败:\n{error_report}")
 
-    # 编译AST
+    context.ast_node = ast_node
+    if recorder:
+        recorder.on_ast(ast_node)
+
     compiler = Compiler(ast_node, source_path=file_path)
     compiler.compile()
-    
     opcode_gen = compiler.opcode_generator
+    context.warnings = compiler.warnings
 
-    return CompilerOutput(
+    output = CompilerOutput(
         bytecode=compiler.bytecode,
         constant_pool=compiler.constant_pool,
         function_compilation_results=opcode_gen.function_compilation_results,
         labels=opcode_gen.labels,
-        tokens=tokenizer.tokens if need_tokens else None,
-        ast_node=ast_node if need_ast else None,
-        processed_code=processed_code if need_processed_code else source_code,
+        tokens=tokenizer.tokens,
+        ast_node=ast_node,
+        processed_code=processed_code,
         lineno_table=opcode_gen.lineno_table,
         warnings=compiler.warnings,
-        parser_generation_report=parser_generation_report
+        parser_generation_report=context.parser_generation_report
+    )
+    if recorder:
+        recorder.on_compiled(output)
+    return output
+
+
+def run_parser_generation(
+    *,
+    log_modules: set[str],
+    dump_modules: set[str],
+    dump_path: str | None = None,
+) -> RunResult:
+    """编译语法文件生成解析器。"""
+    if dump_path is None and dump_modules:
+        dump_path = create_dump_path(grammar_file)
+
+    recorder = PipelineRecorder(
+        source_filename=grammar_file,
+        log_modules=log_modules,
+        dump_modules=dump_modules,
+        dump_path=dump_path,
+        dump_title="Verbose-C Parser Dump",
+        basic_info_lines=[
+            f"- 源语法文件: `{grammar_file}`",
+            f"- 输出解析器: `{default_parser_output}`",
+        ],
+    )
+
+    report = None
+    captured_error = None
+    try:
+        report = generate_parser(grammar_file, default_parser_output)
+        recorder.on_parser_generated(report)
+    except Exception as e:
+        captured_error = e
+        print(f"编译语法文件时发生错误: {e}")
+        traceback.print_exc()
+        recorder.on_error(e)
+    finally:
+        final_path = recorder.finalize(success=captured_error is None)
+
+    return RunResult(
+        success=captured_error is None,
+        dump_path=final_path,
+        error=captured_error,
+    )
+
+
+def run_source_file(
+    filename: str,
+    *,
+    log_modules: set[str],
+    dump_modules: set[str],
+    dump_path: str | None = None,
+    execute: bool = True,
+    refresh_parser: bool = False,
+    show_warnings: bool = True,
+) -> RunResult:
+    """编译并可选执行单个源文件，由 recorder 负责 log 与 dump 输出。"""
+    if dump_path is None and dump_modules:
+        dump_path = create_dump_path(filename)
+
+    recorder = PipelineRecorder(
+        source_filename=filename,
+        log_modules=log_modules,
+        dump_modules=dump_modules,
+        dump_path=dump_path,
+    )
+
+    compilation_result = None
+    captured_error = None
+    compile_warnings: list[str] = []
+
+    recorder.log_compile_start()
+    try:
+        recorder.log_compile_engine()
+        compilation_result = compile_module(
+            file_path=filename,
+            refresh_parser=refresh_parser,
+            recorder=recorder,
+        )
+        compile_warnings = compilation_result.warnings or []
+        if show_warnings and compile_warnings:
+            for warning_line in compile_warnings:
+                print(f"警告: {warning_line}")
+
+        recorder.log_compile_done()
+
+        if execute:
+            recorder.log_vm_start()
+            from verbose_c.vm.core import VBCVirtualMachine
+
+            vm = VBCVirtualMachine(debug_log_collector=recorder.create_vm_log_collector())
+            vm.excute(
+                bytecode=compilation_result.bytecode,
+                constants=compilation_result.constant_pool,
+                source_path=filename,
+                lineno_table=compilation_result.lineno_table,
+                source_code=compilation_result.processed_code.split("\n")
+            )
+            recorder.log_vm_done()
+
+    except VBCRuntimeError as e:
+        captured_error = e
+        recorder.on_error(e)
+    except VBCCompileError as e:
+        captured_error = e
+        print(f"编译错误: 文件 {e.filepath}")
+        for error_line in e.message.split('\n'):
+            print(f"  - {error_line}")
+        compile_warnings = e.warnings or []
+        if show_warnings and compile_warnings:
+            for warning_line in compile_warnings:
+                print(f"警告: {warning_line}")
+        recorder.on_error(e)
+    except Exception as e:
+        captured_error = e
+        print(f"发生了一个意外的内部错误: {e}")
+        traceback.print_exc()
+        recorder.on_error(e)
+    finally:
+        final_path = recorder.finalize(success=captured_error is None)
+
+    return RunResult(
+        success=captured_error is None,
+        dump_path=final_path,
+        compilation_output=compilation_result,
+        warnings=compile_warnings,
+        error=captured_error,
     )

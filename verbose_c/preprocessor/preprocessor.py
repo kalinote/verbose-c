@@ -1,6 +1,8 @@
 import os
 import re
 
+from verbose_c.parser.lexer.token import Token
+
 class Preprocessor:
     """
     源代码预处理器，负责处理宏指令，如 #include 和 #define。
@@ -168,3 +170,13 @@ class Preprocessor:
         self._included_files.remove(abs_file_path)
 
         return "\n".join(processed_lines)
+
+    def process_tokens(self, tokens: list[Token]) -> list[Token]:
+        """
+        TODO: [高优先级]处理词法分析后的Token序列，展开宏定义。
+        """
+        # TODO: 暂时先支持最简单的define，后续再增加对其他宏的支持
+        for token in tokens:
+            pass
+        
+        return tokens
