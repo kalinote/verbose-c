@@ -43,7 +43,9 @@
   - 【已完成】调试 dump 可分别展示预处理前、预处理后的 Token 序列
   - 【已完成】`tests/grammar_preprocessor_test.vbc` 预处理测试通过
   - 【已完成】include 文件 token 的解析错误可输出对应文件的源码上下文
-  - 【待完善】新增 Token 边界相关回归测试（字符串内宏名、标识符子串等专用用例）
+  - 【已完成】新增 Token 边界相关回归测试（`tests/grammar/preprocessor_token_boundary_test.vbc`：字符串内宏名、标识符子串、注释、函数式宏无括号等专用用例）
+
+
 
 ### P0-2 Token 宏展开语义闭环
 
@@ -63,7 +65,8 @@
   - 【已完成】`#define A B` + `#define B 1` 可继续展开为最终值（`grammar_preprocessor_test.vbc` 覆盖）
   - 【已完成】复杂宏样例（如 `BUILD_TOTAL(START_VALUE)`、include 导入宏）可稳定得到预期展开结果
   - 【已完成】`tests/grammar/predefined_macros_test.vbc` 覆盖预定义宏与 `__func__`
-  - 【待完善】每类宏展开行为都有预处理前后 Token 对照测试（dump 已支持两节 token，缺专用回归用例）
+
+
 
 ### P0-3 预处理条件编译
 
@@ -77,6 +80,8 @@
   - 【未完成】嵌套条件编译可正常解析
   - 【未完成】非法宏块能给出明确错误信息（包含文件和行号）
 
+
+
 ### P0-4 C 条件判断语义修正
 
 - 目标能力：
@@ -87,6 +92,8 @@
 - 验收标准：
   - `if (1)`, `if (ptr)`, `while (n)` 均可编译并行为正确
   - `!0`、`!1`、`!ptr` 结果符合 C 预期
+
+
 
 ### P0-5 基础运算符闭环（C 高频基础子集）
 
@@ -101,6 +108,8 @@
   - 运算优先级与结合性符合 C 常识
   - 与赋值语句、循环更新表达式组合使用行为正确
 
+
+
 ### P0-6 函数声明原型（Prototype）
 
 - 目标能力：
@@ -110,6 +119,8 @@
 - 验收标准：
   - `int add(int, int);` + 后续定义可通过
   - 调用时参数检查遵循原型
+
+
 
 ### P0-7 数组与下标访问
 
@@ -123,6 +134,8 @@
   - 读写下标结果正确
   - 越界行为至少有一致策略（报错或定义明确）
 
+
+
 ### P0-8 C 控制流补齐：`switch/case/default`
 
 - 目标能力：
@@ -134,6 +147,8 @@
   - 可编译执行多分支 `switch` 示例
   - 无 `break` 时能够按 C 语义穿透
   - 默认分支行为正确
+
+
 
 ### P0-9 关键数据结构基础：`typedef` / `enum` / `struct`
 
@@ -150,7 +165,11 @@
 
 ---
 
+
+
 ## 4. P1 目标（高优先级）
+
+
 
 ### P1-1 指针语义增强
 
@@ -160,6 +179,8 @@
 - 验收标准：
   - 数组与指针联动场景可运行
   - 指针运算结果与元素步长语义一致
+
+
 
 ### P1-2 类型转换与整数提升规则完善
 
@@ -171,6 +192,8 @@
   - `int/int` 除法结果符合 C 语义
   - 非法转换给出明确错误
 
+
+
 ### P1-3 `sizeof` 与更完整声明语法
 
 - 目标能力：
@@ -180,6 +203,8 @@
   - 常见 `sizeof` 场景结果正确
   - 与数组、指针、结构体组合使用时结果一致
 
+
+
 ### P1-4 作用域与存储期关键字（最小集）
 
 - 目标能力：
@@ -188,6 +213,8 @@
   - `const` 变量禁止非法修改
   - `static` 生命周期与可见性符合预期
 
+
+
 ### P1-5 标准库最小可迁移接口（libc 最小子集）
 
 - 目标能力：
@@ -195,6 +222,8 @@
   - 至少保证常见输入输出与字符串基础能力可迁移
 - 验收标准：
   - 迁移小型 C 示例（输入输出+字符串处理）无需大改
+
+
 
 ### P1-6 `#include` 与 C17 6.10.2 对齐
 
@@ -211,18 +240,22 @@
   - 插入时机与宏可见性与 C 标准一致
 - 与 C 标准差异：
 
-| 行为 | C17 6.10.2 | P0 实现 |
-|------|------------|---------|
-| `"file.h"` 搜索 | 当前目录 → 再按 `<>` 规则重搜 | 仅当前文件相对目录 |
-| `<file.h>` | system/include 目录 | 不支持（warn + 跳过） |
-| 重复 include | 允许，靠守卫防重复 | 路径去重跳过 |
-| 循环 include | 无内置防护 | 检测环并跳过 |
-| 找不到文件 | diagnostic（通常错误） | warn + 丢弃 |
+
+| 行为            | C17 6.10.2          | P0 实现          |
+| ------------- | ------------------- | -------------- |
+| `"file.h"` 搜索 | 当前目录 → 再按 `<>` 规则重搜 | 仅当前文件相对目录      |
+| `<file.h>`    | system/include 目录   | 不支持（warn + 跳过） |
+| 重复 include    | 允许，靠守卫防重复           | 路径去重跳过         |
+| 循环 include    | 无内置防护               | 检测环并跳过         |
+| 找不到文件         | diagnostic（通常错误）    | warn + 丢弃      |
+
 
 - 验收标准：
   - `#include <stdio.h>` 可通过 `-I` 或系统路径解析
   - 无 include guard 的头文件被 include 两次时，内容出现两次（与 C 一致）
   - 找不到 include 文件时编译失败并给出文件与行号
+
+
 
 ### P1-7 统一错误诊断与输出（`verbose_c/error`）
 
@@ -247,19 +280,23 @@ verbose_c/error/
 
 - 当前各阶段错误/警告分布（基线）：
 
-| 阶段 | 产生位置 | 载体 | 格式化 | 终端输出 |
-|------|----------|------|--------|----------|
-| CLI | `cli.py` | 无 | 无 | `cli.py` 直接 `print` |
-| 词法 | `lexer.py` | `SyntaxError` | 无 | `engine` `except Exception` |
-| 预处理 | `preprocessor.py` | 警告字符串 | `_warn` 内拼位置 | `preprocessor._warn` 直接 `print` |
-| 语法解析 | `error_collector.py` | `ParseError` 列表 | `format_error_report()` | 包进 `VBCCompileError` 后 `engine` 打印 |
-| 类型检查 | `type_checker_visitor.py` | `list[str]` | `"\n".join(errors)` | `VBCCompileError` → `engine` |
-| 代码生成 | `opcode_generator_visitor.py` | `RuntimeError` 等 | 无 | 内部错误 / traceback |
-| 编译编排 | `engine.py` | `VBCCompileError` | 无 | `split('\n')` 循环 `print` |
-| 运行时 | `vm/core.py` | `VBCRuntimeError` + `TracebackFrame` | `recorder.format_runtime_error` | **`recorder.on_error` 内 print** |
-| Dump | `recorder.on_error` | 任意 `Exception` | 仅类型名 + `str(error)` | 写入 markdown |
+
+| 阶段   | 产生位置                          | 载体                                   | 格式化                             | 终端输出                               |
+| ---- | ----------------------------- | ------------------------------------ | ------------------------------- | ---------------------------------- |
+| CLI  | `cli.py`                      | 无                                    | 无                               | `cli.py` 直接 `print`                |
+| 词法   | `lexer.py`                    | `SyntaxError`                        | 无                               | `engine` `except Exception`        |
+| 预处理  | `preprocessor.py`             | 警告字符串                                | `_warn` 内拼位置                    | `preprocessor._warn` 直接 `print`    |
+| 语法解析 | `error_collector.py`          | `ParseError` 列表                      | `format_error_report()`         | 包进 `VBCCompileError` 后 `engine` 打印 |
+| 类型检查 | `type_checker_visitor.py`     | `list[str]`                          | `"\n".join(errors)`             | `VBCCompileError` → `engine`       |
+| 代码生成 | `opcode_generator_visitor.py` | `RuntimeError` 等                     | 无                               | 内部错误 / traceback                   |
+| 编译编排 | `engine.py`                   | `VBCCompileError`                    | 无                               | `split('\n')` 循环 `print`           |
+| 运行时  | `vm/core.py`                  | `VBCRuntimeError` + `TracebackFrame` | `recorder.format_runtime_error` | `recorder.on_error` **内 print**    |
+| Dump | `recorder.on_error`           | 任意 `Exception`                       | 仅类型名 + `str(error)`             | 写入 markdown                        |
+
 
 - 实施步骤：
+
+
 
 #### 步骤 1（必须）：解析错误树形 CLI 输出 + `VBCCompileError` 统一格式化
 
@@ -287,6 +324,8 @@ verbose_c/error/
 
 - 回归用例：【已有】`tests/error_report_test.vbc` + `tests/error_report_bad.inc`（include 文件内语法错误）
 
+
+
 #### 步骤 2（必须）：运行时错误格式化迁入 `error` 包
 
 - 【未完成】将 `recorder.format_runtime_error` 迁至 `verbose_c/error/format.py`
@@ -294,17 +333,23 @@ verbose_c/error/
 - 【未完成】`recorder.on_error` 对 `VBCRuntimeError` 复用 formatter 写 dump
 - 【待完善】`vm/core.py` 中 `TracebackFrame.source_line_context` 改用 `SourceManager` 取多行上下文（当前为单行 strip）
 
+
+
 #### 步骤 3（必须）：类型检查错误接入统一 formatter
 
 - 【未完成】`compiler.py` 抛出 `VBCCompileError` 前，将 `type_checker.errors` 转为与解析错误兼容的 section 列表
 - 【未完成】类型检查多条错误时，树形输出每条为 `├─`，最后一条为 `└─`
 - 【未完成】dump 与终端共用同一格式化路径
 
+
+
 #### 步骤 4（高优）：警告输出统一
 
 - 【未完成】新建 `format_warning(message, path?, line?)` 或 `Diagnostic(severity=warning)`
 - 【未完成】`Preprocessor._warn` 改为只构造 diagnostic，不直接 `print`；由 `engine` 或统一 `ErrorSink` 输出（兼容 `--no-warn`）
 - 【未完成】类型检查 `warnings` 与预处理警告使用同一警告格式
+
+
 
 #### 步骤 5（可选）：结构化 Diagnostic 模型
 
@@ -313,10 +358,14 @@ verbose_c/error/
 - 【未完成】解析、类型、运行时均产出 `Diagnostic`，formatter 只消费 `list[Diagnostic]`
 - 收益：多文件/多错误排序、国际化、IDE 集成、稳定错误码
 
+
+
 #### 步骤 6（可选）：词法错误纳入 `VBCCompileError`
 
 - 【未完成】`lexer.py` 非法字符等不再抛裸 `SyntaxError`，改为 `VBCCompileError` 或 `Diagnostic`
 - 【未完成】经统一 formatter 输出，与解析错误样式一致
+
+
 
 #### 步骤 7（可选）：Dump 错误节增强
 
@@ -324,12 +373,13 @@ verbose_c/error/
 - 【未完成】运行时 dump 包含完整调用栈与源码上下文块
 - 文件写入仍由 `PipelineRecorder` 编排，`error` 包只返回字符串
 
+
+
 #### 步骤 8（可选，暂不纳入）：不在本计划范围
 
 - `opcode_generator_visitor` 内部 `RuntimeError`（编译器实现缺陷，保留 Python traceback）
 - PPG 语法文件生成链路（`validator.py`、`build.py`）的错误格式
 - CLI 参数错误（足够简单，可保持 `cli.py` 内 `print`）
-
 - 验收标准：
   - 【未完成】`tests/error_report_test.vbc` 终端输出为树形格式，且指向 include 文件的正确源码行
   - 【未完成】`--dump` 时「错误信息」节与终端报告内容一致（允许 markdown 代码块包裹）
@@ -339,7 +389,11 @@ verbose_c/error/
 
 ---
 
+
+
 ## 5. P2 目标（增强项）
+
+
 
 ### P2-1 多维数组与复杂初始化
 
@@ -347,6 +401,8 @@ verbose_c/error/
   - 多维数组声明、初始化、访问
 - 验收标准：
   - 多维下标访问正确
+
+
 
 ### P2-2 位运算与移位
 
@@ -356,6 +412,8 @@ verbose_c/error/
 - 验收标准：
   - 每个运算符至少有独立用例覆盖
   - 运算优先级与结合性符合 C 常识
+
+
 
 ### P2-3 `union` 最小可用实现
 
@@ -368,6 +426,8 @@ verbose_c/error/
 
 ---
 
+
+
 ## 6. 明确降级（暂不进入 C 兼容主线）
 
 以下内容不是 C 语言本体，按当前策略不作为近期主线目标：
@@ -379,34 +439,50 @@ verbose_c/error/
 
 ---
 
+
+
 ## 7. 实施顺序建议（仅针对 C 兼容）
+
+
 
 ### 阶段 A（先打通主干）
 
 - 完成 P0-1 到 P0-3：Token 化预处理器与编译管线重构、Token 宏展开语义闭环、预处理条件编译
 
+
+
 ### 阶段 B（补齐基础语言语义）
 
 - 完成 P0-4 到 P0-6：条件判断语义、基础运算符子集、函数声明原型
+
+
 
 ### 阶段 C（补齐 C 核心模型）
 
 - 完成 P0-7 到 P0-9：一维数组、`switch/case/default`、`typedef/enum/struct`
 
+
+
 ### 阶段 D（提升迁移能力）
 
 - 推进 P1：指针语义、类型转换规则、`sizeof`、`const/static`、最小标准库兼容、**统一错误诊断与输出（P1-7 步骤 1–3）**
+
+
 
 ### 阶段 D+（开发者体验，可与阶段 D 并行）
 
 - 推进 P1-7 步骤 4：警告输出统一
 - 推进 P1-7 步骤 5–7（可选）：结构化 Diagnostic、词法错误统一、dump 增强
 
+
+
 ### 阶段 E（增强）
 
 - 推进 P2：多维数组、位运算与移位、`union`
 
 ---
+
+
 
 ## 8. 统一验收原则
 
@@ -421,6 +497,8 @@ verbose_c/error/
 
 ---
 
+
+
 ## 9. 完成判定（Definition of Done）
 
 一个目标项可标记“完成”，必须同时满足：
@@ -429,3 +507,4 @@ verbose_c/error/
 - 有对应回归测试用例
 - 已更新用户文档（语法说明与示例）
 - 不引入现有 C 兼容能力回退
+

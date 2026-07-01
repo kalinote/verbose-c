@@ -1,0 +1,75 @@
+// 测试点：宏展开仅作用于独立标识符 token，不误替换字符串、注释或标识符子串。
+
+#define A 1
+#define TWICE(x) ((x) * 2)
+
+int main() {
+    int score = 0;
+
+    // 独立宏名 A 应展开为 1
+    int standalone = A;
+    if (standalone == 1) {
+        score = score + 1;
+    }
+
+    // DATA 含字母 A 但作为整体标识符，不应被展开
+    int DATA = 99;
+    if (DATA == 99) {
+        score = score + 2;
+    }
+
+    // A1、AX 等与宏名相邻字符组成的标识符，不应展开内部的 A
+    int A1 = 10;
+    int AX = 20;
+    if (A1 == 10 && AX == 20) {
+        score = score + 4;
+    }
+
+    // _A 与宏名 A 是不同标识符
+    int _A = 42;
+    if (_A == 42) {
+        score = score + 8;
+    }
+
+    // 字符串字面量中的宏名保持原文
+    string literal = "macro A not expanded";
+    if (len(literal) == 20) {
+        score = score + 16;
+    }
+
+    string with_suffix = "prefixA1suffix";
+    if (len(with_suffix) == 14) {
+        score = score + 32;
+    }
+
+    // 注释中的宏名不影响代码中的宏展开（下方 X 仍应展开）
+    // X is 0 in comment
+    /* block comment keeps A as text */
+    #define X 100
+    int from_comment_context = X;
+    if (from_comment_context == 100) {
+        score = score + 64;
+    }
+
+    // 函数式宏在无紧跟 '(' 时不展开，可作为变量名
+    int TWICE = 5;
+    if (TWICE == 5) {
+        score = score + 128;
+    }
+
+    // 同一宏名在带 '(' 时仍按函数式宏展开
+    int doubled = TWICE(3);
+    if (doubled == 6) {
+        score = score + 256;
+    }
+
+    write(STDOUT, "\n=== Token Boundary Preprocessor Test ===\n");
+    write(STDOUT, "score: ");
+    write(STDOUT, score);
+    write(STDOUT, "\n");
+
+    // 期望 score = 1+2+4+8+16+32+64+128+256 = 511
+    return score;
+}
+
+main();
