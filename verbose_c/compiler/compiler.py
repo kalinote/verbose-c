@@ -14,7 +14,7 @@ class Compiler:
     """
     编译器
     """
-    def __init__(self, target_ast: ASTNode, optimize_level: int=0, scope_type: ScopeType=ScopeType.GLOBAL, symbol_table: SymbolTable | None = None, source_path: str | None = None, passes_to_run: list[CompilerPass] | None = None):
+    def __init__(self, target_ast: ASTNode, optimize_level: int=0, scope_type: ScopeType=ScopeType.GLOBAL, symbol_table: SymbolTable | None = None, source_path: str | None = None, passes_to_run: list[CompilerPass] | None = None, function_name: str | None = None):
         self._target_ast = target_ast
         self._optimize_level = optimize_level   # 编译优化等级
         self._scope_type=scope_type
@@ -31,7 +31,11 @@ class Compiler:
         # 类型检查
         self._type_checker = TypeChecker(self._symbol_table, source_path=self._source_path)
         # 操作码生成器
-        self._opcode_generator = OpcodeGenerator(self._symbol_table, source_path=self._source_path)
+        self._opcode_generator = OpcodeGenerator(
+            self._symbol_table,
+            source_path=self._source_path,
+            function_name=function_name,
+        )
 
         self._bytecode = []
         self._constant_pool = []

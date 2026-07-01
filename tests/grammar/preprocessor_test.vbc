@@ -1,6 +1,6 @@
 // 测试点：#include 导入宏、普通宏、函数式宏和反斜杠续行宏需要先由预处理器展开。
 
-#include "preprocessor_imported_macros.inc"
+#include "../preprocessor_imported_macros.inc"
 
 #define IMPORTED_VALUE 4
 #define IMPORTED_STEP 2

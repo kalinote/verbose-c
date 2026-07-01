@@ -1,0 +1,29 @@
+// 测试点：C17 预定义宏与 __func__ 预定义标识符无需手动 #define 即可使用。
+
+#define SHOW_LINE() __LINE__
+
+int helper() {
+    return __LINE__;
+}
+
+int main() {
+    write(STDOUT, __FILE__);
+    write(STDOUT, "\n");
+    write(STDOUT, __LINE__);
+    write(STDOUT, "\n");
+    write(STDOUT, __STDC__);
+    write(STDOUT, "\n");
+    write(STDOUT, __STDC_VERSION__);
+    write(STDOUT, "\n");
+    write(STDOUT, SHOW_LINE());
+    write(STDOUT, "\n");
+    write(STDOUT, __func__);
+    write(STDOUT, "\n");
+    write(STDOUT, __DATE__);
+    write(STDOUT, "\n");
+    write(STDOUT, __TIME__);
+    write(STDOUT, "\n");
+    return helper();
+}
+
+main();

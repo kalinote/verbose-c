@@ -1,10 +1,17 @@
 import os
 import re
+from datetime import datetime
 
 from verbose_c.fs.source_manager import SourceManager
 from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.lexer import Lexer
 from verbose_c.parser.lexer.token import Token
+from verbose_c.preprocessor.builtin_macros import (
+    DYNAMIC_PREDEFINED,
+    RESERVED_PREDEFINED,
+    build_static_predefined,
+    expand_predefined,
+)
 from verbose_c.preprocessor.macro_definition import MacroDefinition, MacroDefinitionType
 
 DEFINE_PATTERN = re.compile(
@@ -22,11 +29,34 @@ class Preprocessor:
 
     MAX_EXPANSION_DEPTH = 20
 
-    def __init__(self, source_manager: SourceManager, show_warnings: bool = True):
+    def __init__(
+        self,
+        source_manager: SourceManager,
+        show_warnings: bool = True,
+        compile_time: datetime | None = None,
+    ):
         self.source_manager = source_manager
         self.show_warnings = show_warnings
         self.macro_register: dict[str, MacroDefinition] = {}
         self._included_files = set()
+        self._compile_time = compile_time or datetime.now()
+        self._register_static_predefined_macros()
+
+    def _register_static_predefined_macros(self) -> None:
+        """注册 __DATE__、__STDC__ 等编译期固定的预定义宏。"""
+        for name, body in build_static_predefined(self._compile_time).items():
+            body_tokens = [
+                tok for tok in Lexer("", body).tokenize()
+                if tok.type != TokenType.END
+            ]
+            self.macro_register[name] = MacroDefinition(
+                MacroDefinitionType.OBJECT,
+                [],
+                body_tokens,
+                source_file="<builtin>",
+                line=None,
+                column=None,
+            )
 
     def _token_location(self, token: Token) -> str:
         """格式化 token 所在源文件与行号。"""
@@ -72,7 +102,8 @@ class Preprocessor:
             elif tok.type == TokenType.RPAREN:
                 paren_level -= 1
                 if paren_level == 0:
-                    args.append(current_arg)
+                    if current_arg or args:
+                        args.append(current_arg)
                     return args, index - lparen_index + 1
                 current_arg.append(tok)
             elif tok.type == TokenType.COMMA and paren_level == 1:
@@ -89,12 +120,14 @@ class Preprocessor:
         index: int,
         hiding: set[str],
         depth: int = 0,
+        site: Token | None = None,
     ) -> tuple[list[Token], int]:
         """在 index 处展开宏，返回展开 token 及从 index 起消费的长度。"""
         if depth > self.MAX_EXPANSION_DEPTH:
             self._warn(f"宏展开超过最大深度 {self.MAX_EXPANSION_DEPTH}", tokens[index])
             return [self._clone_token(tokens[index])], 1
 
+        invocation_site = site or tokens[index]
         name = tokens[index].value
         macro = self.macro_register[name]
         new_hiding = hiding | {name}
@@ -119,10 +152,10 @@ class Preprocessor:
                     substituted.append(self._clone_token(tok))
 
             consumed = next_index - index + arg_span
-            return self._rescan(substituted, new_hiding, depth + 1), consumed
+            return self._rescan(substituted, new_hiding, depth + 1, site=invocation_site), consumed
 
         replacement = [self._clone_token(t) for t in macro.replacement]
-        return self._rescan(replacement, new_hiding, depth + 1), 1
+        return self._rescan(replacement, new_hiding, depth + 1, site=invocation_site), 1
 
     def _consume_token(
         self,
@@ -130,25 +163,39 @@ class Preprocessor:
         index: int,
         hiding: set[str],
         depth: int = 0,
+        site: Token | None = None,
     ) -> tuple[list[Token], int]:
         """处理单个 token：尝试宏展开，否则原样输出。"""
         tok = tokens[index]
         if (
             tok.type == TokenType.NAME
+            and tok.value in DYNAMIC_PREDEFINED
+            and tok.value not in self.macro_register
+            and tok.value not in hiding
+        ):
+            return [expand_predefined(tok.value, site or tok)], 1
+        if (
+            tok.type == TokenType.NAME
             and tok.value in self.macro_register
             and tok.value not in hiding
         ):
-            return self._expand_at(tokens, index, hiding, depth)
+            return self._expand_at(tokens, index, hiding, depth, site=site)
         return [self._clone_token(tok)], 1
 
-    def _rescan(self, tokens: list[Token], hiding: set[str], depth: int = 0) -> list[Token]:
+    def _rescan(
+        self,
+        tokens: list[Token],
+        hiding: set[str],
+        depth: int = 0,
+        site: Token | None = None,
+    ) -> list[Token]:
         """对 token 序列 rescan 并展开其中的宏。"""
         output: list[Token] = []
         index = 0
         while index < len(tokens):
             if tokens[index].type == TokenType.END:
                 break
-            expanded, consumed = self._consume_token(tokens, index, hiding, depth)
+            expanded, consumed = self._consume_token(tokens, index, hiding, depth, site=site)
             output.extend(expanded)
             index += consumed
         return output
@@ -191,6 +238,8 @@ class Preprocessor:
                 self._warn(f"宏定义 {name} 已存在，{prev_loc}")
             else:
                 self._warn(f"宏定义 {name} 已存在", token)
+            if name in RESERVED_PREDEFINED:
+                self._warn(f"不建议重定义标准预定义宏 {name}", token)
 
         macro_type = MacroDefinitionType.FUNCTION if params_str else MacroDefinitionType.OBJECT
         params = [p.strip() for p in params_str.strip()[1:-1].split(",") if p.strip()] if params_str else []

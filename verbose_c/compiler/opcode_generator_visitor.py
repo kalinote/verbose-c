@@ -46,9 +46,10 @@ class OpcodeGenerator(VisitorBase):
     """
     根据AST生成机器码的访问者类
     """
-    def __init__(self, symbol_table: SymbolTable, source_path: str | None = None):
+    def __init__(self, symbol_table: SymbolTable, source_path: str | None = None, function_name: str | None = None):
         self.symbol_table: SymbolTable = symbol_table
         self.source_path = source_path
+        self.current_function_name: str | None = function_name
         self.bytecode: list[tuple] = []
         self.labels = {}
         self.constant_pool = []
@@ -129,7 +130,15 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.CAST, target_enum)
 
     # 基本数据类型
-    def visit_NameNode(self, node: NameNode): 
+    def visit_NameNode(self, node: NameNode):
+        if node.name == "__func__":
+            if self.current_function_name is None:
+                raise Exception(f"'__func__' 只能在函数体内使用, 在行: {node.start_line}, 列: {node.start_column}")
+            vbc_str = VBCString(self.current_function_name)
+            const_index = self._add_constant(vbc_str)
+            self._emit(Opcode.LOAD_CONSTANT, const_index)
+            return
+
         symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None:
             raise Exception(f"未定义的标识符: {node.name}, 在行: {node.start_line}, 列: {node.start_column}")
@@ -595,7 +604,8 @@ class OpcodeGenerator(VisitorBase):
             symbol_table=function_symbol_table,
             scope_type=ScopeType.FUNCTION,
             source_path=self.source_path,
-            passes_to_run=[CompilerPass.GENERATE_CODE]
+            passes_to_run=[CompilerPass.GENERATE_CODE],
+            function_name=node.name.name,
         )
         
         function_compiler.compile()
@@ -735,6 +745,7 @@ class OpcodeGenerator(VisitorBase):
                     scope_type=ScopeType.FUNCTION,
                     source_path=self.source_path,
                     passes_to_run=[CompilerPass.GENERATE_CODE],
+                    function_name=method_name,
                 )
                 
                 method_compiler.compile()
@@ -836,6 +847,7 @@ class OpcodeGenerator(VisitorBase):
             scope_type=ScopeType.FUNCTION,
             source_path=self.source_path,
             passes_to_run=[CompilerPass.GENERATE_CODE],
+            function_name="__init__",
         )
         init_compiler.compile()
         init_op_generator = init_compiler.opcode_generator

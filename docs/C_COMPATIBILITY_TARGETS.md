@@ -35,6 +35,7 @@
   - 【方案变更】【已完成】dump 分「预处理前 / 预处理后」两节 token 表格，不再输出预处理源码文本
   - 【已完成】多文件源码由 `SourceManager`（`verbose_c/fs`）按 path 统一缓存；`get_line_source(path, line)` 支持 include 文件取行
   - 【待完善】`#include` 为简化实现，与 C17 6.10.2 存在差异（见 P1-6）
+  - 【已完成】C17 预定义宏内置：`__FILE__`、`__LINE__`、`__DATE__`、`__TIME__`、`__STDC__`、`__STDC_VERSION__`（201710）、`__STDC_HOSTED__`、`__STDC_UTF_16__`、`__STDC_UTF_32__`；`__func__` 在编译器阶段作为预定义标识符支持
 - 验收标准：
   - 【已完成】普通宏、函数式宏和 `#include "..."` 处理均基于 Token 序列完成
   - 【已完成】`#define A 1` 不会误替换 `DATA`、字符串字面量或注释中的 `A`
@@ -56,10 +57,12 @@
   - 【已完成】`_expand_at` / `_rescan` / `_consume_token` 实现 token 级展开与嵌套 rescan
   - 【已完成】函数宏仅在后跟 `(` 时展开；形参替换为实参 token 序列后再 rescan
   - 【已完成】反斜杠续行 `#define` 在注册时合并宏体并 tokenize
+  - 【已完成】C17 预定义宏：`__FILE__`/`__LINE__` 按宏调用点动态展开（经用户宏传递时保留调用点行号）；其余在预处理器初始化时注册
 - 验收标准：
   - 【待完善】`#define A A`、`#define A B` + `#define B A` 等循环宏有专用回归测试（hiding 已实现，缺用例）
   - 【已完成】`#define A B` + `#define B 1` 可继续展开为最终值（`grammar_preprocessor_test.vbc` 覆盖）
   - 【已完成】复杂宏样例（如 `BUILD_TOTAL(START_VALUE)`、include 导入宏）可稳定得到预期展开结果
+  - 【已完成】`tests/grammar/predefined_macros_test.vbc` 覆盖预定义宏与 `__func__`
   - 【待完善】每类宏展开行为都有预处理前后 Token 对照测试（dump 已支持两节 token，缺专用回归用例）
 
 ### P0-3 预处理条件编译

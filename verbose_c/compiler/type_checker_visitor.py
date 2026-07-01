@@ -51,6 +51,7 @@ class TypeChecker(VisitorBase):
         self.warnings: list[str] = []
         self.loop_level = 0
         self.current_function_return_type: Type | None = None   # 跟踪当前函数返回类型
+        self.current_function_name: str | None = None
         self.current_class_type: ClassType | None = None # 跟踪当前类上下文
         self._register_builtin_types()
 
@@ -233,6 +234,11 @@ class TypeChecker(VisitorBase):
         return NullType()
 
     def visit_NameNode(self, node: NameNode) -> Type:
+        if node.name == "__func__":
+            if self.current_function_name is None:
+                self.errors.append(f"语法错误: '__func__' 只能在函数体内使用, 在 {node.start_line} 行")
+                return ErrorType()
+            return StringType()
         symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None:
             self.errors.append(f"命名错误: '{node.name}' 未定义, 在 {node.start_line} 行")
@@ -511,10 +517,13 @@ class TypeChecker(VisitorBase):
 
         original_return_type = self.current_function_return_type
         self.current_function_return_type = return_type
+        original_function_name = self.current_function_name
+        self.current_function_name = node.name.name
 
         # 直接访问函数体 BlockNode，利用 visit_BlockNode 的逻辑来创建和链接作用域
         self.visit(node.body)
 
+        self.current_function_name = original_function_name
         self.current_function_return_type = original_return_type
         self.symbol_table = original_table
 
@@ -684,10 +693,13 @@ class TypeChecker(VisitorBase):
 
                 original_return_type = self.current_function_return_type
                 self.current_function_return_type = method_type.return_type
+                original_function_name = self.current_function_name
+                self.current_function_name = method_name
 
                 # 直接访问方法体 BlockNode，利用 visit_BlockNode 的逻辑来创建和链接作用域
                 self.visit(member.body)
 
+                self.current_function_name = original_function_name
                 self.current_function_return_type = original_return_type
                 self.symbol_table = original_method_scope_parent_table
 
