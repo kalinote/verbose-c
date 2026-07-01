@@ -61,7 +61,7 @@
   - 【已完成】反斜杠续行 `#define` 在注册时合并宏体并 tokenize
   - 【已完成】C17 预定义宏：`__FILE__`/`__LINE__` 按宏调用点动态展开（经用户宏传递时保留调用点行号）；其余在预处理器初始化时注册
 - 验收标准：
-  - 【待完善】`#define A A`、`#define A B` + `#define B A` 等循环宏有专用回归测试（hiding 已实现，缺用例）
+  - 【已完成】`#define A A`、`#define A B` + `#define B A` 等循环宏有专用回归测试（`tests/grammar/preprocessor_circular_macro_test.vbc`）
   - 【已完成】`#define A B` + `#define B 1` 可继续展开为最终值（`grammar_preprocessor_test.vbc` 覆盖）
   - 【已完成】复杂宏样例（如 `BUILD_TOTAL(START_VALUE)`、include 导入宏）可稳定得到预期展开结果
   - 【已完成】`tests/grammar/predefined_macros_test.vbc` 覆盖预定义宏与 `__func__`

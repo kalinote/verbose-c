@@ -1,0 +1,60 @@
+// 测试点：循环宏定义由 hiding 集终止展开，避免无限递归。
+
+#define A B
+#define B A
+
+#define LOOP LOOP
+
+#define CHAIN_A CHAIN_B
+#define CHAIN_B CHAIN_C
+#define CHAIN_C CHAIN_A
+
+#define ID(x) x
+
+int main() {
+    int score = 0;
+
+    // #define A B + #define B A：从 A 展开得标识符 A（非无限 B）
+    int A = 5;
+    int from_a = A;
+    if (from_a == 5) {
+        score = score + 1;
+    }
+
+    // 从 B 展开得标识符 B
+    int B = 10;
+    int from_b = B;
+    if (from_b == 10) {
+        score = score + 2;
+    }
+
+    // #define LOOP LOOP：自环停止后仍绑定同名变量
+    int LOOP = 20;
+    int self = LOOP;
+    if (self == 20) {
+        score = score + 4;
+    }
+
+    // 函数宏实参中的循环展开同样应终止
+    int wrapped = ID(A);
+    if (wrapped == 5) {
+        score = score + 8;
+    }
+
+    // 三向环：CHAIN_A -> CHAIN_B -> CHAIN_C -> CHAIN_A(hidden)
+    int CHAIN_A = 13;
+    int chain = CHAIN_A;
+    if (chain == 13) {
+        score = score + 16;
+    }
+
+    write(STDOUT, "\n=== Circular Macro Hiding Test ===\n");
+    write(STDOUT, "score: ");
+    write(STDOUT, score);
+    write(STDOUT, "\n");
+
+    // 期望 score = 1+2+4+8+16 = 31
+    return score;
+}
+
+main();
