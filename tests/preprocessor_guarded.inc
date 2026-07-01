@@ -1,0 +1,6 @@
+#ifndef PREPROCESSOR_GUARDED_INC
+#define PREPROCESSOR_GUARDED_INC
+
+#define GUARDED_VAL 7
+
+#endif

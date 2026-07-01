@@ -1,0 +1,65 @@
+// 测试点：预处理条件编译 #if/#ifdef/#ifndef/#elif/#else/#endif、defined()、嵌套与 include guard。
+
+#define FEATURE_A 1
+
+int main() {
+    int score = 0;
+
+#ifdef FEATURE_A
+    score = score + 1;
+#else
+    score = score + 100;
+#endif
+
+#ifndef MISSING_MACRO
+    score = score + 2;
+#endif
+
+#if 0
+    score = score + 1000;
+#elif 1
+    score = score + 4;
+#else
+    score = score + 2000;
+#endif
+
+#if defined(FEATURE_A) && !defined(MISSING_MACRO)
+    score = score + 8;
+#endif
+
+#if defined FEATURE_A
+    score = score + 16;
+#endif
+
+#define MACRO_VAL 42
+#if MACRO_VAL
+    score = score + 32;
+#endif
+
+#if 0
+    #define GHOST 999
+#endif
+
+#if 1
+    #ifdef INNER_ALWAYS
+        score = score + 10000;
+    #else
+        score = score + 64;
+    #endif
+#endif
+
+#include "../preprocessor_guarded.inc"
+#include "../preprocessor_guarded.inc"
+
+    score = score + GUARDED_VAL;
+
+    write(STDOUT, "\n=== Preprocessor Conditional Test ===\n");
+    write(STDOUT, "score: ");
+    write(STDOUT, score);
+    write(STDOUT, "\n");
+
+    // 1+2+4+8+16+32+64+7 = 134
+    return score;
+}
+
+main();

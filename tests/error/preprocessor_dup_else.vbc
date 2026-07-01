@@ -1,0 +1,11 @@
+#ifdef DUP_ELSE_TEST
+int a = 1;
+#else
+int b = 2;
+#else
+int c = 3;
+#endif
+
+int main() {
+    return 0;
+}

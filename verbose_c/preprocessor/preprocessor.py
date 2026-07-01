@@ -1,7 +1,9 @@
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime
 
+from verbose_c.error import VBCCompileError
 from verbose_c.fs.source_manager import SourceManager
 from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.lexer import Lexer
@@ -12,16 +14,32 @@ from verbose_c.preprocessor.builtin_macros import (
     build_static_predefined,
     expand_predefined,
 )
+from verbose_c.preprocessor.const_expr import eval_preprocessor_expr
 from verbose_c.preprocessor.macro_definition import MacroDefinition, MacroDefinitionType
 
 DEFINE_PATTERN = re.compile(
-    r'^\s*#define\s+([a-zA-Z_][a-zA-Z0-9_]*)(\([^\)]*\))?\s+(.*)',
+    r'^\s*#define\s+([a-zA-Z_][a-zA-Z0-9_]*)(\([^\)]*\))?(?:\s+(.*))?$',
     re.DOTALL,
 )
 INCLUDE_QUOTED_PATTERN = re.compile(r'^\s*#include\s+"([^"]+)"')
 INCLUDE_ANGLE_PATTERN = re.compile(r'^\s*#include\s+<([^>]+)>')
+IF_PATTERN = re.compile(r'^\s*#if\s+(.*)', re.DOTALL)
+ELIF_PATTERN = re.compile(r'^\s*#elif\s+(.*)', re.DOTALL)
+IFDEF_PATTERN = re.compile(r'^\s*#ifdef\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$')
+IFNDEF_PATTERN = re.compile(r'^\s*#ifndef\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$')
+ELSE_PATTERN = re.compile(r'^\s*#else\s*$')
+ENDIF_PATTERN = re.compile(r'^\s*#endif\s*$')
 
 _INSIGNIFICANT = frozenset({TokenType.WHITESPACE, TokenType.COMMENT, TokenType.NEWLINE})
+
+
+@dataclass
+class _CondFrame:
+    opening_token: Token
+    parent_active: bool
+    branch_taken: bool
+    self_active: bool
+    seen_else: bool = False
 
 
 class Preprocessor:
@@ -40,6 +58,7 @@ class Preprocessor:
         self.macro_register: dict[str, MacroDefinition] = {}
         self._included_files = set()
         self._compile_time = compile_time or datetime.now()
+        self._cond_stack: list[_CondFrame] = []
         self._register_static_predefined_macros()
 
     def _register_static_predefined_macros(self) -> None:
@@ -57,6 +76,104 @@ class Preprocessor:
                 line=None,
                 column=None,
             )
+
+    def _is_active(self) -> bool:
+        return not self._cond_stack or self._cond_stack[-1].self_active
+
+    def _error(self, message: str, token: Token) -> None:
+        location = self._token_location(token)
+        if location:
+            full_message = f"{message}，{location}"
+        else:
+            full_message = message
+        raise VBCCompileError(full_message, line=token.line, filepath=token.path)
+
+    def _push_cond_frame(self, token: Token, condition: bool) -> None:
+        parent_active = self._is_active()
+        self_active = parent_active and condition
+        self._cond_stack.append(
+            _CondFrame(
+                opening_token=token,
+                parent_active=parent_active,
+                branch_taken=self_active,
+                self_active=self_active,
+            )
+        )
+
+    def _eval_cond_expr(self, expr_raw: str, token: Token) -> bool:
+        expr = self._join_directive_continuation(expr_raw.strip())
+        return eval_preprocessor_expr(self, expr, token)
+
+    def _handle_conditional_directive(self, token: Token) -> bool:
+        """解析条件编译指令并更新条件栈，返回是否已处理。"""
+        value = token.value
+
+        ifdef_match = IFDEF_PATTERN.match(value)
+        ifndef_match = IFNDEF_PATTERN.match(value)
+        if ifdef_match or ifndef_match:
+            name = (ifdef_match or ifndef_match).group(1)
+            defined = name in self.macro_register
+            self._push_cond_frame(token, defined if ifdef_match else not defined)
+            return True
+
+        if_match = IF_PATTERN.match(value)
+        if if_match:
+            self._push_cond_frame(token, self._eval_cond_expr(if_match.group(1), token))
+            return True
+
+        elif_match = ELIF_PATTERN.match(value)
+        if elif_match:
+            if not self._cond_stack:
+                self._error("预处理错误：#elif 缺少匹配的 #if", token)
+            frame = self._cond_stack[-1]
+            if frame.seen_else:
+                self._error("预处理错误：#else 之后不能有 #elif", token)
+            if frame.branch_taken:
+                frame.self_active = False
+            elif self._eval_cond_expr(elif_match.group(1), token):
+                frame.branch_taken = True
+                frame.self_active = frame.parent_active
+            else:
+                frame.self_active = False
+            return True
+
+        if ELSE_PATTERN.match(value):
+            if not self._cond_stack:
+                self._error("预处理错误：#else 缺少匹配的 #if", token)
+            frame = self._cond_stack[-1]
+            if frame.seen_else:
+                self._error("预处理错误：重复的 #else", token)
+            frame.seen_else = True
+            if frame.branch_taken:
+                frame.self_active = False
+            else:
+                frame.branch_taken = True
+                frame.self_active = frame.parent_active
+            return True
+
+        if ENDIF_PATTERN.match(value):
+            if not self._cond_stack:
+                self._error("预处理错误：#endif 缺少匹配的 #if", token)
+            self._cond_stack.pop()
+            return True
+
+        return False
+
+    @staticmethod
+    def _join_directive_continuation(text: str) -> str:
+        """合并预处理指令中的反斜杠续行。"""
+        lines = text.splitlines()
+        parts: list[str] = []
+        line_index = 0
+        while line_index < len(lines):
+            line = lines[line_index].strip()
+            while line.endswith("\\") and line_index + 1 < len(lines):
+                line = line[:-1].rstrip() + lines[line_index + 1].strip()
+                line_index += 1
+            if line:
+                parts.append(line)
+            line_index += 1
+        return " ".join(parts)
 
     def _token_location(self, token: Token) -> str:
         """格式化 token 所在源文件与行号。"""
@@ -208,20 +325,10 @@ class Preprocessor:
 
         name = define_match.group(1)
         params_str = define_match.group(2)
-        raw_body = define_match.group(3).strip()
+        raw_body = define_match.group(3)
+        raw_body = raw_body.strip() if raw_body else ""
 
-        lines = raw_body.splitlines()
-        body_parts: list[str] = []
-        line_index = 0
-        while line_index < len(lines):
-            line = lines[line_index].strip()
-            while line.endswith('\\') and line_index + 1 < len(lines):
-                line = line[:-1].rstrip() + lines[line_index + 1].strip()
-                line_index += 1
-            if line:
-                body_parts.append(line)
-            line_index += 1
-        body = ' '.join(body_parts)
+        body = self._join_directive_continuation(raw_body)
 
         if name in self.macro_register:
             existing = self.macro_register[name]
@@ -286,27 +393,37 @@ class Preprocessor:
 
     def process_tokens(self, tokens: list[Token]) -> list[Token]:
         """处理 token 序列：注册 define、展开 include 与宏。"""
+        cond_depth_at_start = len(self._cond_stack)
         output: list[Token] = []
         index = 0
         while index < len(tokens):
             token = tokens[index]
 
             if token.type == TokenType.END:
+                if len(self._cond_stack) > cond_depth_at_start:
+                    self._error(
+                        "预处理错误：缺少匹配的 #endif",
+                        self._cond_stack[cond_depth_at_start].opening_token,
+                    )
                 output.append(token)
                 break
 
             if token.type == TokenType.MACRO_CODE:
-                if DEFINE_PATTERN.match(token.value):
-                    self._handle_define(token)
-                elif INCLUDE_QUOTED_PATTERN.match(token.value) or INCLUDE_ANGLE_PATTERN.match(token.value):
-                    output.extend(self._handle_include(token))
-                elif self.show_warnings:
-                    self._warn(f"未识别的预处理指令: {token.value}", token)
+                if not self._handle_conditional_directive(token) and self._is_active():
+                    if DEFINE_PATTERN.match(token.value):
+                        self._handle_define(token)
+                    elif INCLUDE_QUOTED_PATTERN.match(token.value) or INCLUDE_ANGLE_PATTERN.match(token.value):
+                        output.extend(self._handle_include(token))
+                    elif self.show_warnings:
+                        self._warn(f"未识别的预处理指令: {token.value}", token)
                 index += 1
                 continue
 
-            expanded, consumed = self._consume_token(tokens, index, set())
-            output.extend(expanded)
-            index += consumed
+            if self._is_active():
+                expanded, consumed = self._consume_token(tokens, index, set())
+                output.extend(expanded)
+                index += consumed
+            else:
+                index += 1
 
         return output

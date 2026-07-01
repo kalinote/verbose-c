@@ -71,14 +71,19 @@
 ### P0-3 预处理条件编译
 
 - 目标能力：
-  - 【未完成】支持 `#if/#ifdef/#ifndef/#elif/#else/#endif`
-  - 【未完成】支持 `defined(MACRO)` 基本判断
+  - 【已完成】支持 `#if/#ifdef/#ifndef/#elif/#else/#endif`
+  - 【已完成】支持 `defined(MACRO)` / `defined MACRO` 基本判断
 - 当前现状：
-  - 【未完成】条件宏未实现；未识别预处理指令仅 warn 并跳过
+  - 【已完成】`Preprocessor` 条件栈与指令状态机；假分支不输出 token、不注册 `#define`、不展开 `#include`
+  - 【已完成】`const_expr.py` MVP 表达式求值：`0`/`1` 字面量、`defined()`、`!`/`&&`/`||`、括号、对象宏展开为整数
+  - 【已完成】非法条件块抛出 `VBCCompileError`（含文件路径与行号）
+  - 【待完善】`#if` 完整 C17 常量表达式（算术/位运算/比较运算符）未实现
+  - 【已完成】无宏体的 `#define NAME`（include guard 常用）已支持
 - 验收标准：
-  - 【未完成】带条件编译分支的示例代码可稳定编译且分支选择正确
-  - 【未完成】嵌套条件编译可正常解析
-  - 【未完成】非法宏块能给出明确错误信息（包含文件和行号）
+  - 【已完成】带条件编译分支的示例代码可稳定编译且分支选择正确（`tests/grammar/preprocessor_conditional_test.vbc`）
+  - 【已完成】嵌套条件编译可正常解析（同上）
+  - 【已完成】非法宏块能给出明确错误信息（`tests/error/preprocessor_*.vbc`）
+  - 【已完成】include guard 场景（`tests/preprocessor_guarded.inc` + 双次 `#include`）
 
 
 

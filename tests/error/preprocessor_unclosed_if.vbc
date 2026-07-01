@@ -1,0 +1,5 @@
+#ifdef NEVER_CLOSED
+
+int main() {
+    return 0;
+}

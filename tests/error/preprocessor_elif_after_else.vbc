@@ -1,0 +1,11 @@
+#ifdef ELIF_AFTER_ELSE
+int a = 1;
+#else
+int b = 2;
+#elif 1
+int c = 3;
+#endif
+
+int main() {
+    return 0;
+}
