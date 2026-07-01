@@ -1,0 +1,40 @@
+// 测试点：堆内存 dump，覆盖多种运行时对象类型（整数、浮点、字符串、布尔、指针、类实例）。
+
+class Box {
+    int value;
+    string label;
+}
+
+int main() {
+    write(STDOUT, "\n=== Memory Dump Test ===\n");
+
+    int count = 42;
+    float ratio = 3.14;
+    string name = "verbose-c";
+    bool ready = true;
+    int* ptr = &count;
+
+    Box box = new Box();
+    box.value = count;
+    box.label = name;
+
+    write(STDOUT, "count: ");
+    write(STDOUT, count);
+    write(STDOUT, "\nratio: ");
+    write(STDOUT, ratio);
+    write(STDOUT, "\nname: ");
+    write(STDOUT, name);
+    write(STDOUT, "\nready: ");
+    write(STDOUT, ready);
+    write(STDOUT, "\nptr -> count: ");
+    write(STDOUT, *ptr);
+    write(STDOUT, "\nbox.value: ");
+    write(STDOUT, box.value);
+    write(STDOUT, "\nbox.label: ");
+    write(STDOUT, box.label);
+    write(STDOUT, "\n");
+
+    return box.value;
+}
+
+main();

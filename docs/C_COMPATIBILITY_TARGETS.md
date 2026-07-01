@@ -392,6 +392,52 @@ verbose_c/error/
   - 【未完成】`VBCRuntimeError` 打印职责不在 `recorder` 内隐式副作用，而经 `engine` + `error.format` 显式调用
   - 【待完善】反向样例测试覆盖：解析错误、类型错误、运行时错误各至少 1 个专用 `.vbc` 用例
 
+
+
+### P1-8 程序入口 `main` 与进程退出码
+
+- 背景与动机：
+  - 当前解释器采用类似 Python 的执行模型：无标准程序入口，入口文件从顶层语句起按源码顺序执行
+  - 函数定义仅完成注册，不会自动执行；即便定义了 `int main()`，若未在顶层显式写 `main();` 则不会进入 `main` 函数体
+  - 现有测试用例普遍在文件末尾手动调用 `main();`（如 `tests/grammar/functions_test.vbc`），与标准 C 程序习惯不符
+  - 标准 C 以 `int main(void)` / `int main(int argc, char *argv[])` 为进程入口；部分环境亦存在非标准的 `void main()`，迁移时应尽量兼容
+- 目标能力：
+  - 在入口模块中识别符合条件的 `main` 函数定义：`int main()`（MVP 先支持无参形式），并兼容非标准的 `void main()`
+  - 若存在上述 `main` 定义，在顶层代码按现有顺序执行完毕后**自动调用** `main()`，无需源码末尾手写 `main();`
+  - **保留**现有顶层顺序执行语义不变：函数/类型定义注册、全局变量声明与初始化、顶层可执行语句、顶层独立代码块等仍按源码顺序在调用 `main` 之前执行
+  - `int main()` 中 `return expr;` 的整型返回值作为进程退出码传递给命令行（CLI 以 `sys.exit(code)` 等形式退出）
+  - `void main()` 正常执行结束时退出码为 `0`；若运行期异常或 `VBCRuntimeError`，退出码为非零（与现有错误处理一致）
+  - 若入口模块不存在 `main` 定义，行为与现在完全一致（纯顺序执行，退出码 `0`）
+- 当前现状：
+  - `OpcodeGenerator.visit_ModuleNode` 仅遍历执行 `node.body` 中的语句，无入口探测与自动调用逻辑
+  - `VBCVirtualMachine.excute` 以 `<module:entry>` 伪函数为根，从字节码偏移 `0` 起执行至 `HALT`
+  - `cli.main` / `run_source_file` 不读取 VM 返回值，进程始终以 Python 默认退出码 `0` 结束（编译/运行时错误亦未统一映射为 shell 退出码）
+  - 测试用例依赖显式 `main();` 触发入口逻辑
+- 与 C 标准差异（可接受/分阶段）：
+
+
+| 行为 | C17 / 常见实现 | 目标实现 |
+| ---- | -------------- | -------- |
+| 程序入口 | 从 `main` 开始，全局对象初始化先于 `main` | 顶层语句先于 `main` 执行（保留脚本化顺序语义）；`main` 在顶层代码之后自动调用 |
+| `main` 形参 | `argc`/`argv`/`envp` 等 | MVP 仅无参 `int main()` / `void main()`；带参形式后续扩展 |
+| `void main()` | 非标准，部分编译器扩展 | 兼容调用，退出码视为 `0` |
+| 显式 `main();` | 标准 C 中顶层调用 `main()` 合法但少见 | 需避免与自动调用重复执行（见验收标准） |
+
+
+- 设计要点（实施参考）：
+  - **检测时机**：编译期在符号表或 AST 阶段标记入口模块是否存在签名匹配的 `main`（名称 `main`，返回 `int` 或 `void`，MVP 形参为空）
+  - **代码生成**：在 `visit_ModuleNode` 或 `visit_RootNode` 末尾，若存在 `main` 且策略允许，生成 `LOAD_FUNCTION` + `CALL_FUNCTION`；`int main` 调用结束后将返回值留在栈顶或写入 VM 退出码槽
+  - **退出码通路**：`run_source_file` / `VBCVirtualMachine.excute` 返回整型退出码 → `cli.main` 调用 `sys.exit(code)`
+  - **重复调用**：若源码中已显式调用 `main()`，自动入口应跳过或仅在不显式调用时生效（推荐：编译期检测顶层是否存在对 `main` 的调用表达式，有则不再注入自动调用）
+- 验收标准：
+  - 仅含 `int main() { return 42; }`、无顶层 `main();` 的 `.vbc` 可编译运行，且 shell 退出码为 `42`
+  - 含顶层初始化语句 + `int main()` 时，初始化语句先于 `main` 体执行（顺序与 `blocks_and_assignments_test.vbc` 中顶层块 + `main` 的组合一致，但无需手写 `main();`）
+  - `void main() { ... }` 可自动进入并正常结束，退出码为 `0`
+  - 无 `main` 定义的脚本式顶层代码行为与改动前一致
+  - 源码末尾已写 `main();` 时 `main` 只执行一次
+  - `return;`（无表达式）在 `int main` 中退出码为 `0`（与 C 一致）
+  - 至少 2 类测试：正向（自动入口 + 退出码）、反向（多个 `main` 定义或签名不匹配时不应误触发自动入口，若实现选择报错则需有专用错误用例）
+
 ---
 
 
@@ -470,7 +516,7 @@ verbose_c/error/
 
 ### 阶段 D（提升迁移能力）
 
-- 推进 P1：指针语义、类型转换规则、`sizeof`、`const/static`、最小标准库兼容、**统一错误诊断与输出（P1-7 步骤 1–3）**
+- 推进 P1：指针语义、类型转换规则、`sizeof`、`const/static`、最小标准库兼容、**统一错误诊断与输出（P1-7 步骤 1–3）**、**程序入口 `main` 与进程退出码（P1-8）**
 
 
 

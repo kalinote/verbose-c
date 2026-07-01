@@ -50,3 +50,7 @@ class MemoryManager:
             raise MemoryError(f"内存访问冲突: 试图写入无效地址 {address}")
         self._heap[address] = value
 
+    def snapshot(self) -> list[tuple[int, VBCObject]]:
+        """返回堆内存快照，每项为 (地址, 对象)。"""
+        return list(enumerate(self._heap))
+

@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from verbose_c.error import VBCRuntimeError
+from verbose_c.vm.memory import MemoryManager
 
 
 def create_dump_path(filename: str) -> str:
@@ -156,6 +157,7 @@ class PipelineRecorder:
         self._dump_const = dump_all or "const" in dump_modules
         self._dump_label = dump_all or "label" in dump_modules
         self._dump_vm = dump_all or "vm" in dump_modules
+        self._dump_memory = dump_all or "memory" in dump_modules
 
         self._toc_lines: list[str] = ["- [基本信息](#基本信息)"]
         self._section_body = ""
@@ -228,6 +230,12 @@ class PipelineRecorder:
             self._append_section("标签", self._format_labels_section(output.labels))
         if self._dump_opcode and output.function_compilation_results:
             self._append_section("函数编译结果", self._format_function_results_section(output.function_compilation_results))
+
+    def on_memory(self, memory) -> None:
+        """dump 程序结束时刻的堆内存快照（--dump memory）。"""
+        if not self._dump_memory or not self.dump_path:
+            return
+        self._append_section("内存快照", self._format_memory_section(memory))
 
     def on_vm_log(self, entry: str) -> None:
         if not self._dump_vm or not self.dump_path:
@@ -321,6 +329,22 @@ class PipelineRecorder:
                 f"`{_escape_markdown_table_cell(literal)}` | "
                 f"{line_col} | `{_escape_markdown_table_cell(filepath)}` |\n"
             )
+        lines.append("\n")
+        return "".join(lines)
+
+    def _format_memory_section(self, memory: MemoryManager) -> str:
+        entries = memory.snapshot()
+        lines = [
+            "## 内存快照\n\n",
+            f"- 堆对象数: `{len(entries)}`\n\n",
+            "| 地址 | 类型 | 对象 |\n",
+            "| --- | --- | --- |\n",
+        ]
+        for address, obj in entries:
+            obj_type = getattr(obj, "_object_type", type(obj).__name__)
+            type_name = obj_type.name if hasattr(obj_type, "name") else str(obj_type)
+            obj_text = _escape_markdown_table_cell(repr(obj))
+            lines.append(f"| {address} | `{type_name}` | `{obj_text}` |\n")
         lines.append("\n")
         return "".join(lines)
 

@@ -300,6 +300,7 @@ def run_source_file(
     compilation_result = None
     captured_error = None
     compile_warnings: list[str] = []
+    vm = None
 
     recorder.log_compile_start()
     try:
@@ -349,6 +350,8 @@ def run_source_file(
         traceback.print_exc()
         recorder.on_error(e)
     finally:
+        if vm is not None:
+            recorder.on_memory(vm.memory)
         final_path = recorder.finalize(success=captured_error is None)
 
     return RunResult(
