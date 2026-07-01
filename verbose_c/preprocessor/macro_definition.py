@@ -11,10 +11,21 @@ class MacroDefinitionType(Enum):
 
 class MacroDefinition:
     """宏定义结构"""
-    def __init__(self, type_: MacroDefinitionType, parameters: list[str], replacement: list[Token]):
+    def __init__(
+        self,
+        type_: MacroDefinitionType,
+        parameters: list[str],
+        replacement: list[Token],
+        source_file: str = "",
+        line: int | None = None,
+        column: int | None = None,
+    ):
         self.type = type_
         self.parameters = parameters
         self.replacement = replacement
+        self.source_file = source_file
+        self.line = line
+        self.column = column
 
     def __eq__(self, other: "MacroDefinition"):
         if not isinstance(other, MacroDefinition):

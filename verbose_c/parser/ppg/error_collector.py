@@ -61,11 +61,13 @@ class ErrorCollector:
         
         self.errors.append(error)
     
-    def _get_context(self, line: int, column: int) -> List[Tuple[int, str]]:
+    def _get_context(self, path: str, line: int, column: int) -> List[Tuple[int, str]]:
         """获取错误位置的上下文"""
+        source_manager = self.tokenizer.source_manager
+        line_count = source_manager.line_count(path)
         context_lines = []
-        for i in range(max(1, line - 2), min(len(self.tokenizer._source_lines), line + 2) + 1):
-            context_lines.append((i, self.tokenizer.get_line_source(i)))
+        for i in range(max(1, line - 2), min(line_count, line + 2) + 1):
+            context_lines.append((i, self.tokenizer.get_line_source(path, i)))
         return context_lines
     
     def get_best_error(self) -> Optional[ParseError]:
@@ -96,11 +98,12 @@ class ErrorCollector:
 
         line = actual_token_at_furthest.line or 0
         column = actual_token_at_furthest.column or 0
+        path = actual_token_at_furthest.path or self.tokenizer.lexer.filename
 
-        context_lines_with_numbers = self._get_context(line, column)
+        context_lines_with_numbers = self._get_context(path, line, column)
 
-        lines = []        
-        lines.append(f"错误位置: 第 {line} 行，第 {column} 列")
+        lines = []
+        lines.append(f"错误位置: 第 {line} 行，第 {column} 列，位于 {path} 文件")
         
         if self.furthest_expected:
             expected_set = self.furthest_expected
@@ -122,7 +125,6 @@ class ErrorCollector:
 
         best_error = self.get_best_error()
         if best_error and best_error.rule_stack:
-            lines.append(f"\n规则调用栈:\n {' -> '.join(best_error.rule_stack)}")
+            lines.append(f"\n语法解析规则调用栈:\n {' -> '.join(best_error.rule_stack)}")
 
-        lines.append("\n" + "=" * 50)
         return '\n'.join(lines)

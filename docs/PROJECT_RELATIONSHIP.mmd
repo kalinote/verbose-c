@@ -1,0 +1,330 @@
+flowchart TD
+    %% Verbose-C 项目模块与类关系总览
+
+    subgraph Inputs["输入、语法和调试产物"]
+        Src["tests/*.vbc<br/>Verbose-C 源码样例"]
+        GrammarFile["Grammar/verbose_c.gram<br/>语言语法定义"]
+        GeneratedParserFile["parser.py<br/>生成的语言解析器"]
+        Dumps["dumps/*.md<br/>CLI dump 调试报告"]
+    end
+
+    subgraph CLI["命令行入口层 verbose_c.cli"]
+        CliMain["cli.main()"]
+        ParseArgs["parse_args()<br/>--log / --dump / --compile-parser / --compile-only / --no-warn / -rp"]
+        ParseModuleSets["_parse_module_sets()<br/>校验 log/dump 模块名"]
+    end
+
+    subgraph Engine["编译编排层 verbose_c.engine"]
+        RunSourceFile["run_source_file()<br/>编译、可选执行、异常处理总编排"]
+        RunParserGen["run_parser_generation()<br/>语法文件生成解析器编排"]
+        CompileModule["compile_module()<br/>单文件分阶段编译"]
+        GenerateParser["generate_parser()<br/>生成 parser.py 并校验语法"]
+        EnsureParser["ensure_parser()<br/>按需生成或加载 parser.py"]
+        CompileContext["CompileContext<br/>各阶段中间产物，失败时保留"]
+        RunResult["RunResult<br/>success / dump_path / warnings / error"]
+        ParserGenerationReport["ParserGenerationReport<br/>解析器生成报告"]
+        CompilerOutput["CompilerOutput<br/>字节码、常量池、AST、tokens、标签、行号表、警告"]
+    end
+
+    subgraph Recorder["输出记录 verbose_c.engine.recorder"]
+        PipelineRecorder["PipelineRecorder<br/>分阶段 log 与 markdown dump"]
+        CreateDumpPath["create_dump_path()<br/>生成 dumps 路径"]
+        FormatParserMd["format_parser_generation_markdown()"]
+        FormatRuntimeError["format_runtime_error()<br/>格式化 VM 调用栈错误"]
+        VmLogCollector["VmDebugLogCollector<br/>VM 调试日志收集"]
+    end
+
+    subgraph FS["文件系统 verbose_c.fs"]
+        SourceManager["SourceManager<br/>路径规范化、文件缓存、resolve_include"]
+        ArtifactStore["ArtifactStore<br/>字节码持久化（占位）"]
+        IncrementalCompiler["IncrementalCompiler<br/>增量编译与依赖追踪（占位）"]
+    end
+
+    subgraph PPG["Parser Generator verbose_c.parser.ppg"]
+        PPGTokenizer["ppg.tokenizer.Tokenizer<br/>读取 .gram token"]
+        GrammarParser["grammar_parser.GeneratedParser<br/>解析语法文件"]
+        GrammarModel["grammar.*<br/>Grammar / Rule / Rhs / Alt / NamedItem / Lookahead / Repeat"]
+        ParserGeneratorBase["parser_generator.ParserGenerator<br/>规则检查、nullable、left recursive、first graph"]
+        PythonParserGenerator["python_generator.PythonParserGenerator<br/>把语法规则生成为 Python 代码"]
+        Validator["validator.validate_grammar()<br/>语法校验"]
+        SCCUtils["sccutils<br/>强连通分量、拓扑排序、环检测"]
+        PPGParserBase["ppg.parser.Parser<br/>语法文件解析基类和 memoize"]
+        BuildParser["build.build_parser()"]
+        BuildPythonGenerator["build.build_python_generator()"]
+        BuildAll["build.build_python_parser_and_generator()"]
+    end
+
+    subgraph Frontend["源码前端：词法、预处理、语法"]
+        SourceLexer["lexer.Lexer<br/>正则分词"]
+        Tokenizer["lexer.Tokenizer<br/>peek/getnext/mark/reset/get_line_source"]
+        Token["Token<br/>type/value/line/column/path/is_keyword"]
+        LexerEnum["lexer.enum<br/>TokenType / Operator"]
+        Preprocessor["Preprocessor<br/>process_tokens()：#include / #define / 函数式宏 / 续行宏"]
+        MacroDef["macro_definition<br/>MacroDefinition / MacroDefinitionType"]
+        ParserBase["parser.parser.Parser<br/>语言解析基类、memoize、错误收集"]
+        ParseError["ParseError<br/>解析错误详情与规则栈"]
+        ErrorCollector["ppg.error_collector.ErrorCollector<br/>期望收集、最远位置、format_error_report"]
+        AstDump["ast_dump()<br/>AST dump 输出"]
+        GeneratedParser["parser.py::GeneratedParser<br/>start/module/statement/expression 等规则"]
+    end
+
+    subgraph AST["AST 节点 verbose_c.parser.parser.ast.node"]
+        ASTNode["ASTNode<br/>accept(visitor)"]
+        BasicNodes["基础节点<br/>NameNode / NumberNode / BoolNode / StringNode / NullNode / TypeNode"]
+        ExpressionNodes["表达式节点<br/>UnaryOpNode / BinaryOpNode / RangeNode / CastNode / ParenOrCastNode"]
+        StructureNodes["结构节点<br/>RootNode / ModuleNode / BlockNode / LabelNode"]
+        StatementNodes["语句节点<br/>VarDeclNode / AssignmentNode / ExprStmtNode"]
+        ControlNodes["控制流节点<br/>IfNode / WhileNode / DoWhileNode / ForNode / ReturnNode / BreakNode / ContinueNode"]
+        FunctionNodes["函数节点<br/>ParamNode / FunctionNode / CallNode"]
+        ClassAstNodes["类与对象节点<br/>ClassNode / NewInstanceNode / GetPropertyNode / SetPropertyNode / SuperNode"]
+        AstEnum["ast.enum.AttributeType"]
+    end
+
+    subgraph CompilerLayer["编译器 verbose_c.compiler"]
+        Compiler["Compiler<br/>类型检查和字节码生成总入口"]
+        CompilerPass["CompilerPass<br/>ALL / TYPE_CHECK / GENERATE_CODE"]
+        TypeChecker["type_checker_visitor.TypeChecker<br/>语义检查、类型推断、隐式转换标记、告警"]
+        BuiltinTypeMap["BUILTIN_TYPE_MAP<br/>void/int/float/string/bool 等编译时类型"]
+        OpcodeGenerator["opcode_generator_visitor.OpcodeGenerator<br/>AST 访问并生成字节码、常量池、标签、行号表"]
+        LoopContext["LoopContext<br/>break/continue 标签上下文"]
+        Opcode["Opcode<br/>LOAD / STORE / 算术 / 跳转 / CALL / CAST / 指针 / 类对象"]
+        SymbolTable["SymbolTable<br/>值命名空间、类型命名空间、嵌套作用域、局部地址"]
+        Symbol["Symbol<br/>name/type/kind/address/scope"]
+        CompilerEnums["compiler.enum<br/>ScopeType / SymbolKind / LoopType / FunctionSignatureType"]
+        FunctionSignature["FunctionSignature<br/>旧式/辅助函数签名结构"]
+    end
+
+    subgraph TypeSystem["编译期类型系统 verbose_c.typing"]
+        TypeBase["Type<br/>编译时类型基类"]
+        PrimitiveTypes["基础类型<br/>VoidType / NullType / IntegerType / FloatType / StringType / BoolType"]
+        CompositeTypes["复合类型<br/>PointerType / FunctionType / ClassType"]
+        SpecialTypes["特殊类型<br/>AnyType / ErrorType"]
+        ClassTypeDetails["ClassType<br/>fields / methods / super_class / mro / is_subclass_of()"]
+    end
+
+    subgraph VM["虚拟机 verbose_c.vm"]
+        VBCVM["VBCVirtualMachine<br/>栈式 VM、PC、全局/局部变量、调用栈、指令循环"]
+        RegisterInstruction["register_instruction()<br/>Opcode 到 handler 的注册装饰器"]
+        VMHandlers["_vm_handlers<br/>全局指令处理器表"]
+        Stack["utils.stack.Stack<br/>操作数栈"]
+        MemoryManager["MemoryManager<br/>地址分配、读写、释放"]
+        GC["GarbageCollector<br/>标记-清除 GC"]
+        BuiltinsModule["builtins_functions<br/>BUILTIN_FUNCTIONS / BUILTIN_FUNCTION_SIGNATURES / BUILTIN_CONSTANTS"]
+        BuiltinTypeof["typeof.native_typeof"]
+        BuiltinLen["len.native_len"]
+        BuiltinIO["io.native_open/read/write/close/lseek<br/>以及 IO_CONSTANTS"]
+    end
+
+    subgraph RuntimeObjects["运行时对象 verbose_c.object"]
+        VBCObject["VBCObject<br/>运行时对象基类"]
+        VBCObjectWithGC["VBCObjectWithGC<br/>可 GC 对象基类"]
+        ObjectEnum["VBCObjectType<br/>运行时对象类型枚举"]
+        PrimitiveObjects["基础对象<br/>VBCInteger / VBCFloat / VBCBool / VBCString / VBCNull"]
+        PointerObject["VBCPointer<br/>模拟指针地址和目标类型"]
+        FunctionObjects["函数对象<br/>VBCFunction / VBCNativeFunction / VBCBoundMethod / CallFrame"]
+        ClassObject["VBCClass<br/>运行时类对象"]
+        InstanceObject["VBCInstance<br/>运行时实例对象"]
+        ModuleObject["VBCModule<br/>模块对象"]
+    end
+
+    subgraph ErrorsAndUtils["错误和工具"]
+        VisitorBase["VisitorBase<br/>按 visit_ClassName 分发"]
+        Errors["error.exceptions<br/>VBCError / VBCCompileError / VBCRuntimeError / VBCIOError / TracebackFrame"]
+        Algorithm["utils.algorithm.hash_"]
+    end
+
+    %% CLI 分发
+    Src --> CliMain
+    CliMain --> ParseArgs
+    CliMain --> ParseModuleSets
+    CliMain --> RunSourceFile
+    CliMain --> RunParserGen
+    ParseModuleSets --> RunSourceFile
+    ParseModuleSets --> RunParserGen
+
+    %% Engine 总编排
+    RunSourceFile --> PipelineRecorder
+    RunSourceFile --> CompileModule
+    RunSourceFile --> VBCVM
+    RunSourceFile --> RunResult
+    RunParserGen --> PipelineRecorder
+    RunParserGen --> GenerateParser
+    RunParserGen --> RunResult
+    RunSourceFile --> CreateDumpPath
+    RunParserGen --> CreateDumpPath
+    CreateDumpPath --> Dumps
+
+    %% Recorder 输出
+    PipelineRecorder --> FormatParserMd
+    PipelineRecorder --> FormatRuntimeError
+    PipelineRecorder --> VmLogCollector
+    PipelineRecorder --> AstDump
+    PipelineRecorder --> Dumps
+    FormatRuntimeError --> Errors
+    VmLogCollector --> PipelineRecorder
+    VmLogCollector --> VBCVM
+
+    %% compile_module 分阶段流水线
+    CompileModule --> EnsureParser
+    EnsureParser --> GenerateParser
+    CompileModule --> SourceManager
+    CompileModule --> CompileContext
+    CompileModule --> CompilerOutput
+    CompileModule --> PipelineRecorder
+    SourceManager --> Tokenizer
+    Tokenizer --> SourceLexer
+    SourceLexer --> Token
+    SourceLexer --> LexerEnum
+    CompileModule --> Tokenizer
+    Tokenizer -->|raw_tokens| Preprocessor
+    Preprocessor -->|processed_tokens| Tokenizer
+    Preprocessor --> SourceManager
+    Preprocessor --> MacroDef
+    MacroDef --> Token
+    CompileModule --> GeneratedParser
+    GeneratedParserFile --> GeneratedParser
+    GeneratedParser --> ParserBase
+    ParserBase --> Tokenizer
+    ParserBase --> ErrorCollector
+    ParserBase --> LexerEnum
+    ErrorCollector --> ParseError
+    ErrorCollector --> Tokenizer
+    Tokenizer --> SourceManager
+    GeneratedParser --> ASTNode
+    GeneratedParser --> BasicNodes
+    GeneratedParser --> ExpressionNodes
+    GeneratedParser --> StructureNodes
+    GeneratedParser --> StatementNodes
+    GeneratedParser --> ControlNodes
+    GeneratedParser --> FunctionNodes
+    GeneratedParser --> ClassAstNodes
+
+    %% Parser Generator
+    GenerateParser --> ParserGenerationReport
+    GenerateParser --> BuildAll
+    GrammarFile --> BuildParser
+    BuildAll --> BuildParser
+    BuildAll --> BuildPythonGenerator
+    BuildParser --> PPGTokenizer
+    BuildParser --> GrammarParser
+    GrammarParser --> PPGParserBase
+    GrammarParser --> GrammarModel
+    BuildPythonGenerator --> PythonParserGenerator
+    PythonParserGenerator --> ParserGeneratorBase
+    ParserGeneratorBase --> GrammarModel
+    ParserGeneratorBase --> SCCUtils
+    BuildPythonGenerator --> GeneratedParserFile
+    GenerateParser --> Validator
+    Validator --> GrammarModel
+
+    %% AST
+    AstDump --> ASTNode
+    ASTNode --> BasicNodes
+    ASTNode --> ExpressionNodes
+    ASTNode --> StructureNodes
+    ASTNode --> StatementNodes
+    ASTNode --> ControlNodes
+    ASTNode --> FunctionNodes
+    ASTNode --> ClassAstNodes
+    ASTNode --> VisitorBase
+    BasicNodes --> LexerEnum
+    ExpressionNodes --> LexerEnum
+    ClassAstNodes --> AstEnum
+
+    %% Compiler
+    CompileModule --> Compiler
+    Compiler --> CompilerPass
+    Compiler --> SymbolTable
+    Compiler --> TypeChecker
+    Compiler --> OpcodeGenerator
+    Compiler --> BuiltinsModule
+    Compiler --> Errors
+    TypeChecker --> VisitorBase
+    OpcodeGenerator --> VisitorBase
+    TypeChecker --> ASTNode
+    OpcodeGenerator --> ASTNode
+    TypeChecker --> SymbolTable
+    OpcodeGenerator --> SymbolTable
+    TypeChecker --> BuiltinTypeMap
+    TypeChecker --> TypeBase
+    TypeChecker --> Errors
+    OpcodeGenerator --> Opcode
+    OpcodeGenerator --> LoopContext
+    OpcodeGenerator --> RuntimeObjects
+    OpcodeGenerator --> TypeSystem
+    OpcodeGenerator --> FunctionObjects
+    OpcodeGenerator --> ClassObject
+    SymbolTable --> Symbol
+    SymbolTable --> CompilerEnums
+    SymbolTable --> TypeBase
+    SymbolTable --> ClassTypeDetails
+    FunctionSignature --> TypeBase
+
+    %% Type System
+    TypeBase --> PrimitiveTypes
+    TypeBase --> CompositeTypes
+    TypeBase --> SpecialTypes
+    CompositeTypes --> ClassTypeDetails
+    PrimitiveTypes --> ObjectEnum
+    CompositeTypes --> ObjectEnum
+
+    %% VM 执行
+    CompilerOutput --> Opcode
+    CompilerOutput --> VBCVM
+    CompilerOutput --> FunctionObjects
+    VBCVM --> RegisterInstruction
+    RegisterInstruction --> VMHandlers
+    VBCVM --> VMHandlers
+    VBCVM --> Opcode
+    VBCVM --> Stack
+    VBCVM --> MemoryManager
+    VBCVM --> GC
+    VBCVM --> BuiltinsModule
+    VBCVM --> FunctionObjects
+    VBCVM --> RuntimeObjects
+    VBCVM --> Errors
+    VBCVM --> ObjectEnum
+    GC --> VBCVM
+    GC --> VBCObjectWithGC
+    MemoryManager --> RuntimeObjects
+
+    %% Builtins
+    BuiltinsModule --> BuiltinTypeof
+    BuiltinsModule --> BuiltinLen
+    BuiltinsModule --> BuiltinIO
+    BuiltinsModule --> FunctionObjects
+    BuiltinsModule --> TypeSystem
+    BuiltinsModule --> PrimitiveObjects
+    BuiltinsModule --> ObjectEnum
+    Compiler --> BuiltinsModule
+    VBCVM --> BuiltinsModule
+
+    %% Runtime Objects
+    VBCObject --> VBCObjectWithGC
+    VBCObject --> PrimitiveObjects
+    VBCObject --> PointerObject
+    VBCObject --> FunctionObjects
+    VBCObjectWithGC --> FunctionObjects
+    VBCObjectWithGC --> ClassObject
+    VBCObjectWithGC --> InstanceObject
+    VBCObject --> ModuleObject
+    VBCObject --> ObjectEnum
+    PrimitiveObjects --> ObjectEnum
+    PointerObject --> ObjectEnum
+    FunctionObjects --> ObjectEnum
+    ClassObject --> ObjectEnum
+    InstanceObject --> ObjectEnum
+    ClassObject --> FunctionObjects
+    ClassObject --> ClassTypeDetails
+    InstanceObject --> ClassObject
+    FunctionObjects --> InstanceObject
+
+    %% FS 占位模块（未来接入）
+    ArtifactStore -.->|TODO| CompilerOutput
+    IncrementalCompiler -.->|TODO| SourceManager
+
+  %% 注释性虚线关系
+    Dumps -.->|记录 tokens、AST、opcode、常量池、标签、VM 日志| PipelineRecorder
+    Dumps -.->|辅助定位运行时错误| Errors
+    Src -.->|作为命令行测试输入| RunSourceFile
+    Algorithm -.->|通用辅助函数| RuntimeObjects

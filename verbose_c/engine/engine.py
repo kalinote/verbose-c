@@ -5,6 +5,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
+from verbose_c.fs.source_manager import SourceManager
 from verbose_c.preprocessor.preprocessor import Preprocessor
 from verbose_c.parser.lexer.tokenizer import Tokenizer
 from verbose_c.parser.lexer.token import Token
@@ -182,29 +183,30 @@ def compile_module(
 
     file_path = os.path.abspath(file_path)
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        source_code = f.read()
-
+    source_manager = SourceManager()
+    
     # 词法分析
-    tokenizer = Tokenizer(file_path, source_code)
-    context.tokens = tokenizer.tokens
+    tokenizer = Tokenizer(file_path, source_manager)
+    raw_tokens = tokenizer.tokens
+    context.tokens = raw_tokens
+    if recorder:
+        recorder.on_raw_tokens(raw_tokens)
 
-    # 宏代码预处理
-    preprocessor = Preprocessor()
-    processed_tokens = preprocessor.process_tokens(tokenizer.tokens)
+    preprocessor = Preprocessor(source_manager)
+    processed_tokens = preprocessor.process_tokens(raw_tokens)
     tokenizer.tokens = processed_tokens
     tokenizer._total_tokens = len(processed_tokens)
     tokenizer._index = 0
     context.tokens = processed_tokens
     if recorder:
-        recorder.on_tokens(processed_tokens)
+        recorder.on_preprocessed_tokens(processed_tokens)
 
     # 语法分析
     parser = parser_module.GeneratedParser(tokenizer)
     ast_node = parser.start()
     if ast_node is None:
         error_report = parser.get_error_report() if parser.has_errors() else "未知的解析错误"
-        raise SyntaxError(f"在文件 {file_path} 中解析失败:\n{error_report}")
+        raise VBCCompileError(f"在文件 {file_path} 中解析失败:\n{error_report}", filepath=file_path)
 
     context.ast_node = ast_node
     if recorder:
@@ -335,7 +337,7 @@ def run_source_file(
         captured_error = e
         print(f"编译错误: 文件 {e.filepath}")
         for error_line in e.message.split('\n'):
-            print(f"  - {error_line}")
+            print(f"    {error_line}")
         compile_warnings = e.warnings or []
         if show_warnings and compile_warnings:
             for warning_line in compile_warnings:

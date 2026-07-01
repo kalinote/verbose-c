@@ -1,10 +1,10 @@
 import os
 import re
 
+from verbose_c.fs.source_manager import SourceManager
 from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.lexer import Lexer
 from verbose_c.parser.lexer.token import Token
-from verbose_c.parser.lexer.tokenizer import Tokenizer
 from verbose_c.preprocessor.macro_definition import MacroDefinition, MacroDefinitionType
 
 DEFINE_PATTERN = re.compile(
@@ -22,10 +22,31 @@ class Preprocessor:
 
     MAX_EXPANSION_DEPTH = 20
 
-    def __init__(self, show_warnings: bool = True):
+    def __init__(self, source_manager: SourceManager, show_warnings: bool = True):
+        self.source_manager = source_manager
         self.show_warnings = show_warnings
         self.macro_register: dict[str, MacroDefinition] = {}
         self._included_files = set()
+
+    def _token_location(self, token: Token) -> str:
+        """格式化 token 所在源文件与行号。"""
+        path = os.path.abspath(token.path) if token.path else ""
+        parts: list[str] = []
+        if token.line is not None:
+            parts.append(f"位于 {token.line} 行")
+        if path:
+            parts.append(f"在 {path} 文件")
+        return "，".join(parts)
+
+    def _warn(self, message: str, token: Token | None = None) -> None:
+        """输出带可选位置信息的预处理警告。"""
+        if not self.show_warnings:
+            return
+        location = self._token_location(token) if token else ""
+        if location:
+            print(f"警告: {message}，{location}")
+        else:
+            print(f"警告: {message}")
 
     def _clone_token(self, token: Token) -> Token:
         """浅拷贝单个 Token。"""
@@ -71,8 +92,7 @@ class Preprocessor:
     ) -> tuple[list[Token], int]:
         """在 index 处展开宏，返回展开 token 及从 index 起消费的长度。"""
         if depth > self.MAX_EXPANSION_DEPTH:
-            if self.show_warnings:
-                print(f"警告: 宏展开超过最大深度 {self.MAX_EXPANSION_DEPTH}")
+            self._warn(f"宏展开超过最大深度 {self.MAX_EXPANSION_DEPTH}", tokens[index])
             return [self._clone_token(tokens[index])], 1
 
         name = tokens[index].value
@@ -156,8 +176,21 @@ class Preprocessor:
             line_index += 1
         body = ' '.join(body_parts)
 
-        if name in self.macro_register and self.show_warnings:
-            print(f"警告: 宏定义 {name} 已存在")
+        if name in self.macro_register:
+            existing = self.macro_register[name]
+            prev_parts: list[str] = []
+            if existing.line is not None:
+                prev_parts.append(f"位于 {existing.line} 行")
+            if existing.source_file:
+                prev_parts.append(f"在 {existing.source_file} 文件")
+            prev_loc = "，".join(prev_parts)
+            cur_loc = self._token_location(token)
+            if prev_loc and cur_loc:
+                self._warn(f"宏定义 {name} 已存在，{prev_loc}；当前定义{cur_loc}")
+            elif prev_loc:
+                self._warn(f"宏定义 {name} 已存在，{prev_loc}")
+            else:
+                self._warn(f"宏定义 {name} 已存在", token)
 
         macro_type = MacroDefinitionType.FUNCTION if params_str else MacroDefinitionType.OBJECT
         params = [p.strip() for p in params_str.strip()[1:-1].split(",") if p.strip()] if params_str else []
@@ -165,35 +198,38 @@ class Preprocessor:
             tok for tok in Lexer(os.path.abspath(token.path or ""), body).tokenize()
             if tok.type != TokenType.END
         ]
-        self.macro_register[name] = MacroDefinition(macro_type, params, body_tokens)
+        self.macro_register[name] = MacroDefinition(
+            macro_type,
+            params,
+            body_tokens,
+            source_file=os.path.abspath(token.path or ""),
+            line=token.line,
+            column=token.column,
+        )
 
     def _handle_include(self, token: Token) -> list[Token]:
         """处理 #include "..." 并返回展开后的 token 列表。"""
         quoted_match = INCLUDE_QUOTED_PATTERN.match(token.value)
         if not quoted_match:
-            if INCLUDE_ANGLE_PATTERN.match(token.value) and self.show_warnings:
-                print("警告: 暂不支持 #include <...> 形式")
+            if INCLUDE_ANGLE_PATTERN.match(token.value):
+                self._warn("暂不支持 #include <...> 形式", token)
             return []
 
         filename = quoted_match.group(1)
-        base_dir = os.path.dirname(os.path.abspath(token.path or ""))
-        abs_path = os.path.normpath(os.path.join(base_dir, filename))
+        abs_path = self.source_manager.resolve_include(filename, token.path or "")
 
         if abs_path in self._included_files:
-            if self.show_warnings:
-                print(f"警告: 检测到循环包含 '{abs_path}'，已跳过。")
+            self._warn(f"检测到循环包含 '{abs_path}'，已跳过", token)
             return []
 
-        if not os.path.exists(abs_path):
-            if self.show_warnings:
-                print(f"警告: #include 文件未找到 '{abs_path}' (在 {token.path} 中)")
+        if not self.source_manager.exists(abs_path):
+            self._warn(f"#include 文件未找到 '{abs_path}'", token)
             return []
 
         self._included_files.add(abs_path)
         try:
-            with open(abs_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            included_tokens = Tokenizer(abs_path, content).tokens
+            content = self.source_manager.read(abs_path)
+            included_tokens = Lexer(abs_path, content).tokenize()
             processed = self.process_tokens(included_tokens)
             return [t for t in processed if t.type != TokenType.END]
         finally:
@@ -216,7 +252,7 @@ class Preprocessor:
                 elif INCLUDE_QUOTED_PATTERN.match(token.value) or INCLUDE_ANGLE_PATTERN.match(token.value):
                     output.extend(self._handle_include(token))
                 elif self.show_warnings:
-                    print(f"警告: 未识别的预处理指令: {token.value}")
+                    self._warn(f"未识别的预处理指令: {token.value}", token)
                 index += 1
                 continue
 

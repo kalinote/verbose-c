@@ -1,6 +1,6 @@
 from typing import List
-import os
 
+from verbose_c.fs.source_manager import SourceManager
 from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.token import Token
 from verbose_c.parser.lexer.lexer import Lexer
@@ -8,13 +8,15 @@ from verbose_c.parser.lexer.lexer import Lexer
 Mark = int
 
 class Tokenizer:
-    def __init__(self, filename: str, source: str) -> None:
-        self.lexer: Lexer = Lexer(os.path.abspath(filename) if filename else filename, source)
+    def __init__(self, filename: str, source_manager: SourceManager) -> None:
+        self.source_manager = source_manager
+        abs_path = source_manager.normalize_path(filename)
+        source = source_manager.read(abs_path)
+        self.lexer: Lexer = Lexer(abs_path, source)
         self.tokens: List[Token] = self.lexer.tokenize()
         self._total_tokens: int = len(self.tokens)
         self._index: int = 0
         self._marks: List[int] = []
-        self._source_lines = source.splitlines()
 
     def getnext(self) -> Token:
         """
@@ -61,7 +63,6 @@ class Tokenizer:
                 return tok
         return self.tokens[-1]
 
-    def get_line_source(self, line: int) -> str:
-        if 1 <= line <= len(self._source_lines):
-            return self._source_lines[line - 1]
-        return ""
+    def get_line_source(self, path: str, line: int) -> str:
+        resolved_path = path or self.lexer.filename
+        return self.source_manager.get_line(resolved_path, line)

@@ -1,0 +1,12 @@
+// 测试点：验证 SourceManager 多文件源码缓存与解析错误上下文输出。
+// 预期：报错应指向 error_report_bad.inc 中的非法语句，并打印该文件源码行。
+
+#include "error_report_bad.inc"
+
+int main() {
+    int x = imported_value();
+    write(STDOUT, x);
+    return x;
+}
+
+main();

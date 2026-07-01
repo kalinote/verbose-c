@@ -18,15 +18,6 @@ def _escape_markdown_table_cell(value) -> str:
     return str(value).replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|").replace("\n", "<br>")
 
 
-def _section_anchor(title: str) -> str:
-    mapping = {
-        "Token 序列（预处理后）": "token-序列",
-        "Token 序列": "token-序列",
-        "AST 结构": "ast-结构",
-    }
-    return mapping.get(title, title.lower().replace(" ", "-"))
-
-
 def format_parser_generation_markdown(report, heading_level: int = 2, include_details: bool = True) -> str:
     heading = "#" * heading_level
     lines = [
@@ -203,20 +194,19 @@ class PipelineRecorder:
                 format_parser_generation_markdown(report, heading_level=2, include_details=True)
             )
 
-    def on_preprocessed(self, code: str) -> None:
-        if not self._dump_preprocess or not self.dump_path:
-            return
-        content = "## 预处理代码\n\n```c\n"
-        content += code
-        if not code.endswith("\n"):
-            content += "\n"
-        content += "```\n\n"
-        self._append_section("预处理代码", content)
-
-    def on_tokens(self, tokens) -> None:
+    def on_raw_tokens(self, tokens) -> None:
+        """dump 词法分析后、预处理前的 token 序列（--dump tokens）。"""
         if not self._dump_tokens or not self.dump_path:
             return
-        self._append_section("Token 序列（预处理后）", self._format_tokens_section(tokens))
+        title = "原始Token序列"
+        self._append_section(title, self._format_tokens_section(tokens, title))
+
+    def on_preprocessed_tokens(self, tokens) -> None:
+        """dump 预处理后的 token 序列（--dump preprocess）。"""
+        if not self._dump_preprocess or not self.dump_path:
+            return
+        title = "预处理Token序列"
+        self._append_section(title, self._format_tokens_section(tokens, title))
 
     def on_ast(self, node) -> None:
         if not self._dump_ast or not self.dump_path:
@@ -305,15 +295,14 @@ class PipelineRecorder:
 
     def _append_section(self, toc_title: str, content: str, record_toc: bool = True) -> None:
         if record_toc:
-            anchor = _section_anchor(toc_title)
-            self._toc_lines.append(f"- [{toc_title}](#{anchor})")
+            self._toc_lines.append(f"- [{toc_title}](#{toc_title.lower().replace(' ', '-')})")
         self._section_body += content
         with open(self.dump_path, "a", encoding="utf-8") as f:
             f.write(content)
 
-    def _format_tokens_section(self, tokens) -> str:
+    def _format_tokens_section(self, tokens, title: str) -> str:
         lines = [
-            "## Token 序列（预处理后）\n\n",
+            f"## {title}\n\n",
             "| 序号 | TokenType | 字面量 | 行:列 | 文件 |\n",
             "| --- | --- | --- | --- | --- |\n",
         ]

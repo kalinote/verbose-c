@@ -13,7 +13,7 @@ def parse_args():
 
     parser.add_argument("filename", help="需要编译的文件（.vbc源代码文件或.gram语法文件）")
     parser.add_argument("--log", nargs="?", const="all", help="按模块输出命令行日志（模块: compile, vm, parser, all；默认 all）")
-    parser.add_argument("--dump", nargs="?", const="all", help="导出执行过程日志，支持模块: parser, preprocess, tokens, ast, opcode, const, label, vm, all；默认 all")
+    parser.add_argument("--dump", nargs="?", const="all", help="导出执行过程日志，支持模块: parser, tokens, preprocess, ast, opcode, const, label, vm, all；默认 all")
     parser.add_argument("--no-warn", help="静默编译告警输出", action="store_true")
     parser.add_argument("-cp", "--compile-parser", help="编译语法文件生成解析器", action="store_true")
     parser.add_argument("--compile-only", help="只编译不执行源代码", action="store_true")
