@@ -405,8 +405,7 @@ class VBCVirtualMachine:
     @register_instruction(Opcode.LOGICAL_NOT)
     def __handle_logical_not(self):
         operand = self._stack.pop()
-        py_result = not operand
-        self._stack.push(VBCBool(py_result))
+        self._stack.push(VBCInteger(0 if bool(operand) else 1))
 
     ## 控制流类指令
     @register_instruction(Opcode.JUMP)

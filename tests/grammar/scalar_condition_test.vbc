@@ -1,0 +1,107 @@
+// 测试点：C 标量真值语义——if/while/for 条件允许整数/指针/浮点，一元 ! 返回 int 0/1。
+
+int main() {
+    write(STDOUT, "\n=== Scalar Condition Test ===\n");
+
+    int flag = 0;
+
+    if (1) {
+        flag = 1;
+    }
+    if (0) {
+        flag = 99;
+    }
+    if (flag != 1) {
+        write(STDOUT, "FAIL: if (1) / if (0)\n");
+        return 1;
+    }
+
+    int n = 3;
+    if (n) {
+        flag = 2;
+    }
+    n = 0;
+    if (n) {
+        flag = 99;
+    }
+    if (flag != 2) {
+        write(STDOUT, "FAIL: if (n)\n");
+        return 2;
+    }
+
+    int a = 10;
+    int* p = &a;
+    if (p) {
+        flag = 3;
+    }
+    p = null;
+    if (p) {
+        flag = 99;
+    }
+    if (flag != 3) {
+        write(STDOUT, "FAIL: if (ptr)\n");
+        return 3;
+    }
+
+    float ratio = 0.0;
+    if (ratio) {
+        flag = 99;
+    }
+    ratio = 1.5;
+    if (ratio) {
+        flag = 4;
+    }
+    if (flag != 4) {
+        write(STDOUT, "FAIL: if (ratio)\n");
+        return 4;
+    }
+
+    n = 3;
+    int while_count = 0;
+    while (n) {
+        while_count = while_count + 1;
+        n = n - 1;
+    }
+    if (while_count != 3) {
+        write(STDOUT, "FAIL: while (n)\n");
+        return 5;
+    }
+
+    n = 2;
+    int for_count = 0;
+    for (; n; n = n - 1) {
+        for_count = for_count + 1;
+    }
+    if (for_count != 2) {
+        write(STDOUT, "FAIL: for (; n; n = n - 1)\n");
+        return 6;
+    }
+
+    int not_zero = !0;
+    int not_one = !1;
+    if (not_zero != 1 || not_one != 0) {
+        write(STDOUT, "FAIL: !0 / !1\n");
+        return 7;
+    }
+
+    p = &a;
+    int not_ptr = !p;
+    p = null;
+    int not_null_ptr = !p;
+    if (not_ptr != 0 || not_null_ptr != 1) {
+        write(STDOUT, "FAIL: !ptr\n");
+        return 8;
+    }
+
+    int not_float_zero = !0.0;
+    int not_float_one = !1.0;
+    if (not_float_zero != 1 || not_float_one != 0) {
+        write(STDOUT, "FAIL: !ratio\n");
+        return 9;
+    }
+
+    write(STDOUT, "All scalar condition tests passed.\n");
+    return 0;
+}
+
+main();

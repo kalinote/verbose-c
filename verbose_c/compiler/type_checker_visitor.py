@@ -120,6 +120,18 @@ class TypeChecker(VisitorBase):
 
         return False
 
+    def _is_scalar_truthy_type(self, type_: Type) -> bool:
+        """可用于 C 条件上下文或一元 ! 的标量类型：整数、浮点、指针、布尔。"""
+        return isinstance(type_, (IntegerType, FloatType, PointerType, BoolType))
+
+    def _check_condition_type(self, condition_type: Type, line: int | None, stmt: str) -> None:
+        if isinstance(condition_type, ErrorType):
+            return
+        if not self._is_scalar_truthy_type(condition_type):
+            self.errors.append(
+                f"类型错误: '{stmt}' 语句的条件必须是标量类型（整数、浮点、指针或布尔）, 而不是 '{condition_type}', 在 {line} 行"
+            )
+
     def _numeric_rank(self, type_: Type) -> int:
         """返回数值类型的隐式转换优先级，用于判断是否窄化。"""
         if isinstance(type_, BoolType):
@@ -279,11 +291,10 @@ class TypeChecker(VisitorBase):
             return operand_type
 
         if node.op == Operator.NOT:
-            # 注意：C语言允许对指针和整数进行逻辑非操作，这里我们先保持严格，只允许布尔
-            if not isinstance(operand_type, BoolType):
-                self.errors.append(f"类型错误: 操作符 '!' 只能用于布尔类型, 而不是 '{operand_type}', 在 {node.start_line} 行")
+            if not self._is_scalar_truthy_type(operand_type):
+                self.errors.append(f"类型错误: 操作符 '!' 只能用于标量类型, 而不是 '{operand_type}', 在 {node.start_line} 行")
                 return ErrorType()
-            return BoolType()
+            return IntegerType(VBCObjectType.INT)
 
         self.errors.append(f"内部错误: 未知的一元操作符 '{node.op.value}', 在 {node.start_line} 行")
         return ErrorType()
@@ -345,8 +356,8 @@ class TypeChecker(VisitorBase):
 
         # 逻辑运算
         if op in (Operator.LOGICAL_AND, Operator.LOGICAL_OR):
-            if not (isinstance(left_type, BoolType) and isinstance(right_type, BoolType)):
-                self.errors.append(f"类型错误: 逻辑操作符 '{op.value}' 的操作数必须是布尔类型, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+            if not (self._is_scalar_truthy_type(left_type) and self._is_scalar_truthy_type(right_type)):
+                self.errors.append(f"类型错误: 逻辑操作符 '{op.value}' 的操作数必须是标量类型, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
                 return ErrorType()
             return BoolType()
 
@@ -424,8 +435,7 @@ class TypeChecker(VisitorBase):
 
     def visit_IfNode(self, node: IfNode) -> Type:
         condition_type = self.visit(node.condition)
-        if not isinstance(condition_type, BoolType):
-            self.errors.append(f"类型错误: 'if' 语句的条件必须是布尔类型, 而不是 '{condition_type}', 在 {node.condition.start_line} 行")
+        self._check_condition_type(condition_type, node.condition.start_line, "if")
 
         self.visit(node.then_branch)
 
@@ -440,8 +450,7 @@ class TypeChecker(VisitorBase):
 
     def visit_WhileNode(self, node: WhileNode) -> Type:
         condition_type = self.visit(node.condition)
-        if not isinstance(condition_type, BoolType):
-            self.errors.append(f"类型错误: 'while' 语句的条件必须是布尔类型, 而不是 '{condition_type}', 在 {node.condition.start_line} 行")
+        self._check_condition_type(condition_type, node.condition.start_line, "while")
 
         self.loop_level += 1
         self.visit(node.body)
@@ -455,8 +464,7 @@ class TypeChecker(VisitorBase):
         self.loop_level -= 1
 
         condition_type = self.visit(node.condition)
-        if not isinstance(condition_type, BoolType):
-            self.errors.append(f"类型错误: 'do-while' 语句的条件必须是布尔类型, 而不是 '{condition_type}', 在 {node.condition.start_line} 行")
+        self._check_condition_type(condition_type, node.condition.start_line, "do-while")
 
         return VoidType()
 
@@ -471,8 +479,7 @@ class TypeChecker(VisitorBase):
         
         if node.condition:
             condition_type = self.visit(node.condition)
-            if not isinstance(condition_type, BoolType):
-                self.errors.append(f"类型错误: 'for' 语句的条件必须是布尔类型, 而不是 '{condition_type}', 在 {node.condition.start_line} 行")
+            self._check_condition_type(condition_type, node.condition.start_line, "for")
 
         if node.update:
             self.visit(node.update)
