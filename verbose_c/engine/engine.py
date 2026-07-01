@@ -180,19 +180,26 @@ def compile_module(
 
     parser_module = _load_parser_module()
 
+    file_path = os.path.abspath(file_path)
+
     with open(file_path, "r", encoding="utf-8") as f:
         source_code = f.read()
 
-    processed_code = Preprocessor().process(source_code, file_path)
-    context.processed_code = processed_code
-    if recorder:
-        recorder.on_preprocessed(processed_code)
-
-    tokenizer = Tokenizer(file_path, processed_code)
+    # 词法分析
+    tokenizer = Tokenizer(file_path, source_code)
     context.tokens = tokenizer.tokens
-    if recorder:
-        recorder.on_tokens(tokenizer.tokens)
 
+    # 宏代码预处理
+    preprocessor = Preprocessor()
+    processed_tokens = preprocessor.process_tokens(tokenizer.tokens)
+    tokenizer.tokens = processed_tokens
+    tokenizer._total_tokens = len(processed_tokens)
+    tokenizer._index = 0
+    context.tokens = processed_tokens
+    if recorder:
+        recorder.on_tokens(processed_tokens)
+
+    # 语法分析
     parser = parser_module.GeneratedParser(tokenizer)
     ast_node = parser.start()
     if ast_node is None:
@@ -215,7 +222,7 @@ def compile_module(
         labels=opcode_gen.labels,
         tokens=tokenizer.tokens,
         ast_node=ast_node,
-        processed_code=processed_code,
+        processed_code="",
         lineno_table=opcode_gen.lineno_table,
         warnings=compiler.warnings,
         parser_generation_report=context.parser_generation_report

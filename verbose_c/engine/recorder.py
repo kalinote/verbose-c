@@ -20,6 +20,7 @@ def _escape_markdown_table_cell(value) -> str:
 
 def _section_anchor(title: str) -> str:
     mapping = {
+        "Token 序列（预处理后）": "token-序列",
         "Token 序列": "token-序列",
         "AST 结构": "ast-结构",
     }
@@ -215,11 +216,7 @@ class PipelineRecorder:
     def on_tokens(self, tokens) -> None:
         if not self._dump_tokens or not self.dump_path:
             return
-        lines = ["## Token 序列\n\n```text\n"]
-        for token in tokens:
-            lines.append(f"{token}\n")
-        lines.append("```\n\n")
-        self._append_section("Token 序列", "".join(lines))
+        self._append_section("Token 序列（预处理后）", self._format_tokens_section(tokens))
 
     def on_ast(self, node) -> None:
         if not self._dump_ast or not self.dump_path:
@@ -313,6 +310,30 @@ class PipelineRecorder:
         self._section_body += content
         with open(self.dump_path, "a", encoding="utf-8") as f:
             f.write(content)
+
+    def _format_tokens_section(self, tokens) -> str:
+        lines = [
+            "## Token 序列（预处理后）\n\n",
+            "| 序号 | TokenType | 字面量 | 行:列 | 文件 |\n",
+            "| --- | --- | --- | --- | --- |\n",
+        ]
+        for index, token in enumerate(tokens):
+            literal = repr(token.value)
+            if token.is_keyword:
+                literal = f"{literal} (keyword)"
+            line_col = "-"
+            if token.line is not None and token.column is not None:
+                line_col = f"{token.line}:{token.column}"
+            elif token.line is not None:
+                line_col = str(token.line)
+            filepath = token.path or "-"
+            lines.append(
+                f"| {index} | `{token.type.name}` | "
+                f"`{_escape_markdown_table_cell(literal)}` | "
+                f"{line_col} | `{_escape_markdown_table_cell(filepath)}` |\n"
+            )
+        lines.append("\n")
+        return "".join(lines)
 
     def _format_bytecode_section(self, bytecode: list[tuple[Any, ...]]) -> str:
         lines = ["## 操作码\n\n", "| 索引 | 指令 |\n", "| --- | --- |\n"]

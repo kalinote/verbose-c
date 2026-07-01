@@ -1,6 +1,7 @@
 import re
 from verbose_c.parser.lexer.token import Token
 from verbose_c.parser.lexer.enum import TokenType
+import os
 
 
 class Lexer:
@@ -21,7 +22,7 @@ class Lexer:
     }
 
     def __init__(self, filename, source):
-        self.filename = filename
+        self.filename = os.path.abspath(filename) if filename else filename
         self.source = source
         self.pos = 0
         self.line = 1

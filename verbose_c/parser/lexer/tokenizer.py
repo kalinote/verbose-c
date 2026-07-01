@@ -1,4 +1,5 @@
 from typing import List
+import os
 
 from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.token import Token
@@ -8,7 +9,7 @@ Mark = int
 
 class Tokenizer:
     def __init__(self, filename: str, source: str) -> None:
-        self.lexer: Lexer = Lexer(filename, source)
+        self.lexer: Lexer = Lexer(os.path.abspath(filename) if filename else filename, source)
         self.tokens: List[Token] = self.lexer.tokenize()
         self._total_tokens: int = len(self.tokens)
         self._index: int = 0
