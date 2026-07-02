@@ -54,17 +54,31 @@
   - 【已完成】用宏展开排除表（hiding 集）替代固定递归次数作为主防护机制
   - 【已完成】展开结果 rescan 时可继续匹配其他宏；当前展开链中的宏名不可再展开
   - 【已完成】`MAX_EXPANSION_DEPTH` 保留为兜底保护
-  - 【待完善】字符串化（`#`）、拼接（`##`）等复杂宏能力（扩展点已预留，未实现）
+  - 【已完成】字符串化（`#`）、拼接（`##`）等复杂宏能力（`macro_operators.py` + 词法 `PP_STRINGIFY`/`PP_CONCAT`）
 - 当前现状：
   - 【已完成】`_expand_at` / `_rescan` / `_consume_token` 实现 token 级展开与嵌套 rescan
-  - 【已完成】函数宏仅在后跟 `(` 时展开；形参替换为实参 token 序列后再 rescan
+  - 【已完成】函数宏按形参用法分类预展开实参（`NORMAL` / `STRINGIFY` / `CONCAT`），再替换宏体并处理 `#` / `##`
+  - 【已完成】`##` 粘贴后 re-lex；粘贴结果进入 `_rescan` 可继续匹配其他宏
+  - 【已完成】宏体分词使用 `Lexer(macro_body=True)`（不含 `MACRO_CODE`）；行首预处理指令仍由 `MACRO_CODE` 识别
   - 【已完成】反斜杠续行 `#define` 在注册时合并宏体并 tokenize
   - 【已完成】C17 预定义宏：`__FILE__`/`__LINE__` 按宏调用点动态展开（经用户宏传递时保留调用点行号）；其余在预处理器初始化时注册
+  - 【待完善】`__VA_ARGS__` / 可变参宏（见下方 P0-2 后续）
 - 验收标准：
   - 【已完成】`#define A A`、`#define A B` + `#define B A` 等循环宏有专用回归测试（`tests/grammar/preprocessor_circular_macro_test.vbc`）
   - 【已完成】`#define A B` + `#define B 1` 可继续展开为最终值（`grammar_preprocessor_test.vbc` 覆盖）
   - 【已完成】复杂宏样例（如 `BUILD_TOTAL(START_VALUE)`、include 导入宏）可稳定得到预期展开结果
   - 【已完成】`tests/grammar/predefined_macros_test.vbc` 覆盖预定义宏与 `__func__`
+  - 【已完成】`tests/grammar/preprocessor_stringify_concat_test.vbc` 覆盖 `#` 字符串化、`##` 拼接、嵌套宏展开顺序、include 导入宏
+  - 【已完成】反向样例：`tests/error/preprocessor_stringify_invalid.vbc`、`preprocessor_concat_invalid.vbc`、`preprocessor_hash_in_object_macro.vbc`
+
+#### P0-2 后续 / P1 预处理增强（未纳入本次）
+
+- 【待完善】`__VA_ARGS__` 与可变参宏
+- 【待完善】`#` / `##` 与 `__VA_ARGS__` 组合（如 `f(...) ## g`）
+- 【待完善】空实参 placemarker 与 gcc/clang 边界差异（当前 MVP 支持常见 `CAT(,x)` 粘贴）
+- 【待完善】`##` 粘贴不能构成合法 token 时：当前策略为报错（非实现定义宽松容错）
+- 【待完善】GNU 扩展（`__VA_OPT__` 等）
+- 【交叉引用】`#if` 完整 C17 常量表达式见 P0-3
 
 
 

@@ -1,0 +1,76 @@
+// 测试点：# 字符串化与 ## 拼接宏运算符。
+
+#include "../preprocessor_stringify_macros.inc"
+
+#define STR(x) #x
+#define CAT(a, b) a ## b
+#define MKSTR(x) #x
+#define F(a) MKSTR(a)
+#define ONE 1
+#define X ONE
+#define foobar 42
+#define BIT(n) (1 ## n)
+
+int main() {
+    int score = 0;
+
+    string s1 = STR(hello);
+    if (len(s1) == 5) {
+        score = score + 1;
+    }
+
+    string s2 = STR(a + 1);
+    if (len(s2) == 5) {
+        score = score + 2;
+    }
+
+    string s3 = STR("q");
+    if (len(s3) == 3) {
+        score = score + 4;
+    }
+
+    int v1 = CAT(1, 2);
+    if (v1 == 12) {
+        score = score + 8;
+    }
+
+    int v2 = CAT(foo, bar);
+    if (v2 == 42) {
+        score = score + 16;
+    }
+
+    string s4 = MKSTR(X);
+    if (len(s4) == 1) {
+        score = score + 32;
+    }
+
+    string s5 = F(X);
+    if (len(s5) == 1) {
+        score = score + 64;
+    }
+
+    string s6 = INC_STR(world);
+    if (len(s6) == 5) {
+        score = score + 128;
+    }
+
+    int v3 = INC_CAT(3, 4);
+    if (v3 == 34) {
+        score = score + 256;
+    }
+
+    int v4 = BIT(0);
+    if (v4 == 10) {
+        score = score + 512;
+    }
+
+    write(STDOUT, "\n=== Stringify Concat Preprocessor Test ===\n");
+    write(STDOUT, "score: ");
+    write(STDOUT, score);
+    write(STDOUT, "\n");
+
+    // 期望 score = 1+2+4+8+16+32+64+128+256+512 = 1023
+    return score;
+}
+
+main();

@@ -1,0 +1,9 @@
+// 测试点：对象宏不能使用 # 运算符。
+
+#define BAD #foo
+
+int main() {
+    return 0;
+}
+
+main();

@@ -1,0 +1,9 @@
+// 测试点：## 位于宏体开头时应报预处理错误。
+
+#define BAD(a) ## a
+
+int main() {
+    return 0;
+}
+
+main();

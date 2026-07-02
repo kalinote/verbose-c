@@ -1,0 +1,9 @@
+// 测试点：# 后缺少形参名时应报预处理错误。
+
+#define BAD(x) # y
+
+int main() {
+    return 0;
+}
+
+main();

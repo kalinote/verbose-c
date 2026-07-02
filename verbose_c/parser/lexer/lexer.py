@@ -21,7 +21,7 @@ class Lexer:
         'final', 'extends', 'implements', 'interface', 'abstract',
     }
 
-    def __init__(self, filename, source):
+    def __init__(self, filename, source, *, macro_body: bool = False):
         self.filename = os.path.abspath(filename) if filename else filename
         self.source = source
         self.pos = 0
@@ -29,9 +29,10 @@ class Lexer:
         self.column = 0
         self.tokens = []
 
-        # 基于 TokenType 构造 master_pattern
-        patterns = [f"(?P<{t.name}>{t.pattern})"
-                    for t in TokenType]
+        token_types = TokenType
+        if macro_body:
+            token_types = [t for t in TokenType if t != TokenType.MACRO_CODE]
+        patterns = [f"(?P<{t.name}>{t.pattern})" for t in token_types]
         self.master_pattern = re.compile("|".join(patterns), re.UNICODE)
 
     def tokenize(self):

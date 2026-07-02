@@ -10,7 +10,9 @@ class TokenType(Enum):
     NEWLINE    = ("NEWLINE", r"\r?\n")                          # 换行符
 
     # 预处理器相关或特殊构造
-    MACRO_CODE = ("MACRO_CODE", r"#(?:[^\r\n]*?\\\r?\n)*[^\r\n]*") # 宏代码, 匹配从#开始的完整预处理指令，支持'\'换行
+    PP_CONCAT    = ("PP_CONCAT",    r"##")
+    MACRO_CODE   = ("MACRO_CODE",   r"(?<!\S)[ \t]*#(?:[^\r\n]*?\\\r?\n)*[^\r\n]*")
+    PP_STRINGIFY = ("PP_STRINGIFY", r"#")
 
     # 复合操作符
     SHIFT_LEFT_ASSIGN = ("<<=", r"<<=")                 # 左移等于

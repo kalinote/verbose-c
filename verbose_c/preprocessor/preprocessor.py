@@ -16,6 +16,12 @@ from verbose_c.preprocessor.builtin_macros import (
 )
 from verbose_c.preprocessor.const_expr import eval_preprocessor_expr
 from verbose_c.preprocessor.macro_definition import MacroDefinition, MacroDefinitionType
+from verbose_c.preprocessor.macro_operators import (
+    classify_parameter_usage,
+    prepare_macro_arguments,
+    substitute_function_macro,
+    validate_macro_body,
+)
 
 DEFINE_PATTERN = re.compile(
     r'^\s*#define\s+([a-zA-Z_][a-zA-Z0-9_]*)(\([^\)]*\))?(?:\s+(.*))?$',
@@ -261,12 +267,16 @@ class Preprocessor:
                 return [self._clone_token(tokens[index])], 1
 
             param_map = dict(zip(macro.parameters, args))
-            substituted: list[Token] = []
-            for tok in macro.replacement:
-                if tok.type == TokenType.NAME and tok.value in param_map:
-                    substituted.extend(self._clone_token(t) for t in param_map[tok.value])
-                else:
-                    substituted.append(self._clone_token(tok))
+            usage = classify_parameter_usage(macro.replacement, macro.parameters)
+            prepared = prepare_macro_arguments(
+                param_map, usage, self, hiding, depth,
+            )
+            substituted = substitute_function_macro(
+                macro.replacement,
+                macro.parameters,
+                prepared,
+                invocation_site,
+            )
 
             consumed = next_index - index + arg_span
             return self._rescan(substituted, new_hiding, depth + 1, site=invocation_site), consumed
@@ -351,9 +361,10 @@ class Preprocessor:
         macro_type = MacroDefinitionType.FUNCTION if params_str else MacroDefinitionType.OBJECT
         params = [p.strip() for p in params_str.strip()[1:-1].split(",") if p.strip()] if params_str else []
         body_tokens = [
-            tok for tok in Lexer(os.path.abspath(token.path or ""), body).tokenize()
+            tok for tok in Lexer(os.path.abspath(token.path or ""), body, macro_body=True).tokenize()
             if tok.type != TokenType.END
         ]
+        validate_macro_body(macro_type, params, body_tokens, token)
         self.macro_register[name] = MacroDefinition(
             macro_type,
             params,
