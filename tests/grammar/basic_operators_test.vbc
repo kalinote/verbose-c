@@ -1,0 +1,78 @@
+// P0-5 基础运算符闭环验收用例：取模、复合赋值、自增自减
+
+int main() {
+    write(STDOUT, "\n=== Basic Operators Test ===\n");
+
+    int a = 17;
+    int mod = a % 5;
+    write(STDOUT, "17 % 5 = ");
+    write(STDOUT, mod);
+    write(STDOUT, "\n");
+
+    int b = 10;
+    b += 3;
+    write(STDOUT, "10 += 3 -> ");
+    write(STDOUT, b);
+    write(STDOUT, "\n");
+
+    b -= 2;
+    write(STDOUT, "13 -= 2 -> ");
+    write(STDOUT, b);
+    write(STDOUT, "\n");
+
+    b *= 2;
+    write(STDOUT, "11 *= 2 -> ");
+    write(STDOUT, b);
+    write(STDOUT, "\n");
+
+    b /= 4;
+    write(STDOUT, "22 /= 4 -> ");
+    write(STDOUT, b);
+    write(STDOUT, "\n");
+
+    b %= 3;
+    write(STDOUT, "5 %= 3 -> ");
+    write(STDOUT, b);
+    write(STDOUT, "\n");
+
+    int c = 5;
+    int pre_inc = ++c;
+    write(STDOUT, "++c -> c=");
+    write(STDOUT, c);
+    write(STDOUT, ", value=");
+    write(STDOUT, pre_inc);
+    write(STDOUT, "\n");
+
+    int post_inc = c++;
+    write(STDOUT, "c++ -> c=");
+    write(STDOUT, c);
+    write(STDOUT, ", value=");
+    write(STDOUT, post_inc);
+    write(STDOUT, "\n");
+
+    int d = 5;
+    int pre_dec = --d;
+    write(STDOUT, "--d -> d=");
+    write(STDOUT, d);
+    write(STDOUT, ", value=");
+    write(STDOUT, pre_dec);
+    write(STDOUT, "\n");
+
+    int post_dec = d--;
+    write(STDOUT, "d-- -> d=");
+    write(STDOUT, d);
+    write(STDOUT, ", value=");
+    write(STDOUT, post_dec);
+    write(STDOUT, "\n");
+
+    int i = 0;
+    for (i = 0; i < 5; i++) {
+        write(STDOUT, "for i++: ");
+        write(STDOUT, i);
+        write(STDOUT, "\n");
+    }
+
+    return mod;
+}
+
+main();

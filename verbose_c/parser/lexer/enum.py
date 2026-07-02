@@ -128,6 +128,14 @@ class Operator(Enum):
     NOT = "!"
     ADDRESS_OF = "&"
     DEREFERENCE = "*"
+    MODULO = "%"
+    PLUS_ASSIGN = "+="
+    MINUS_ASSIGN = "-="
+    STAR_ASSIGN = "*="
+    SLASH_ASSIGN = "/="
+    PERCENT_ASSIGN = "%="
+    INCREMENT = "++"
+    DECREMENT = "--"
 
     def __str__(self):
         return self.value 

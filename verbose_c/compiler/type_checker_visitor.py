@@ -299,7 +299,6 @@ class TypeChecker(VisitorBase):
         self.errors.append(f"内部错误: 未知的一元操作符 '{node.op.value}', 在 {node.start_line} 行")
         return ErrorType()
 
-
     def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
         """检查二元表达式类型并推导结果类型。"""
         left_type = self.visit(node.left)
@@ -310,6 +309,13 @@ class TypeChecker(VisitorBase):
 
         op = node.op
 
+        # 取模运算
+        if op == Operator.MODULO:
+            if not isinstance(left_type, IntegerType) or not isinstance(right_type, IntegerType):
+                self.errors.append(f"类型错误: 取模运算的操作数必须是整数类型, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                return ErrorType()
+            return IntegerType(VBCObjectType.INT)
+
         # 算术运算
         if op in (Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE):
             # 规则 1: 字符串拼接
@@ -318,16 +324,19 @@ class TypeChecker(VisitorBase):
 
             # 规则 2: 数字运算 (整数/浮点数)
             if isinstance(left_type, (IntegerType, FloatType)) and isinstance(right_type, (IntegerType, FloatType)):
+                if op == Operator.DIVIDE:
+                    if isinstance(left_type, FloatType) or isinstance(right_type, FloatType):
+                        left_priority = TYPE_PROMOTION_PRIORITY[left_type.kind]
+                        right_priority = TYPE_PROMOTION_PRIORITY[right_type.kind]
+                        return left_type if left_priority >= right_priority else right_type
+                    int_priority = TYPE_PROMOTION_PRIORITY[VBCObjectType.INT]
+                    left_p = IntegerType(VBCObjectType.INT) if TYPE_PROMOTION_PRIORITY[left_type.kind] < int_priority else left_type
+                    right_p = IntegerType(VBCObjectType.INT) if TYPE_PROMOTION_PRIORITY[right_type.kind] < int_priority else right_type
+                    return left_p if TYPE_PROMOTION_PRIORITY[left_p.kind] >= TYPE_PROMOTION_PRIORITY[right_p.kind] else right_p
+
                 left_priority = TYPE_PROMOTION_PRIORITY[left_type.kind]
                 right_priority = TYPE_PROMOTION_PRIORITY[right_type.kind]
-                
-                # 结果类型遵循优先级更高的操作数
                 result_type = left_type if left_priority >= right_priority else right_type
-                
-                # 特殊规则：整数除法的结果是浮点数
-                if op == Operator.DIVIDE and isinstance(result_type, IntegerType):
-                    return FloatType(VBCObjectType.DOUBLE)
-                
                 return result_type
 
             # 如果以上规则都不匹配，则是类型错误
@@ -419,6 +428,49 @@ class TypeChecker(VisitorBase):
         self._warn_implicit_conversion_if_needed(target_type, value_type, node.start_line, "赋值")
         self._mark_implicit_cast_if_needed(node.value, target_type, value_type)
         return target_type
+
+    def visit_CompoundAssignmentNode(self, node: CompoundAssignmentNode):
+        op_in_bin = {
+            Operator.PLUS_ASSIGN: Operator.ADD,
+            Operator.MINUS_ASSIGN: Operator.SUBTRACT,
+            Operator.STAR_ASSIGN: Operator.MULTIPLY,
+            Operator.SLASH_ASSIGN: Operator.DIVIDE,
+            Operator.PERCENT_ASSIGN: Operator.MODULO,
+        }
+        if node.op not in op_in_bin:
+            self.errors.append(f"类型错误: 不支持的复合赋值运符 '{node.op.value}', 在 {node.start_line} 行")
+            return ErrorType()
+        
+        bin_expr = BinaryOpNode(left=node.left, op=op_in_bin[node.op], right=node.right)
+        if isinstance(self.visit_BinaryOpNode(bin_expr), ErrorType):
+            return ErrorType()
+
+        final_result = self.visit_AssignmentNode(AssignmentNode(target=node.left, value=bin_expr))
+        cast_target = getattr(bin_expr, "_implicit_cast_target", None)
+        if cast_target is not None:
+            setattr(node, "_implicit_cast_target", cast_target)
+        if isinstance(final_result, ErrorType):
+            return ErrorType()
+
+        return final_result
+
+    def visit_UpdateExprNode(self, node: UpdateExprNode) -> Type:
+        base = node.base
+        if not (
+            isinstance(base, NameNode)
+            or (isinstance(base, UnaryOpNode) and base.op == Operator.DEREFERENCE)
+            or isinstance(base, GetPropertyNode)
+        ):
+            self.errors.append(f"类型错误: 自增/自减的操作数必须是可修改左值, 在 {node.start_line} 行")
+            return ErrorType()
+
+        base_type = self.visit(base)
+        if isinstance(base_type, ErrorType):
+            return ErrorType()
+        if not isinstance(base_type, (IntegerType, FloatType)):
+            self.errors.append(f"类型错误: 自增/自减操作数必须是整数或浮点类型, 而不是 '{base_type}', 在 {node.start_line} 行")
+            return ErrorType()
+        return base_type
 
     def visit_BlockNode(self, node: BlockNode) -> Type:
         original_table = self.symbol_table

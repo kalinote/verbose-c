@@ -160,11 +160,30 @@ class VBCInteger(VBCObject):
 
     def __truediv__(self, other: VBCObject):
         from verbose_c.object.t_float import VBCFloat
-        if isinstance(other, (VBCInteger, VBCFloat)):
+        if isinstance(other, VBCInteger):
+            if other.value == 0:
+                raise ZeroDivisionError("除零错误")
+            q, _ = divmod(abs(self.value), abs(other.value))
+            new_value = q if self.value * other.value >= 0 else -q
+            int_priority = VBCInteger.bit_width[VBCObjectType.INT][1]
+            left_p = VBCObjectType.INT if VBCInteger.bit_width[self._object_type][1] < int_priority else self._object_type
+            right_p = VBCObjectType.INT if VBCInteger.bit_width[other._object_type][1] < int_priority else other._object_type
+            result_type = left_p if VBCInteger.bit_width[left_p][1] >= VBCInteger.bit_width[right_p][1] else right_p
+            return VBCInteger._create_with_promotion(new_value, result_type)
+
+        if isinstance(other, VBCFloat):
             if other.value == 0:
                 raise ZeroDivisionError("除零错误")
             new_value = self.value / other.value
-            
             return VBCFloat._create_with_promotion(new_value, VBCObjectType.DOUBLE)
 
         raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "/" 运算符')
+
+    def __mod__(self, other: VBCObject):
+        if isinstance(other, VBCInteger):
+            new_value = self.value % other.value
+            base_type = other._object_type if self.type_priority < other.type_priority else self._object_type
+            return VBCInteger._create_with_promotion(new_value, base_type)
+        
+        raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "%" 运算符')
+    

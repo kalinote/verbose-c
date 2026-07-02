@@ -240,6 +240,38 @@ class AssignmentNode(ASTNode):
         self.target: ASTNode = target
         self.value: ASTNode = value
         
+class CompoundAssignmentNode(ASTNode):
+    """
+    复合赋值节点
+    +=, -=, *=, /=, %=
+    
+    Args:
+        left (ASTNode): 左操作数
+        op (Operator): 运算符
+        right (ASTNode): 右操作数
+    """
+    def __init__(self, left: ASTNode, op: Operator, right: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.left: ASTNode = left
+        self.op: Operator = op
+        self.right: ASTNode = right
+        
+class UpdateExprNode(ASTNode):
+    """
+    自增/自减表达式节点
+    ++, --
+    
+    Args:
+        base (ASTNode): 基操作数
+        op (Operator): 运算符
+        is_prefix (bool): 是否为前缀
+    """
+    def __init__(self, base: ASTNode, op: Operator, is_prefix: bool, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.base: ASTNode = base
+        self.op: Operator = op
+        self.is_prefix: bool = is_prefix
+
 class ExprStmtNode(ASTNode):
     """
     单表达式语句节点

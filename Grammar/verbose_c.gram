@@ -50,6 +50,11 @@ expression_as_statement[ExprStmtNode]: e=expr ';' { ExprStmtNode(e, LOCATIONS) }
 expr:
     | assignment
 assignment[ASTNode]:
+    | left=member_expr '+=' right=assignment{ CompoundAssignmentNode(left, Operator.PLUS_ASSIGN, right, LOCATIONS) }
+    | left=member_expr '-=' right=assignment{ CompoundAssignmentNode(left, Operator.MINUS_ASSIGN, right, LOCATIONS) }
+    | left=member_expr '*=' right=assignment{ CompoundAssignmentNode(left, Operator.STAR_ASSIGN, right, LOCATIONS) }
+    | left=member_expr '/=' right=assignment{ CompoundAssignmentNode(left, Operator.SLASH_ASSIGN, right, LOCATIONS) }
+    | left=member_expr '%=' right=assignment{ CompoundAssignmentNode(left, Operator.PERCENT_ASSIGN, right, LOCATIONS) }
     | target=member_expr '=' val=assignment { AssignmentNode(target, val, LOCATIONS) }
     | logical_or
 logical_or:
@@ -73,6 +78,7 @@ additive:
     | additive '-' multiplicative { BinaryOpNode(additive, Operator.SUBTRACT, multiplicative, LOCATIONS) }
     | multiplicative
 multiplicative:
+    | multiplicative '%' factor { BinaryOpNode(multiplicative, Operator.MODULO, factor, LOCATIONS) }
     | multiplicative '*' factor { BinaryOpNode(multiplicative, Operator.MULTIPLY, factor, LOCATIONS) }
     | multiplicative '/' factor { BinaryOpNode(multiplicative, Operator.DIVIDE, factor, LOCATIONS) }
     | factor
@@ -81,13 +87,18 @@ factor:
     | '(' expr ')' { expr }
     | unary
     | new_instance
-    | member_expr
 unary:
-    | '-' factor { UnaryOpNode(Operator.SUBTRACT, factor, LOCATIONS) }
-    | '+' factor { UnaryOpNode(Operator.ADD, factor, LOCATIONS) }
-    | '!' factor { UnaryOpNode(Operator.NOT, factor, LOCATIONS) }
-    | '&' factor { UnaryOpNode(Operator.ADDRESS_OF, factor, LOCATIONS) }
-
+    | '++' operand=unary { UpdateExprNode(operand, Operator.INCREMENT, is_prefix=True, LOCATIONS) }
+    | '--' operand=unary { UpdateExprNode(operand, Operator.DECREMENT, is_prefix=True, LOCATIONS) }
+    | '-' operand=unary { UnaryOpNode(Operator.SUBTRACT, operand, LOCATIONS) }
+    | '+' operand=unary { UnaryOpNode(Operator.ADD, operand, LOCATIONS) }
+    | '!' operand=unary { UnaryOpNode(Operator.NOT, operand, LOCATIONS) }
+    | '&' operand=unary { UnaryOpNode(Operator.ADDRESS_OF, operand, LOCATIONS) }
+    | member_update_expr
+member_update_expr:
+    | base=member_expr '++' { UpdateExprNode(base, Operator.INCREMENT, is_prefix=False, LOCATIONS) }
+    | base=member_expr '--' { UpdateExprNode(base, Operator.DECREMENT, is_prefix=False, LOCATIONS) }
+    | member_expr
 member_expr:
     | member_expr '.' property=NAME { GetPropertyNode(member_expr, NameNode(property.string, LOCATIONS), LOCATIONS) }
     | member_expr '(' args=func_call_param? ')' { CallNode(member_expr, args or [], {}, LOCATIONS) }

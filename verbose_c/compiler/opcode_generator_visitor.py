@@ -129,6 +129,73 @@ class OpcodeGenerator(VisitorBase):
         if target_enum is not None:
             self._emit(Opcode.CAST, target_enum)
 
+    def _emit_load_lvalue(self, target: ASTNode) -> None:
+        """将左值当前值压栈：NameNode / *p / obj.field"""
+        if isinstance(target, NameNode):
+            symbol = self.symbol_table.lookup_value(target.name)
+            if symbol is None:
+                raise RuntimeError(f"未定义的标识符: {target.name}")
+            if symbol.address is not None:
+                self._emit(Opcode.LOAD_LOCAL_VAR, symbol.address)
+            else:
+                self._emit(Opcode.LOAD_GLOBAL_VAR, target.name)
+        elif isinstance(target, UnaryOpNode) and target.op == Operator.DEREFERENCE:
+            self.visit(target.expr)
+            self._emit(Opcode.LOAD_BY_POINTER)
+        elif isinstance(target, GetPropertyNode):
+            self.visit(target.obj)
+            property_name = self._add_constant(VBCString(target.property_name.name))
+            self._emit(Opcode.LOAD_CONSTANT, property_name)
+            self._emit(Opcode.GET_PROPERTY)
+        else:
+            raise RuntimeError(f"不支持的左值读取目标: {type(target).__name__}")
+
+    def _emit_store_lvalue(self, target: ASTNode) -> None:
+        """弹出栈顶值写入左值，不保留表达式结果。"""
+        if isinstance(target, NameNode):
+            symbol = self.symbol_table.lookup_value(target.name)
+            if symbol is None:
+                raise RuntimeError(f"未定义的变量: {target.name}")
+            if symbol.address is not None:
+                self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+            else:
+                self._emit(Opcode.STORE_GLOBAL_VAR, target.name)
+        elif isinstance(target, UnaryOpNode) and target.op == Operator.DEREFERENCE:
+            self.visit(target.expr)
+            self._emit(Opcode.STORE_BY_POINTER)
+            self._emit(Opcode.POP)
+        elif isinstance(target, GetPropertyNode):
+            self.visit(target.obj)
+            property_name = self._add_constant(VBCString(target.property_name.name))
+            self._emit(Opcode.LOAD_CONSTANT, property_name)
+            self._emit(Opcode.SET_PROPERTY)
+            self._emit(Opcode.POP)
+        else:
+            raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
+
+    def _emit_store_lvalue_keep(self, target: ASTNode) -> None:
+        """写入左值并保留刚写入的值在栈顶。"""
+        if isinstance(target, NameNode):
+            self._emit(Opcode.DUP)
+            symbol = self.symbol_table.lookup_value(target.name)
+            if symbol is None:
+                raise RuntimeError(f"未定义的变量: {target.name}")
+            if symbol.address is not None:
+                self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+            else:
+                self._emit(Opcode.STORE_GLOBAL_VAR, target.name)
+        elif isinstance(target, UnaryOpNode) and target.op == Operator.DEREFERENCE:
+            self.visit(target.expr)
+            self._emit(Opcode.STORE_BY_POINTER)
+        elif isinstance(target, GetPropertyNode):
+            self._emit(Opcode.DUP)
+            self.visit(target.obj)
+            property_name = self._add_constant(VBCString(target.property_name.name))
+            self._emit(Opcode.LOAD_CONSTANT, property_name)
+            self._emit(Opcode.SET_PROPERTY)
+        else:
+            raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
+
     # 基本数据类型
     def visit_NameNode(self, node: NameNode):
         if node.name == "__func__":
@@ -314,6 +381,8 @@ class OpcodeGenerator(VisitorBase):
                     self._emit(Opcode.LESS_EQUAL)
                 case Operator.GREATER_EQUAL:
                     self._emit(Opcode.GREATER_EQUAL)
+                case Operator.MODULO:
+                    self._emit(Opcode.MODULO)
                 case _:
                     raise ValueError(f"未知的二元运算符: {node.op}")
 
@@ -366,7 +435,6 @@ class OpcodeGenerator(VisitorBase):
 
     def visit_AssignmentNode(self, node: AssignmentNode):
         """生成赋值字节码，并在赋值边界执行隐式转换。"""
-        # 解引用赋值
         if isinstance(node.target, UnaryOpNode) and node.target.op == Operator.DEREFERENCE:
             self.visit(node.value)
             self._emit_implicit_cast_if_needed(node.value)
@@ -374,34 +442,49 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.STORE_BY_POINTER)
             return
 
-        # 普通变量赋值
-        if isinstance(node.target, NameNode):
+        if isinstance(node.target, (NameNode, GetPropertyNode)):
             self.visit(node.value)
             self._emit_implicit_cast_if_needed(node.value)
+            self._emit_store_lvalue_keep(node.target)
+            return
 
-            symbol = self.symbol_table.lookup_value(node.target.name)
-            if symbol is None:
-                raise ValueError(f"未定义的变量: {node.target.name}")
+        raise RuntimeError(f"不支持的赋值目标类型: {type(node.target).__name__}")
 
-            self._emit(Opcode.DUP)
-            if symbol.address is not None:
-                self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
-            else:
-                self._emit(Opcode.STORE_GLOBAL_VAR, node.target.name)
-        
-        # 属性赋值
-        elif isinstance(node.target, GetPropertyNode):
-            self.visit(node.value)
-            self._emit_implicit_cast_if_needed(node.value)
-            self.visit(node.target.obj)
+    def visit_CompoundAssignmentNode(self, node: CompoundAssignmentNode):
+        op_to_opcode = {
+            Operator.PLUS_ASSIGN: Opcode.ADD,
+            Operator.MINUS_ASSIGN: Opcode.SUBTRACT,
+            Operator.STAR_ASSIGN: Opcode.MULTIPLY,
+            Operator.SLASH_ASSIGN: Opcode.DIVIDE,
+            Operator.PERCENT_ASSIGN: Opcode.MODULO,
+        }
+        if node.op not in op_to_opcode:
+            raise RuntimeError(f"不支持的复合赋值运算符: {node.op}")
 
-            property_name = self._add_constant(VBCString(node.target.property_name.name))
-            self._emit(Opcode.LOAD_CONSTANT, property_name)
+        self._emit_load_lvalue(node.left)
+        self.visit(node.right)
+        self._emit_implicit_cast_if_needed(node.right)
+        self._emit(op_to_opcode[node.op])
+        self._emit_implicit_cast_if_needed(node)
+        self._emit_store_lvalue_keep(node.left)
 
-            self._emit(Opcode.SET_PROPERTY)
-        else:
-            raise RuntimeError(f"不支持的赋值目标类型: {type(node.target).__name__}")
+    def visit_UpdateExprNode(self, node: UpdateExprNode):
+        base = node.base
+        step_index = self._add_constant(VBCInteger(1, VBCObjectType.INT))
+        arith_op = Opcode.ADD if node.op == Operator.INCREMENT else Opcode.SUBTRACT
 
+        if node.is_prefix:
+            self._emit_load_lvalue(base)
+            self._emit(Opcode.LOAD_CONSTANT, step_index)
+            self._emit(arith_op)
+            self._emit_store_lvalue_keep(base)
+            return
+
+        self._emit_load_lvalue(base)
+        self._emit(Opcode.DUP)
+        self._emit(Opcode.LOAD_CONSTANT, step_index)
+        self._emit(arith_op)
+        self._emit_store_lvalue(base)
 
     def visit_ExprStmtNode(self, node: ExprStmtNode):
         self.visit(node.expr)

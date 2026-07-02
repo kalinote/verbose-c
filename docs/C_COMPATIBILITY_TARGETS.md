@@ -90,28 +90,35 @@
 ### P0-4 C 条件判断语义修正
 
 - 目标能力：
-  - `if/while/for` 条件允许标量类型（至少整数与指针）
-  - 逻辑非 `!` 支持整数/指针
+  - 【已完成】`if/while/do-while/for` 条件允许标量类型（整数、浮点、指针、布尔）
+  - 【已完成】逻辑非 `!` 支持整数/浮点/指针/布尔，结果为 `int`（0 或 1）
+  - 【已完成】`&&` / `||` 操作数接受标量类型（与 `!` 返回 `int` 后的表达式组合兼容）
 - 当前现状：
-  - 当前实现偏严格布尔类型判断，不符合 C 习惯
+  - 【已完成】`TypeChecker` 新增 `_is_scalar_truthy_type` / `_check_condition_type`，控制流条件不再强制 `BoolType`
+  - 【已完成】`visit_UnaryOpNode` 中 `Operator.NOT` 接受标量操作数，推导返回 `IntegerType(INT)`
+  - 【已完成】VM `LOGICAL_NOT` 压入 `VBCInteger(0/1)`，依赖 `VBCInteger`/`VBCFloat`/`VBCPointer`/`VBCBool` 的 `__bool__` 实现 C 真值规则
+  - 【已完成】`JUMP_IF_FALSE` 无需改动，已通过 `bool(condition)` 支持标量条件
 - 验收标准：
-  - `if (1)`, `if (ptr)`, `while (n)` 均可编译并行为正确
-  - `!0`、`!1`、`!ptr` 结果符合 C 预期
+  - 【已完成】`if (1)`、`if (ptr)`、`while (n)` 均可编译并行为正确（`tests/grammar/scalar_condition_test.vbc`）
+  - 【已完成】`!0`、`!1`、`!ptr` 结果符合 C 预期（同上；含 `!0.0`、`!1.0` 浮点用例）
+  - 【已完成】现有布尔条件与逻辑表达式回归通过（`tests/grammar/control_flow_test.vbc`、`tests/grammar/expressions_test.vbc`、`tests/pointer_test.vbc`）
 
 
 
 ### P0-5 基础运算符闭环（C 高频基础子集）
 
 - 目标能力：
-  - 取模：`%`
-  - 复合赋值：`+= -= *= /= %=`
-  - 自增自减：`++` `--`（前置/后置）
+  - 【已完成】取模：`%`
+  - 【已完成】复合赋值：`+= -= *= /= %=`
+  - 【已完成】自增自减：`++` `--`（前置/后置）
 - 当前现状：
-  - 词法有较多 token，语法与后端未闭环
+  - 【已完成】`Grammar/verbose_c.gram` 表达式层级已纳入 `%`、复合赋值与前后缀 `++`/`--`；`Operator` 枚举与 `CompoundAssignmentNode`/`UpdateExprNode` AST 节点已对齐
+  - 【已完成】`TypeChecker` 支持取模（整数操作数）、复合赋值（复用二元运算 + 赋值检查）、自增自减（可修改左值 + 整数/浮点）
+  - 【已完成】`OpcodeGenerator` 生成 `MODULO` 及复合赋值/自增自减字节码；`VBCInteger.__mod__` 与 VM `MODULO` 指令闭环
 - 验收标准：
-  - 每个运算符至少有独立用例覆盖
-  - 运算优先级与结合性符合 C 常识
-  - 与赋值语句、循环更新表达式组合使用行为正确
+  - 【已完成】每个运算符至少有独立用例覆盖（`tests/grammar/basic_operators_test.vbc`：11 种运算符形态 + `for (...; i++)`）
+  - 【已完成】运算优先级与结合性符合 C 常识（`%`/`*`/`/` 位于 `multiplicative`，`+`/`-` 位于 `additive`，复合赋值右结合，前缀 `++`/`--` 高于后缀）
+  - 【已完成】与赋值语句、循环更新表达式组合使用行为正确（同上；`return mod` 为 2，回归 `expressions_test`/`control_flow_test`/`pointer_test` 通过）
 
 
 
@@ -504,7 +511,8 @@ verbose_c/error/
 
 ### 阶段 B（补齐基础语言语义）
 
-- 完成 P0-4 到 P0-6：条件判断语义、基础运算符子集、函数声明原型
+- 【已完成】P0-4：条件判断语义修正
+- 待完成 P0-5 到 P0-6：基础运算符子集、函数声明原型
 
 
 
