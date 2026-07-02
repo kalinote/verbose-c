@@ -125,12 +125,24 @@
 ### P0-6 函数声明原型（Prototype）
 
 - 目标能力：
-  - 支持“先声明，后定义”与跨模块调用基础语义
+  - 【已完成】支持顶层函数原型声明：`type name(params);`
+  - 【已完成】原型形参允许仅类型（`int, int`）或类型+名字（`int a, int b`）；定义形参必须有名字
+  - 【已完成】同一翻译单元内先声明后定义；允许多次完全相同的原型重复声明
+  - 【已完成】`#include` 头文件原型 + 实现文件定义的跨模块基础语义（预处理 splice 为单模块）
+  - 【已完成】调用时参数个数与类型检查遵循原型写入的 `FunctionType`
+  - 【已完成】被调用但仅有原型、无定义时在编译期报链接错误
 - 当前现状：
-  - 主要是函数定义形式，缺少纯声明路径
+  - 【已完成】`ParamNode.name` 可选；新增 `FunctionDeclNode`；`Symbol.is_defined` 区分声明与定义
+  - 【已完成】`Grammar/verbose_c.gram` 新增 `function_decl`、`param_item`；`TypeChecker` 实现 `_register_function_declaration` / `_register_function_definition`、`visit_FunctionDeclNode`；`OpcodeGenerator.visit_FunctionDeclNode` 为空实现
+  - 【已完成】模块遍历结束后统一检查「已声明未定义」的被调函数（支持 `main` 先于定义调用、定义在后的 C 惯用顺序）
+  - 【待完善】`extern` / `static` 链接语义、`int f()` 旧式非原型声明、K&R 风格定义、可变参数 `...`、类方法原型
+  - 【待完善】未被调用且仅有原型的函数允许存在（不强制链接期报错）
 - 验收标准：
-  - `int add(int, int);` + 后续定义可通过
-  - 调用时参数检查遵循原型
+  - 【已完成】`int add(int, int);` + 后续带函数体定义可编译运行（`tests/grammar/function_prototype_test.vbc`）
+  - 【已完成】调用参数个数/类型错误由 `visit_CallNode` 按原型拒绝（同上）
+  - 【已完成】`#include` 原型与实现分离可工作（`tests/grammar/function_prototype_include_test.vbc`、`tests/function_prototype_decl.inc`、`tests/function_prototype_impl.inc`）
+  - 【已完成】至少 4 个反向样例有明确中文错误（`tests/error/function_prototype_conflict.vbc`、`function_prototype_mismatch.vbc`、`function_prototype_undefined.vbc`、`function_prototype_redefine.vbc`）
+  - 【已完成】现有 `functions_test`、`preprocessor_test`、`classes_and_members_test` 等回归不退化
 
 
 
@@ -512,7 +524,8 @@ verbose_c/error/
 ### 阶段 B（补齐基础语言语义）
 
 - 【已完成】P0-4：条件判断语义修正
-- 待完成 P0-5 到 P0-6：基础运算符子集、函数声明原型
+- 【已完成】P0-5：基础运算符子集
+- 【已完成】P0-6：函数声明原型
 
 
 
