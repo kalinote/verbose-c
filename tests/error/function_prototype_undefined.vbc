@@ -1,0 +1,9 @@
+// 预期：仅有原型、被调用但无定义应报「已声明但未定义」错误。
+
+int baz(int);
+
+int main() {
+    return baz(1);
+}
+
+main();

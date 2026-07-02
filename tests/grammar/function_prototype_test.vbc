@@ -1,0 +1,25 @@
+// 测试点：函数原型声明、先声明后定义、无名/有名形参原型、调用参数检查。
+
+int add(int, int);
+int sub(int a, int b);
+
+int main() {
+    int result = add(1, 2) + sub(10, 3);
+
+    write(STDOUT, "\n=== Function Prototype Test ===\n");
+    write(STDOUT, "add(1, 2) + sub(10, 3) = ");
+    write(STDOUT, result);
+    write(STDOUT, "\n");
+
+    return result;
+}
+
+int add(int left, int right) {
+    return left + right;
+}
+
+int sub(int a, int b) {
+    return a - b;
+}
+
+main();

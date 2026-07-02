@@ -378,16 +378,19 @@ class ParamNode(ASTNode):
     
     Args:
         var_type (ASTNode): 参数类型节点
-        name (ASTNode): 参数名节点
+        name (ASTNode | None): 参数名节点，默认为 None(原型函数声明)
     """
-    def __init__(self, var_type: TypeNode, name: NameNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+    def __init__(self, var_type: TypeNode, name: NameNode | None = None, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.var_type: TypeNode = var_type
-        self.name: NameNode = name
+        self.name: NameNode | None = name
 
 class FunctionNode(ASTNode):
     """
     函数定义节点
+    int func(int a, int b) {
+        return a + b;
+    }
     
     Args:
         return_type (TypeNode): 返回类型节点
@@ -403,6 +406,24 @@ class FunctionNode(ASTNode):
         self.args: list[ParamNode] = args or []
         self.kwargs: dict[str, ParamNode] = kwargs or {}        # TODO 暂未使用
         self.body: BlockNode = body
+
+class FunctionDeclNode(ASTNode):
+    """
+    函数声明节点
+    void func(int a, int b);
+    
+    Args:
+        return_type (TypeNode): 返回类型节点
+        name (NameNode): 函数名节点
+        args (list[ParamNode]): 参数列表节点
+        kwargs (Optional[dict[str, ASTNode]]): 关键字参数字典节点
+    """
+    def __init__(self, return_type: TypeNode, name: NameNode, args: list[ParamNode], kwargs: dict[str, ParamNode], start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.return_type: TypeNode = return_type
+        self.name: NameNode = name
+        self.args: list[ParamNode] = args or []
+        self.kwargs: dict[str, ParamNode] = kwargs or {}        # TODO 暂未使用
 
 class CallNode(ASTNode):
     """

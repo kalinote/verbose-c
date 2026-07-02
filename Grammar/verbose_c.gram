@@ -9,6 +9,7 @@ statement:
     | independent_block
     | class_definition
     | function_ret
+    | function_decl
     | function
     | var_decl
     | var_assign
@@ -21,9 +22,10 @@ statement:
     | expression_as_statement
 
 # 函数
+function_decl[FunctionDeclNode]: t=type_name n=NAME '(' p=params? ')' ';' { FunctionDeclNode(t, NameNode(n.string, LOCATIONS), p or [], {}, LOCATIONS) }
 function[FunctionNode]: t=type_name n=NAME '(' p=params? ')' '{' b=func_block '}' { FunctionNode(t, NameNode(n.string, LOCATIONS), p or [], {}, b, LOCATIONS) }
-params[list[ParamNode]]: head=typed_param tail=(',' typed_param)* { [head] + [t[1] for t in tail] }
-typed_param[ParamNode]: t=type_name n=NAME { ParamNode(t, NameNode(n.string, LOCATIONS), LOCATIONS) }
+params[list[ParamNode]]: head=param_item tail=(',' param_item)* { [head] + [t[1] for t in tail] }
+param_item[ParamNode]: t=type_name n=NAME? { ParamNode(t, NameNode(n.string, LOCATIONS) if n else None, LOCATIONS) }
 
 # 代码块
 independent_block[BlockNode]: "{" b=func_block "}" { b }

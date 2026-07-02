@@ -1,0 +1,15 @@
+// 预期：两次完整定义应报「重复定义」错误。
+
+int qux() {
+    return 1;
+}
+
+int qux() {
+    return 2;
+}
+
+int main() {
+    return qux();
+}
+
+main();

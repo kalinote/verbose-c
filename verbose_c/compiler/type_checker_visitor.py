@@ -3,7 +3,7 @@ from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
 from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
-from verbose_c.compiler.symbol import SymbolTable, SymbolKind
+from verbose_c.compiler.symbol import SymbolTable, SymbolKind, Symbol
 from verbose_c.typing.types import (
     Type, VoidType, NullType, IntegerType, FloatType, StringType, BoolType,
     PointerType, FunctionType, ClassType, AnyType, ErrorType
@@ -53,6 +53,7 @@ class TypeChecker(VisitorBase):
         self.current_function_return_type: Type | None = None   # 跟踪当前函数返回类型
         self.current_function_name: str | None = None
         self.current_class_type: ClassType | None = None # 跟踪当前类上下文
+        self._called_undefined_functions: dict[str, int] = {}
         self._register_builtin_types()
 
     def _register_builtin_types(self):
@@ -224,6 +225,11 @@ class TypeChecker(VisitorBase):
     def visit_ModuleNode(self, node: ModuleNode) -> Type:
         for statement in node.body:
             self.visit(statement)
+        for name, line in self._called_undefined_functions.items():
+            symbol = self.symbol_table.lookup_value(name)
+            if symbol and symbol.kind == SymbolKind.FUNCTION and not symbol.is_defined:
+                self.errors.append(f"链接错误: 函数 '{name}' 已声明但未定义, 在 {line} 行")
+        self._called_undefined_functions.clear()
         return VoidType()
 
     # 表达式类型推断
@@ -553,29 +559,80 @@ class TypeChecker(VisitorBase):
             self.errors.append(f"语法错误: 'continue' 语句未在循环内, 在 {node.start_line} 行")
         return VoidType()
 
-    def visit_FunctionNode(self, node: FunctionNode) -> Type:
+    def _build_function_type(self, node: FunctionNode | FunctionDeclNode) -> FunctionType:
         param_types = [self.resolve_type_node(p.var_type) for p in node.args]
         return_type = self.resolve_type_node(node.return_type)
+        return FunctionType(param_types, return_type)
 
-        func_type = FunctionType(param_types, return_type)
-        func_symbol = None
-        try:
-            func_symbol = self.symbol_table.add_symbol(node.name.name, func_type, kind=SymbolKind.FUNCTION)
-        except NameError:
-            self.errors.append(f"命名错误: 符号 '{node.name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
-        
-        # 检查函数体
+    def _function_types_compatible(self, expected: FunctionType, actual: FunctionType) -> bool:
+        return expected == actual
+
+    def _register_function_declaration(self, name: str, func_type: FunctionType, line: int) -> Symbol | None:
+        existing = self.symbol_table.lookup_value(name)
+        if existing is None:
+            return self.symbol_table.add_symbol(name, func_type, kind=SymbolKind.FUNCTION, is_defined=False)
+
+        if existing.kind != SymbolKind.FUNCTION:
+            self.errors.append(f"命名错误: 符号 '{name}' 与函数原型冲突, 在 {line} 行")
+            return None
+
+        if existing.is_defined:
+            self.errors.append(f"命名错误: 函数 '{name}' 重复定义, 在 {line} 行")
+            return None
+
+        if not self._function_types_compatible(existing.type_, func_type):
+            self.errors.append(f"类型错误: 函数 '{name}' 的原型声明冲突, 在 {line} 行")
+            return None
+
+        return existing
+
+    def _register_function_definition(self, name: str, func_type: FunctionType, line: int) -> Symbol | None:
+        existing = self.symbol_table.lookup_value(name)
+        if existing is None:
+            return self.symbol_table.add_symbol(name, func_type, kind=SymbolKind.FUNCTION, is_defined=True)
+
+        if existing.kind != SymbolKind.FUNCTION:
+            self.errors.append(f"命名错误: 符号 '{name}' 与函数定义冲突, 在 {line} 行")
+            return None
+
+        if existing.is_defined:
+            self.errors.append(f"命名错误: 函数 '{name}' 重复定义, 在 {line} 行")
+            return None
+
+        if not self._function_types_compatible(existing.type_, func_type):
+            self.errors.append(f"类型错误: 函数 '{name}' 的定义与原型不匹配, 在 {line} 行")
+            return None
+
+        existing.is_defined = True
+        return existing
+
+    def visit_FunctionDeclNode(self, node: FunctionDeclNode) -> Type:
+        func_type = self._build_function_type(node)
+        self._register_function_declaration(node.name.name, func_type, node.start_line)
+        return VoidType()
+
+    def visit_FunctionNode(self, node: FunctionNode) -> Type:
+        func_type = self._build_function_type(node)
+        func_symbol = self._register_function_definition(node.name.name, func_type, node.start_line)
+        if func_symbol is None:
+            return VoidType()
+
+        for param_node in node.args:
+            if param_node.name is None:
+                self.errors.append(f"语法错误: 函数定义的形参必须有名字, 在 {param_node.start_line} 行")
+                return VoidType()
+
+        param_types = func_type.param_types
         original_table = self.symbol_table
         func_table = SymbolTable(scope_type=ScopeType.FUNCTION, parent=original_table)
-        if func_symbol:
-            func_symbol.scope = func_table
+        func_symbol.scope = func_table
         self.symbol_table = func_table
 
         for i, param_node in enumerate(node.args):
             self.symbol_table.add_symbol(param_node.name.name, param_types[i], kind=SymbolKind.PARAMETER)
 
         original_return_type = self.current_function_return_type
-        self.current_function_return_type = return_type
+        self.current_function_return_type = func_type.return_type
         original_function_name = self.current_function_name
         self.current_function_name = node.name.name
 
@@ -616,7 +673,11 @@ class TypeChecker(VisitorBase):
 
     def visit_CallNode(self, node: CallNode) -> Type:
         """检查函数调用参数类型，并记录参数边界的隐式转换。"""
-        # 检查被调用者是否是函数
+        if isinstance(node.name, NameNode):
+            symbol = self.symbol_table.lookup_value(node.name.name)
+            if symbol and symbol.kind == SymbolKind.FUNCTION and not symbol.is_defined:
+                self._called_undefined_functions[node.name.name] = node.start_line
+
         callee_type = self.visit(node.name)
         if not isinstance(callee_type, FunctionType):
             self.errors.append(f"类型错误: 目标不是一个函数，无法调用, 在 {node.start_line} 行")

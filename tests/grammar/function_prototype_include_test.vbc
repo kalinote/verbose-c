@@ -1,0 +1,17 @@
+// 测试点：#include 导入函数原型与实现分离的跨文件语义。
+
+#include "../function_prototype_decl.inc"
+#include "../function_prototype_impl.inc"
+
+int main() {
+    int result = multiply(3, 4);
+
+    write(STDOUT, "\n=== Function Prototype Include Test ===\n");
+    write(STDOUT, "multiply(3, 4) = ");
+    write(STDOUT, result);
+    write(STDOUT, "\n");
+
+    return result;
+}
+
+main();

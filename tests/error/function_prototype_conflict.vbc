@@ -1,0 +1,10 @@
+// 预期：两个冲突的原型声明应报「原型声明冲突」错误。
+
+int foo(int, int);
+int foo(int);
+
+int main() {
+    return 0;
+}
+
+main();

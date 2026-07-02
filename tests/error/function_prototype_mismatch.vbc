@@ -1,0 +1,13 @@
+// 预期：定义与原型签名不一致应报「定义与原型不匹配」错误。
+
+int bar(int, int);
+
+int bar(int x) {
+    return x;
+}
+
+int main() {
+    return 0;
+}
+
+main();

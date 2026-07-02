@@ -669,11 +669,18 @@ class OpcodeGenerator(VisitorBase):
     def visit_ParamNode(self, node: ParamNode):
         raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
 
+    def visit_FunctionDeclNode(self, node: FunctionDeclNode):
+        pass
+
     def visit_FunctionNode(self, node: FunctionNode):
         from verbose_c.compiler.compiler import Compiler
         from verbose_c.compiler.enum import CompilerPass
         
         func_symbol = self.symbol_table.lookup_value(node.name.name)
+        if func_symbol is None:
+            raise RuntimeError(f"内部错误: 未找到函数 '{node.name.name}' 的符号")
+        if not func_symbol.is_defined:
+            raise RuntimeError(f"内部错误: 函数 '{node.name.name}' 仅有声明，不应进入代码生成")
         if not isinstance(func_symbol.type_, FunctionType):
             raise RuntimeError(f"内部错误: 期望找到函数类型，但找到了 {func_symbol.type_}")
         
