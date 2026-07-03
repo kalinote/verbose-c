@@ -58,6 +58,7 @@ class OpcodeGenerator(VisitorBase):
         self.current_line = -1
         self.next_label_id = 0
         self.loop_stack: list[LoopContext] = []  # 循环标签栈，后续支持嵌套循环和多层跳出
+        self.switch_stack: list[str] = []  # switch 结束标签栈
         self.function_compilation_results = {} # 存储函数编译结果
         self._nested_scope_indices: dict[SymbolTable, int] = {} # 跟踪每个父作用域下嵌套作用域的访问索引
 
@@ -619,6 +620,78 @@ class OpcodeGenerator(VisitorBase):
         # 标记语句结束位置
         self._mark_label(endif_label)
 
+    def _eval_case_constant_value(self, expr: ASTNode) -> int:
+        """从已类型检查的 case 标签提取整型常量值"""
+        if isinstance(expr, NumberNode) and isinstance(expr.value, int) and not isinstance(expr.value, bool):
+            return expr.value
+        raise RuntimeError(f"内部错误: 无效的 case 常量节点 {expr!r}")
+
+    def visit_SwitchNode(self, node: SwitchNode):
+        switch_end_label = self._generate_label("switch_end")
+        label_map: dict[int, str] = {}
+        cases: list[tuple[int, str]] = []
+        default_label: str | None = None
+
+        for item in node.body.statements:
+            if isinstance(item, SwitchLabelNode):
+                label_name = "default" if item.value is None else "case"
+                label = self._generate_label(label_name)
+                label_map[id(item)] = label
+                if item.value is None:
+                    default_label = label
+                else:
+                    cases.append((self._eval_case_constant_value(item.value), label))
+
+        self.visit(node.condition)
+
+        original_symbol_table = self.symbol_table
+        current_index = self._nested_scope_indices.get(original_symbol_table, 0)
+        if current_index >= original_symbol_table.get_nested_scope_length():
+            raise RuntimeError("内部错误: OpcodeGenerator 在 SwitchNode 中找不到对应的嵌套作用域。")
+        block_table = original_symbol_table.get_nested_scope(current_index)
+        self.symbol_table = block_table
+        self._nested_scope_indices[original_symbol_table] = current_index + 1
+
+        self._emit(Opcode.ENTER_SCOPE)
+        self.switch_stack.append(switch_end_label)
+
+        temp_symbol = self.symbol_table.add_symbol(
+            f"__switch_disc_{self.next_label_id}",
+            IntegerType(VBCObjectType.INT),
+        )
+        self._emit(Opcode.DUP)
+        self._emit(Opcode.STORE_LOCAL_VAR, temp_symbol.address)
+        self._emit(Opcode.POP)
+
+        for value, case_label in cases:
+            next_cmp_label = self._generate_label("switch_cmp_next")
+            self._emit(Opcode.LOAD_LOCAL_VAR, temp_symbol.address)
+            const_index = self._add_constant(VBCInteger(value, VBCObjectType.INT))
+            self._emit(Opcode.LOAD_CONSTANT, const_index)
+            self._emit(Opcode.EQUAL)
+            self._emit(Opcode.JUMP_IF_FALSE, next_cmp_label)
+            self._emit(Opcode.JUMP, case_label)
+            self._mark_label(next_cmp_label)
+
+        if default_label is not None:
+            self._emit(Opcode.JUMP, default_label)
+        else:
+            self._emit(Opcode.JUMP, switch_end_label)
+
+        for item in node.body.statements:
+            if isinstance(item, SwitchLabelNode):
+                self._mark_label(label_map[id(item)])
+            else:
+                self.visit(item)
+
+        self._mark_label(switch_end_label)
+        self.switch_stack.pop()
+        self._emit(Opcode.EXIT_SCOPE)
+        self.symbol_table = original_symbol_table
+
+    def visit_SwitchLabelNode(self, node: SwitchLabelNode):
+        pass
+
     def visit_WhileNode(self, node: WhileNode):
         loop_start_label = self._generate_label("while_start")
         loop_end_label = self._generate_label("while_end")
@@ -753,8 +826,11 @@ class OpcodeGenerator(VisitorBase):
         self._emit(Opcode.JUMP, target_label)
 
     def visit_BreakNode(self, node: BreakNode):
+        if self.switch_stack:
+            self._emit(Opcode.JUMP, self.switch_stack[-1])
+            return
         if not self.loop_stack:
-            raise Exception(f"break语句只能在循环内使用, 在行: {node.start_line}, 列: {node.start_column}")
+            raise Exception(f"break语句只能在循环或switch内使用, 在行: {node.start_line}, 列: {node.start_column}")
         
         # 获取当前循环上下文并跳转到break标签
         current_loop = self.loop_stack[-1]

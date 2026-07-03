@@ -50,6 +50,7 @@ class TypeChecker(VisitorBase):
         self.errors: list[str] = []
         self.warnings: list[str] = []
         self.loop_level = 0
+        self.switch_level = 0
         self.current_function_return_type: Type | None = None   # 跟踪当前函数返回类型
         self.current_function_name: str | None = None
         self.current_class_type: ClassType | None = None # 跟踪当前类上下文
@@ -132,6 +133,14 @@ class TypeChecker(VisitorBase):
         if isinstance(expr, NumberNode):
             value = expr.value
             if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        return None
+
+    def _eval_case_constant(self, expr: ASTNode) -> int | None:
+        """MVP: 仅支持 NumberNode 整数字面量（允许 0 和负数）"""
+        if isinstance(expr, NumberNode):
+            value = expr.value
+            if isinstance(value, int) and not isinstance(value, bool):
                 return value
         return None
 
@@ -633,6 +642,44 @@ class TypeChecker(VisitorBase):
         
         return VoidType()
 
+    def visit_SwitchNode(self, node: SwitchNode) -> Type:
+        condition_type = self.visit(node.condition)
+        if not self._is_integer_index_type(condition_type):
+            self.errors.append(f"类型错误: switch 控制表达式必须是整型, 在 {node.condition.start_line} 行")
+            return VoidType()
+
+        self.switch_level += 1
+        original_table = self.symbol_table
+        block_table = SymbolTable(scope_type=ScopeType.BLOCK, parent=original_table)
+        original_table.add_nested_scope(block_table)
+        self.symbol_table = block_table
+
+        case_values: set[int] = set()
+        default_count = 0
+        for stmt in node.body.statements:
+            if isinstance(stmt, SwitchLabelNode):
+                if stmt.value is None:
+                    default_count += 1
+                    if default_count > 1:
+                        self.errors.append(f"语法错误: 多个 default 标签, 在 {stmt.start_line} 行")
+                else:
+                    val = self._eval_case_constant(stmt.value)
+                    if val is None:
+                        self.errors.append(f"类型错误: case 标签必须是编译期整型常量, 在 {stmt.start_line} 行")
+                    elif val in case_values:
+                        self.errors.append(f"语法错误: case 值重复, 在 {stmt.start_line} 行")
+                    else:
+                        case_values.add(val)
+            else:
+                self.visit(stmt)
+
+        self.symbol_table = original_table
+        self.switch_level -= 1
+        return VoidType()
+
+    def visit_SwitchLabelNode(self, node: SwitchLabelNode) -> Type:
+        return VoidType()
+
     def visit_ExprStmtNode(self, node: ExprStmtNode) -> Type:
         self.visit(node.expr)
         return VoidType()
@@ -681,8 +728,8 @@ class TypeChecker(VisitorBase):
         return VoidType()
 
     def visit_BreakNode(self, node: BreakNode) -> Type:
-        if self.loop_level == 0:
-            self.errors.append(f"语法错误: 'break' 语句未在循环内, 在 {node.start_line} 行")
+        if self.loop_level == 0 and self.switch_level == 0:
+            self.errors.append(f"语法错误: 'break' 语句未在循环或 switch 内, 在 {node.start_line} 行")
         return VoidType()
 
     def visit_ContinueNode(self, node: ContinueNode) -> Type:

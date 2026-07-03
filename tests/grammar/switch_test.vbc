@@ -1,0 +1,78 @@
+// 测试点：switch/case/default、fallthrough、嵌套 switch 与 break。
+
+int main() {
+    write(STDOUT, "\n=== Switch Grammar Test ===\n");
+
+    int x = 2;
+    int result = 0;
+
+    switch (x) {
+        case 1:
+            result = 10;
+            break;
+        case 2:
+            result = 20;
+            break;
+        case 3:
+            result = 30;
+            break;
+    }
+    write(STDOUT, "basic switch result: ");
+    write(STDOUT, result);
+    write(STDOUT, "\n");
+
+    int n = 1;
+    int total = 0;
+    switch (n) {
+        case 1:
+            total = total + 1;
+        case 2:
+            total = total + 2;
+            break;
+        case 3:
+            total = total + 3;
+            break;
+    }
+    write(STDOUT, "fallthrough total: ");
+    write(STDOUT, total);
+    write(STDOUT, "\n");
+
+    int v = 99;
+    int fallback = 0;
+    switch (v) {
+        case 0:
+            fallback = 1;
+            break;
+        default:
+            fallback = 42;
+            break;
+    }
+    write(STDOUT, "default fallback: ");
+    write(STDOUT, fallback);
+    write(STDOUT, "\n");
+
+    int outer = 1;
+    int inner_val = 0;
+    switch (outer) {
+        case 1:
+            switch (2) {
+                case 2:
+                    inner_val = 7;
+                    break;
+                default:
+                    inner_val = 9;
+                    break;
+            }
+            break;
+        default:
+            inner_val = 3;
+            break;
+    }
+    write(STDOUT, "nested switch inner_val: ");
+    write(STDOUT, inner_val);
+    write(STDOUT, "\n");
+
+    return result + total + fallback + inner_val;
+}
+
+main();

@@ -1,0 +1,12 @@
+// 预期：应对非整型 switch 控制表达式报「switch 控制表达式必须是整型」错误
+
+int main() {
+    float f = 1.0;
+    switch (f) {
+        case 1:
+            break;
+    }
+    return 0;
+}
+
+main();

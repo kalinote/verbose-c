@@ -316,6 +316,30 @@ class IfNode(ASTNode):
         self.then_branch: ASTNode| None = then_branch
         self.else_branch: ASTNode| None = else_branch
 
+class SwitchNode(ASTNode):
+    """
+    switch 语句节点
+
+    Args:
+        condition (ASTNode): 控制表达式
+        body (BlockNode): 含 SwitchLabelNode 与普通语句的分支体
+    """
+    def __init__(self, condition: ASTNode, body: BlockNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.condition: ASTNode = condition
+        self.body: BlockNode = body
+
+class SwitchLabelNode(ASTNode):
+    """
+    switch 入口标签节点
+
+    Args:
+        value (ASTNode | None): case 常量表达式；None 表示 default
+    """
+    def __init__(self, value: ASTNode | None, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.value: ASTNode | None = value
+
 class WhileNode(ASTNode):
     """
     无限循环循环语句节点
@@ -380,7 +404,7 @@ class ContinueNode(ASTNode):
 
 class BreakNode(ASTNode):
     """
-    跳出循环语句节点
+    跳出循环或 switch 语句节点
     """
     def __init__(self, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)

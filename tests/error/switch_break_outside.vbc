@@ -1,0 +1,8 @@
+// 预期：应对 switch/循环外的 break 报「break 语句未在循环或 switch 内」错误
+
+int main() {
+    break;
+    return 0;
+}
+
+main();

@@ -17,6 +17,7 @@ statement:
     | while_statement
     | do_while_statement
     | for_statement
+    | switch_statement
     | break_statement
     | continue_statement
     | expression_as_statement
@@ -135,6 +136,12 @@ else_clause[ASTNode]:
 while_statement[WhileNode]: 'while' '(' c=expr ')' '{' b=func_block '}' { WhileNode(c, b, LOCATIONS) }
 do_while_statement[DoWhileNode]: 'do' '{' b=func_block '}' 'while' '(' c=expr ')' ';' { DoWhileNode(b, c, LOCATIONS) }
 for_statement[ForNode]: 'for' '(' i=(for_var_decl | expr)? ';' c=expr? ';' u=expr? ')' '{' b=func_block '}' { ForNode(i, c, u, b, LOCATIONS) }
+switch_statement[SwitchNode]: 'switch' '(' c=expr ')' '{' sb=switch_body '}' { SwitchNode(c, sb, LOCATIONS) }
+switch_body[BlockNode]: items=switch_body_item* { BlockNode(items or [], LOCATIONS) }
+switch_body_item:
+    | 'case' v=expr ':' { SwitchLabelNode(v, LOCATIONS) }
+    | 'default' ':' { SwitchLabelNode(None, LOCATIONS) }
+    | s=statement { s }
 
 # 类与对象
 class_definition[ClassNode]: "class" n=NAME e=class_extends? "{" cb=class_body "}" { ClassNode(NameNode(n.string, LOCATIONS), cb, e, LOCATIONS) }

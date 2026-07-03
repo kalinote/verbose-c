@@ -1,0 +1,13 @@
+// 预期：应对多个 default 报「多个 default 标签」错误
+
+int main() {
+    switch (1) {
+        default:
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+main();

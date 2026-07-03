@@ -1,0 +1,13 @@
+// 预期：应对重复 case 值报「case 值重复」错误
+
+int main() {
+    switch (1) {
+        case 1:
+            break;
+        case 1:
+            break;
+    }
+    return 0;
+}
+
+main();

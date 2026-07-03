@@ -188,7 +188,9 @@
   - 支持 `switch`、`case`、`default`、`break` 语义
   - 支持 case 穿透（fallthrough）
 - 当前现状：
-  - 语法层未包含该语句族
+  - 【已完成】grammar、`SwitchNode`/`SwitchLabelNode`、类型检查、字节码（链式比较分发 + fallthrough + switch 内 break）已闭环
+  - 【已完成】验收用例见 `tests/grammar/switch_test.vbc`；编译期错误见 `tests/error/switch_*.vbc`
+  - 【待完善】`enum` 常量 case、编译期常量表达式、`char`/`unsigned`/`long` 扩展、jump table 优化 — 非本期
 - 验收标准：
   - 可编译执行多分支 `switch` 示例
   - 无 `break` 时能够按 C 语义穿透
