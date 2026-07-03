@@ -220,12 +220,27 @@ class VarDeclNode(ASTNode):
         var_type (NameNode): 变量类型
         name (NameNode): 变量名
         init_exp (ASTNode| None): 初始化表达式，默认为None
+        array_dims (list[ASTNode | None]): 数组维度，None 表示 []
     """
-    def __init__(self, var_type: TypeNode, name: NameNode, init_exp: ASTNode| None = None, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+    def __init__(self, var_type: TypeNode, name: NameNode, init_exp: ASTNode| None = None, array_dims: list[ASTNode | None] | None = None, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.var_type: TypeNode = var_type
         self.name: NameNode = name
         self.init_exp: ASTNode| None = init_exp
+        self.array_dims: list[ASTNode | None] = array_dims or []
+
+class InitListNode(ASTNode):
+    """聚合初始化列表节点 { e1, e2, ... }"""
+    def __init__(self, elements: list[ASTNode], start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.elements: list[ASTNode] = elements
+
+class SubscriptNode(ASTNode):
+    """下标访问节点 base[index]"""
+    def __init__(self, base: ASTNode, index: ASTNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.base: ASTNode = base
+        self.index: ASTNode = index
 
 class AssignmentNode(ASTNode):
     """

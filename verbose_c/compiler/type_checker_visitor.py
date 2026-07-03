@@ -6,7 +6,7 @@ from verbose_c.parser.parser.ast.node import *
 from verbose_c.compiler.symbol import SymbolTable, SymbolKind, Symbol
 from verbose_c.typing.types import (
     Type, VoidType, NullType, IntegerType, FloatType, StringType, BoolType,
-    PointerType, FunctionType, ClassType, AnyType, ErrorType
+    PointerType, ArrayType, FunctionType, ClassType, AnyType, ErrorType
 )
 from verbose_c.object.enum import VBCObjectType
 
@@ -102,7 +102,9 @@ class TypeChecker(VisitorBase):
                 return True
             return False
 
-        # 规则2: 类型完全相同
+        # 规则2: 类型完全相同（数组整体赋值除外）
+        if isinstance(target_type, ArrayType) and isinstance(source_type, ArrayType):
+            return False
         if target_type == source_type:
             return True
         
@@ -119,7 +121,69 @@ class TypeChecker(VisitorBase):
             if isinstance(target_type.base_type, VoidType) or isinstance(source_type.base_type, VoidType):
                 return True
 
+        # 规则6: 数组衰变为指向首元素的指针
+        if isinstance(target_type, PointerType) and isinstance(source_type, ArrayType):
+            return source_type.element_type == target_type.base_type
+
         return False
+
+    def _eval_array_size(self, expr: ASTNode) -> int | None:
+        """MVP: 仅支持 NumberNode 正整数常量"""
+        if isinstance(expr, NumberNode):
+            value = expr.value
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        return None
+
+    def _mark_array_decay(self, expr_node: ASTNode) -> None:
+        setattr(expr_node, "_needs_array_decay", True)
+
+    def _resolve_declared_type(self, type_node: TypeNode, array_dims: list[ASTNode | None], line: int | None) -> Type:
+        base_type = self.resolve_type_node(type_node)
+        if isinstance(base_type, ErrorType):
+            return ErrorType()
+        if not array_dims:
+            return base_type
+        if len(array_dims) > 1:
+            self.errors.append(f"类型错误: 当前仅支持一维数组声明, 在 {line} 行")
+            return ErrorType()
+        dim = array_dims[0]
+        if dim is None or isinstance(dim, NullNode):
+            return ArrayType(base_type, 0)
+        size = self._eval_array_size(dim)
+        if size is None:
+            self.errors.append(f"类型错误: 数组长度必须是编译期正整数常量, 在 {line} 行")
+            return ErrorType()
+        return ArrayType(base_type, size)
+
+    def _is_integer_index_type(self, type_: Type) -> bool:
+        return isinstance(type_, IntegerType)
+
+    def _check_init_list(self, init_list: InitListNode, element_type: Type, declared_size: int | None, line: int | None) -> int | None:
+        """校验聚合初始化，返回推导或确认的长度"""
+        count = len(init_list.elements)
+        if declared_size is None or declared_size == 0:
+            inferred = count
+            if count == 0:
+                self.errors.append(f"类型错误: 无法从空的初始化列表推导数组长度, 在 {line} 行")
+                return None
+            for elem in init_list.elements:
+                elem_type = self.visit(elem)
+                if isinstance(elem_type, ErrorType):
+                    return None
+                if not self._is_assignable(element_type, elem_type):
+                    self.errors.append(f"类型错误: 不能将类型 '{elem_type}' 的值用于类型为 '{element_type}' 的数组元素, 在 {elem.start_line} 行")
+            return inferred
+        if count > declared_size:
+            self.errors.append(f"类型错误: 初始化列表包含 {count} 个元素, 超过数组长度 {declared_size}, 在 {line} 行")
+            return None
+        for elem in init_list.elements:
+            elem_type = self.visit(elem)
+            if isinstance(elem_type, ErrorType):
+                return None
+            if not self._is_assignable(element_type, elem_type):
+                self.errors.append(f"类型错误: 不能将类型 '{elem_type}' 的值用于类型为 '{element_type}' 的数组元素, 在 {elem.start_line} 行")
+        return declared_size
 
     def _is_scalar_truthy_type(self, type_: Type) -> bool:
         """可用于 C 条件上下文或一元 ! 的标量类型：整数、浮点、指针、布尔。"""
@@ -283,6 +347,9 @@ class TypeChecker(VisitorBase):
             operand_type = self.visit(node.expr)
             if isinstance(operand_type, ErrorType):
                 return ErrorType()
+            if isinstance(operand_type, ArrayType):
+                self.errors.append(f"语法错误: 取地址操作符 '&' 不能用于数组类型, 在 {node.start_line} 行")
+                return ErrorType()
             
             return PointerType(operand_type)
 
@@ -311,6 +378,10 @@ class TypeChecker(VisitorBase):
         right_type = self.visit(node.right)
 
         if isinstance(left_type, ErrorType) or isinstance(right_type, ErrorType):
+            return ErrorType()
+
+        if isinstance(left_type, ArrayType) or isinstance(right_type, ArrayType):
+            self.errors.append(f"类型错误: 数组不能用于二元运算 '{node.op.value}', 在 {node.start_line} 行")
             return ErrorType()
 
         op = node.op
@@ -382,13 +453,34 @@ class TypeChecker(VisitorBase):
     # 语句的类型检查
     def visit_VarDeclNode(self, node: VarDeclNode) -> Type:
         """检查变量声明初始化的类型兼容，并记录必要的隐式转换信息。"""
-        declared_type = self.resolve_type_node(node.var_type)
-        
-        if node.init_exp:
+        declared_type = self._resolve_declared_type(node.var_type, node.array_dims, node.start_line)
+        if isinstance(declared_type, ErrorType):
+            return ErrorType()
+
+        if isinstance(declared_type, ArrayType):
+            if declared_type.size == 0 and not isinstance(node.init_exp, InitListNode):
+                self.errors.append(f"类型错误: 未指定长度的数组必须提供初始化列表, 在 {node.start_line} 行")
+                return ErrorType()
+            if node.init_exp is None:
+                pass
+            elif isinstance(node.init_exp, InitListNode):
+                final_size = self._check_init_list(
+                    node.init_exp, declared_type.element_type, declared_type.size or None, node.start_line
+                )
+                if final_size is None:
+                    return ErrorType()
+                if declared_type.size == 0:
+                    declared_type = ArrayType(declared_type.element_type, final_size)
+            else:
+                self.errors.append(f"类型错误: 数组初始化必须使用 '{{...}}' 聚合初始化列表, 在 {node.start_line} 行")
+                return ErrorType()
+        elif node.init_exp:
+            if isinstance(node.init_exp, InitListNode):
+                self.errors.append(f"类型错误: 初始化列表只能用于数组声明, 在 {node.start_line} 行")
+                return ErrorType()
             init_type = self.visit(node.init_exp)
             if isinstance(init_type, ErrorType):
                 return ErrorType()
-
             if not self._is_assignable(declared_type, init_type):
                 self.errors.append(f"类型错误: 不能将类型 '{init_type}' 的值赋给类型为 '{declared_type}' 的变量 '{node.name.name}', 在 {node.start_line} 行")
             else:
@@ -401,6 +493,42 @@ class TypeChecker(VisitorBase):
             self.errors.append(f"命名错误: 变量 '{node.name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
 
         return VoidType()
+
+    def visit_SubscriptNode(self, node: SubscriptNode) -> Type:
+        base_type = self._visit_subscript_base_type(node.base)
+        if isinstance(base_type, ErrorType):
+            return ErrorType()
+        if not isinstance(base_type, ArrayType):
+            if isinstance(base_type, PointerType):
+                self.errors.append(f"类型错误: 指针类型不能用于下标访问, 在 {node.start_line} 行")
+            else:
+                self.errors.append(f"类型错误: 下标操作只能用于数组, 而不是 '{base_type}', 在 {node.start_line} 行")
+            return ErrorType()
+
+        index_type = self.visit(node.index)
+        if isinstance(index_type, ErrorType):
+            return ErrorType()
+        if not self._is_integer_index_type(index_type):
+            self.errors.append(f"类型错误: 数组下标必须是整数类型, 而不是 '{index_type}', 在 {node.start_line} 行")
+            return ErrorType()
+
+        node._array_type = base_type
+        return base_type.element_type
+
+    def _visit_subscript_base_type(self, base: ASTNode) -> Type:
+        if isinstance(base, NameNode):
+            symbol = self.symbol_table.lookup_value(base.name)
+            if symbol is None:
+                self.errors.append(f"命名错误: '{base.name}' 未定义, 在 {base.start_line} 行")
+                return ErrorType()
+            return symbol.type_
+        if isinstance(base, SubscriptNode):
+            return self.visit(base)
+        return self.visit(base)
+
+    def visit_InitListNode(self, node: InitListNode) -> Type:
+        self.errors.append(f"类型错误: 初始化列表只能出现在数组声明中, 在 {node.start_line} 行")
+        return ErrorType()
 
     def visit_AssignmentNode(self, node: AssignmentNode) -> Type:
         """检查赋值语句类型兼容，并记录赋值边界的隐式转换信息。"""
@@ -431,6 +559,8 @@ class TypeChecker(VisitorBase):
         if not self._is_assignable(target_type, value_type):
             self.errors.append(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的目标, 在 {node.start_line} 行")
             return ErrorType()
+        if isinstance(target_type, PointerType) and isinstance(value_type, ArrayType):
+            self._mark_array_decay(node.value)
         self._warn_implicit_conversion_if_needed(target_type, value_type, node.start_line, "赋值")
         self._mark_implicit_cast_if_needed(node.value, target_type, value_type)
         return target_type
@@ -464,6 +594,7 @@ class TypeChecker(VisitorBase):
         base = node.base
         if not (
             isinstance(base, NameNode)
+            or isinstance(base, SubscriptNode)
             or (isinstance(base, UnaryOpNode) and base.op == Operator.DEREFERENCE)
             or isinstance(base, GetPropertyNode)
         ):
@@ -697,6 +828,8 @@ class TypeChecker(VisitorBase):
             if not self._is_assignable(expected_arg_type, actual_arg_type):
                 self.errors.append(f"类型错误: 函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型, 在 {arg_node.start_line} 行")
             else:
+                if isinstance(expected_arg_type, PointerType) and isinstance(actual_arg_type, ArrayType):
+                    self._mark_array_decay(arg_node)
                 self._warn_implicit_conversion_if_needed(expected_arg_type, actual_arg_type, arg_node.start_line, f"函数参数 {i+1}")
                 self._mark_implicit_cast_if_needed(arg_node, expected_arg_type, actual_arg_type)
 

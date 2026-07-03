@@ -8,6 +8,7 @@ from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
 from verbose_c.object.t_null import VBCNull
 from verbose_c.object.t_string import VBCString
+from verbose_c.object.enum import VBCObjectType
 from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
 from verbose_c.typing.types import *
@@ -122,6 +123,46 @@ class OpcodeGenerator(VisitorBase):
             return VBCObjectType.BOOL
         return None
 
+    def _element_type_enum_from_type(self, type_obj: Type | None):
+        """数组元素类型映射为运行时枚举"""
+        return self._runtime_type_enum_from_type(type_obj)
+
+    def _emit_array_decay_if_needed(self, expr_node: ASTNode) -> None:
+        if not getattr(expr_node, "_needs_array_decay", False):
+            return
+        if isinstance(expr_node, NameNode):
+            symbol = self.symbol_table.lookup_value(expr_node.name)
+            if symbol is None or not isinstance(symbol.type_, ArrayType):
+                raise RuntimeError(f"内部错误: 数组衰变目标无效 '{expr_node.name}'")
+            elem_enum = self._element_type_enum_from_type(symbol.type_.element_type)
+            if elem_enum is None:
+                raise RuntimeError("内部错误: 不支持的数组元素类型衰变")
+            self._emit(Opcode.ARRAY_DECAY, elem_enum)
+
+    def _emit_load_array_base(self, symbol) -> None:
+        if symbol.address is not None:
+            self._emit(Opcode.LOAD_LOCAL_VAR, symbol.address)
+        else:
+            self._emit(Opcode.LOAD_GLOBAL_VAR, symbol.name)
+
+    def _emit_subscript_base(self, base: ASTNode) -> None:
+        if isinstance(base, NameNode):
+            symbol = self.symbol_table.lookup_value(base.name)
+            if symbol is None:
+                raise RuntimeError(f"未定义的标识符: {base.name}")
+            self._emit_load_array_base(symbol)
+        else:
+            raise RuntimeError(f"不支持的数组下标基址: {type(base).__name__}")
+
+    def _subscript_operand(self, node: SubscriptNode) -> tuple[int, VBCObjectType]:
+        array_type = getattr(node, "_array_type", None)
+        if not isinstance(array_type, ArrayType):
+            raise RuntimeError("内部错误: SubscriptNode 缺少有效的 _array_type")
+        elem_enum = self._element_type_enum_from_type(array_type.element_type)
+        if elem_enum is None:
+            raise RuntimeError("内部错误: 不支持的数组元素类型")
+        return array_type.size, elem_enum
+
     def _emit_implicit_cast_if_needed(self, expr_node: ASTNode):
         """根据类型检查阶段标记，为表达式补发隐式 CAST 指令。"""
         target_type = getattr(expr_node, "_implicit_cast_target", None)
@@ -147,6 +188,11 @@ class OpcodeGenerator(VisitorBase):
             property_name = self._add_constant(VBCString(target.property_name.name))
             self._emit(Opcode.LOAD_CONSTANT, property_name)
             self._emit(Opcode.GET_PROPERTY)
+        elif isinstance(target, SubscriptNode):
+            size, elem_enum = self._subscript_operand(target)
+            self._emit_subscript_base(target.base)
+            self.visit(target.index)
+            self._emit(Opcode.LOAD_INDEX, (size, elem_enum))
         else:
             raise RuntimeError(f"不支持的左值读取目标: {type(target).__name__}")
 
@@ -169,6 +215,12 @@ class OpcodeGenerator(VisitorBase):
             property_name = self._add_constant(VBCString(target.property_name.name))
             self._emit(Opcode.LOAD_CONSTANT, property_name)
             self._emit(Opcode.SET_PROPERTY)
+            self._emit(Opcode.POP)
+        elif isinstance(target, SubscriptNode):
+            size, elem_enum = self._subscript_operand(target)
+            self._emit_subscript_base(target.base)
+            self.visit(target.index)
+            self._emit(Opcode.STORE_INDEX, (size, elem_enum))
             self._emit(Opcode.POP)
         else:
             raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
@@ -193,6 +245,12 @@ class OpcodeGenerator(VisitorBase):
             property_name = self._add_constant(VBCString(target.property_name.name))
             self._emit(Opcode.LOAD_CONSTANT, property_name)
             self._emit(Opcode.SET_PROPERTY)
+        elif isinstance(target, SubscriptNode):
+            size, elem_enum = self._subscript_operand(target)
+            self._emit(Opcode.DUP)
+            self._emit_subscript_base(target.base)
+            self.visit(target.index)
+            self._emit(Opcode.STORE_INDEX, (size, elem_enum))
         else:
             raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
 
@@ -416,10 +474,31 @@ class OpcodeGenerator(VisitorBase):
         if symbol is None:
             raise RuntimeError(f"内部错误: 无法找到已由类型检查器验证的符号 '{node.name.name}'")
 
+        if isinstance(symbol.type_, ArrayType):
+            elem_enum = self._element_type_enum_from_type(symbol.type_.element_type)
+            if elem_enum is None:
+                raise RuntimeError(f"内部错误: 不支持的数组元素类型 '{symbol.type_.element_type}'")
+            self._emit(Opcode.ALLOC_ARRAY, (symbol.type_.size, elem_enum))
+            if symbol.address is not None:
+                self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+            else:
+                self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
+            if isinstance(node.init_exp, InitListNode):
+                for i, elem in enumerate(node.init_exp.elements):
+                    if isinstance(symbol.type_.element_type, (IntegerType, FloatType)):
+                        setattr(elem, "inferred_type", symbol.type_.element_type.kind)
+                    self.visit(elem)
+                    self._emit_implicit_cast_if_needed(elem)
+                    self._emit_load_array_base(symbol)
+                    idx_const = self._add_constant(VBCInteger(i, VBCObjectType.INT))
+                    self._emit(Opcode.LOAD_CONSTANT, idx_const)
+                    self._emit(Opcode.STORE_INDEX, (symbol.type_.size, elem_enum))
+            return
+
         if node.init_exp:
             # 仍然需要向初始化表达式传递类型信息，以处理数字字面量
             if isinstance(symbol.type_, (IntegerType, FloatType)):
-                setattr(node.init_exp, 'inferred_type', symbol.type_.kind)
+                setattr(node.init_exp, "inferred_type", symbol.type_.kind)
             self.visit(node.init_exp)
             self._emit_implicit_cast_if_needed(node.init_exp)
         else:
@@ -433,6 +512,12 @@ class OpcodeGenerator(VisitorBase):
         else:
             self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
 
+    def visit_SubscriptNode(self, node: SubscriptNode):
+        size, elem_enum = self._subscript_operand(node)
+        self._emit_subscript_base(node.base)
+        self.visit(node.index)
+        self._emit(Opcode.LOAD_INDEX, (size, elem_enum))
+
     def visit_AssignmentNode(self, node: AssignmentNode):
         """生成赋值字节码，并在赋值边界执行隐式转换。"""
         if isinstance(node.target, UnaryOpNode) and node.target.op == Operator.DEREFERENCE:
@@ -442,9 +527,19 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.STORE_BY_POINTER)
             return
 
+        if isinstance(node.target, SubscriptNode):
+            size, elem_enum = self._subscript_operand(node.target)
+            self.visit(node.value)
+            self._emit_implicit_cast_if_needed(node.value)
+            self._emit_subscript_base(node.target.base)
+            self.visit(node.target.index)
+            self._emit(Opcode.STORE_INDEX, (size, elem_enum))
+            return
+
         if isinstance(node.target, (NameNode, GetPropertyNode)):
             self.visit(node.value)
             self._emit_implicit_cast_if_needed(node.value)
+            self._emit_array_decay_if_needed(node.value)
             self._emit_store_lvalue_keep(node.target)
             return
 
@@ -754,6 +849,7 @@ class OpcodeGenerator(VisitorBase):
         for arg_expr in node.args:
             self.visit(arg_expr)
             self._emit_implicit_cast_if_needed(arg_expr)
+            self._emit_array_decay_if_needed(arg_expr)
         
         num_args = len(node.args)
         self._emit(Opcode.CALL_FUNCTION, num_args)

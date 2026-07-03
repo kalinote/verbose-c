@@ -37,12 +37,21 @@ break_statement[BreakNode]: "break" ";" { BreakNode(LOCATIONS) }
 continue_statement[ContinueNode]: "continue" ";" { ContinueNode(LOCATIONS) }
 
 # 变量
-var_decl[VarDeclNode]: t=type_name n=NAME v=('=' expr)? ';' { VarDeclNode(t, NameNode(n.string, LOCATIONS), v[1] if v else None, LOCATIONS) }
+var_decl[VarDeclNode]: t=type_name n=NAME dims=array_dim_list? init=var_init? ';' { VarDeclNode(t, NameNode(n.string, LOCATIONS), init if init else None, dims or [], LOCATIONS) }
 # for循环中使用的变量声明
-for_var_decl[VarDeclNode]: t=type_name n=NAME v=('=' expr)? { VarDeclNode(t, NameNode(n.string, LOCATIONS), v[1] if v else None, LOCATIONS) }
+for_var_decl[VarDeclNode]: t=type_name n=NAME dims=array_dim_list? init=var_init? { VarDeclNode(t, NameNode(n.string, LOCATIONS), init if init else None, dims or [], LOCATIONS) }
+array_dim_list[list]: head=array_dim tail=dim_tail* { [head] + tail }
+array_dim[ASTNode | None]: '[' content=dim_content ']' { content }
+dim_content[ASTNode | None]:
+    | &(']') { NullNode(LOCATIONS) }
+    | size=expr { size }
+dim_tail[ASTNode | None]: '[' content=dim_content ']' { content }
+var_init[ASTNode]: '=' val=(expr | init_list) { val }
+init_list[InitListNode]: '{' els=nonnull_init_elems? '}' { InitListNode(els or [], LOCATIONS) }
+nonnull_init_elems[list]: head=expr tail=(',' expr)* { [head] + [t[1] for t in tail] }
 var_assign[AssignmentNode]: n=member_expr '=' v=expr ';' { AssignmentNode(n, v, LOCATIONS) }
 type_name[TypeNode]:
-      | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(!'(') &(!('=' | ';' | ')' | ',')) s='*'* { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), len(s), LOCATIONS) }
+      | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(!'(') &(!('=' | ';' | ')' | ',' | '[')) s='*'* { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), len(s), LOCATIONS) }
       | t=(SOFT_KEYWORD | NAME) s='*'* { TypeNode(NameNode(t.string, LOCATIONS), len(s), LOCATIONS) }
 
 # 表达式作为语句
@@ -102,6 +111,7 @@ member_update_expr:
     | base=member_expr '--' { UpdateExprNode(base, Operator.DECREMENT, is_prefix=False, LOCATIONS) }
     | member_expr
 member_expr:
+    | base=member_expr '[' idx=expr ']' { SubscriptNode(base, idx, LOCATIONS) }
     | member_expr '.' property=NAME { GetPropertyNode(member_expr, NameNode(property.string, LOCATIONS), LOCATIONS) }
     | member_expr '(' args=func_call_param? ')' { CallNode(member_expr, args or [], {}, LOCATIONS) }
     | '*' member_expr { UnaryOpNode(Operator.DEREFERENCE, member_expr, LOCATIONS) }

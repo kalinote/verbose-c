@@ -57,6 +57,10 @@ class Opcode(Enum):
     LOAD_ADDRESS        = 0x82  # 取变量地址 (&a)
     LOAD_BY_POINTER     = 0x83  # 通过指针加载值 (*p)
     STORE_BY_POINTER    = 0x84  # 通过指针存储值 (*p = v)
+    ALLOC_ARRAY         = 0x85  # 分配连续数组存储
+    LOAD_INDEX          = 0x86  # 数组下标读取
+    STORE_INDEX         = 0x87  # 数组下标写入
+    ARRAY_DECAY         = 0x88  # 数组衰变为指针
     
     # === 对象与类操作类 (0x90-0x9F) ===
     GET_PROPERTY        = 0x90  # 获取对象属性

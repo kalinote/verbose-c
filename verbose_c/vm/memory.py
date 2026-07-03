@@ -24,6 +24,15 @@ class MemoryManager:
         self._heap.append(value)
         return address
 
+    def allocate_block(self, count: int, factory) -> int:
+        """连续分配 count 个元素，返回首元素地址"""
+        if count <= 0:
+            raise MemoryError(f"数组分配长度无效: {count}")
+        base = len(self._heap)
+        for _ in range(count):
+            self._heap.append(factory())
+        return base
+
     def read(self, address: int) -> VBCObject:
         """
         根据地址从内存中读取对象。

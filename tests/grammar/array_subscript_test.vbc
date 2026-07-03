@@ -1,0 +1,69 @@
+// P0-7 数组与下标访问验收用例
+
+int g[2];
+
+void set_first(int* p) {
+    *p = 42;
+}
+
+int main() {
+    int arr[3];
+    arr[0] = 1;
+    arr[1] = arr[0] + 1;
+
+    write(STDOUT, "arr[0]=");
+    write(STDOUT, (string)arr[0]);
+    write(STDOUT, " arr[1]=");
+    write(STDOUT, (string)arr[1]);
+    write(STDOUT, "\n");
+
+    int inferred[] = {1, 2, 3};
+    write(STDOUT, "inferred[2]=");
+    write(STDOUT, (string)inferred[2]);
+    write(STDOUT, "\n");
+
+    int partial[5] = {1, 2};
+    write(STDOUT, "partial[2]=");
+    write(STDOUT, (string)partial[2]);
+    write(STDOUT, " partial[4]=");
+    write(STDOUT, (string)partial[4]);
+    write(STDOUT, "\n");
+
+    int decay[2];
+    decay[0] = 0;
+    set_first(decay);
+    write(STDOUT, "decay[0]=");
+    write(STDOUT, (string)decay[0]);
+    write(STDOUT, "\n");
+
+    g[0] = 7;
+    g[1] = 8;
+    write(STDOUT, "g[1]=");
+    write(STDOUT, (string)g[1]);
+    write(STDOUT, "\n");
+
+    if (arr[0] != 1) {
+        return 1;
+    }
+    if (arr[1] != 2) {
+        return 2;
+    }
+    if (inferred[2] != 3) {
+        return 3;
+    }
+    if (partial[2] != 0) {
+        return 4;
+    }
+    if (partial[4] != 0) {
+        return 5;
+    }
+    if (decay[0] != 42) {
+        return 6;
+    }
+    if (g[1] != 8) {
+        return 7;
+    }
+    return 0;
+}
+
+main();

@@ -84,6 +84,20 @@ class PointerType(Type):
             return False
         return self.base_type == other.base_type
 
+class ArrayType(Type):
+    """代表数组类型，例如 int[3]"""
+    def __init__(self, element_type: 'Type', size: int):
+        self.element_type = element_type
+        self.size = size
+
+    def __repr__(self) -> str:
+        return f"Array({repr(self.element_type)}[{self.size}])"
+
+    def __eq__(self, other):
+        if not isinstance(other, ArrayType):
+            return False
+        return self.element_type == other.element_type and self.size == other.size
+
 # --- 复合类型 ---
 
 class FunctionType(Type):

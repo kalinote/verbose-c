@@ -664,6 +664,69 @@ class VBCVirtualMachine:
         # 赋值表达式本身也有值，C语言中是赋的那个值
         self._stack.push(value)
 
+    def _zero_value_for_element_type(self, element_type_enum: VBCObjectType) -> VBCObject:
+        if element_type_enum in VBCInteger.bit_width:
+            return VBCInteger(0, element_type_enum)
+        if element_type_enum in VBCFloat.bit_width:
+            return VBCFloat(0.0, element_type_enum)
+        if element_type_enum == VBCObjectType.BOOL:
+            return VBCBool(False)
+        return VBCNull()
+
+    def _pop_array_index(self) -> int:
+        index_obj = self._stack.pop()
+        if isinstance(index_obj, VBCInteger):
+            return index_obj.value
+        raise RuntimeError(f"数组下标必须是整数，而不是 {type(index_obj).__name__}")
+
+    def _pop_array_base_address(self) -> int:
+        base_obj = self._stack.pop()
+        if isinstance(base_obj, VBCInteger):
+            return base_obj.value
+        raise RuntimeError(f"数组基址必须是整数地址，而不是 {type(base_obj).__name__}")
+
+    @register_instruction(Opcode.ALLOC_ARRAY)
+    def __handle_alloc_array(self, operand):
+        if operand is None:
+            raise RuntimeError("ALLOC_ARRAY 指令缺少操作数")
+        length, element_type_enum = operand
+        factory = lambda et=element_type_enum: self._zero_value_for_element_type(et)
+        base = self.memory.allocate_block(length, factory)
+        self._stack.push(VBCInteger(base, VBCObjectType.INT))
+
+    @register_instruction(Opcode.LOAD_INDEX)
+    def __handle_load_index(self, operand):
+        if operand is None:
+            raise RuntimeError("LOAD_INDEX 指令缺少操作数")
+        array_length, _element_type_enum = operand
+        index = self._pop_array_index()
+        base = self._pop_array_base_address()
+        if not (0 <= index < array_length):
+            raise RuntimeError(f"数组下标越界: 索引 {index} 超出范围 [0, {array_length})")
+        self._stack.push(self.memory.read(base + index))
+
+    @register_instruction(Opcode.STORE_INDEX)
+    def __handle_store_index(self, operand):
+        if operand is None:
+            raise RuntimeError("STORE_INDEX 指令缺少操作数")
+        array_length, _element_type_enum = operand
+        index = self._pop_array_index()
+        base = self._pop_array_base_address()
+        value = self._stack.pop()
+        if not (0 <= index < array_length):
+            raise RuntimeError(f"数组下标越界: 索引 {index} 超出范围 [0, {array_length})")
+        self.memory.write(base + index, value)
+        self._stack.push(value)
+
+    @register_instruction(Opcode.ARRAY_DECAY)
+    def __handle_array_decay(self, operand):
+        if operand is None:
+            raise RuntimeError("ARRAY_DECAY 指令缺少操作数")
+        element_type_enum = operand
+        base = self._pop_array_base_address()
+        pointer = self._allocate(VBCPointer(base, element_type_enum))
+        self._stack.push(pointer)
+
     ## 对象与类操作类
     @register_instruction(Opcode.GET_PROPERTY)
     def __handle_get_property(self):

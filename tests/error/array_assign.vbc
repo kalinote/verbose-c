@@ -1,0 +1,10 @@
+// 预期：应对数组整体赋值报类型错误
+
+int main() {
+    int a[2];
+    int b[2];
+    a = b;
+    return 0;
+}
+
+main();
