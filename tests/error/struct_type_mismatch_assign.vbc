@@ -1,0 +1,20 @@
+// 预期：不同结构体类型之间不能互相赋值，应报类型错误
+
+struct Point {
+    int x;
+    int y;
+};
+
+struct Size {
+    int width;
+    int height;
+};
+
+int main() {
+    struct Point p;
+    struct Size s;
+    p = s;
+    return 0;
+}
+
+main();

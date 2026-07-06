@@ -495,6 +495,59 @@ class ClassNode(ASTNode):
         self.base_classes: list[NameNode] = base_classes or []
         self.body: BlockNode = body
 
+# 类型别名、枚举、结构体
+class TypedefNode(ASTNode):
+    """
+    typedef 类型别名节点
+
+    Args:
+        target_type (TypeNode): 被起别名的源类型
+        alias_name (NameNode): 新的类型别名
+    """
+    def __init__(self, target_type: TypeNode, alias_name: NameNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.target_type: TypeNode = target_type
+        self.alias_name: NameNode = alias_name
+
+class EnumeratorNode(ASTNode):
+    """
+    枚举成员节点
+
+    Args:
+        name (NameNode): 枚举成员名称
+        value (ASTNode | None): 显式赋值的常量表达式，未显式赋值为 None
+    """
+    def __init__(self, name: NameNode, value: ASTNode | None = None, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.name: NameNode = name
+        self.value: ASTNode | None = value
+
+class EnumNode(ASTNode):
+    """
+    枚举定义节点
+
+    Args:
+        name (NameNode): 枚举标签名称
+        enumerators (list[EnumeratorNode]): 枚举成员列表
+    """
+    def __init__(self, name: NameNode, enumerators: list[EnumeratorNode], start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.name: NameNode = name
+        self.enumerators: list[EnumeratorNode] = enumerators or []
+
+class StructNode(ASTNode):
+    """
+    结构体定义节点
+
+    Args:
+        name (NameNode): 结构体标签名称
+        fields (list[VarDeclNode]): 字段列表，按声明顺序排列
+    """
+    def __init__(self, name: NameNode, fields: list['VarDeclNode'], start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.name: NameNode = name
+        self.fields: list['VarDeclNode'] = fields or []
+
 # class AttributeNode(ASTNode):
 #     """
 #     属性节点
@@ -521,16 +574,18 @@ class NewInstanceNode(ASTNode):
 
 class GetPropertyNode(ASTNode):
     """
-    属性获取节点, 表示 '.' 操作
+    属性获取节点, 表示 '.' 或 '->' 操作
 
     Args:
         obj (ASTNode): 属性所属的对象表达式
         property_name (NameNode): 要获取的属性的名称
+        via_pointer (bool): 是否通过 '->' 访问（obj 应为指针类型），False 表示 '.' 访问
     """
-    def __init__(self, obj: ASTNode, property_name: NameNode, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+    def __init__(self, obj: ASTNode, property_name: NameNode, via_pointer: bool = False, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.obj: ASTNode = obj
         self.property_name: NameNode = property_name
+        self.via_pointer: bool = via_pointer
 
 class SetPropertyNode(ASTNode):
     """

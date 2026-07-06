@@ -1,0 +1,12 @@
+// 预期：结构体字段重复定义应报命名错误
+
+struct Point {
+    int x;
+    int x;
+};
+
+int main() {
+    return 0;
+}
+
+main();

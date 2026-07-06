@@ -1,0 +1,48 @@
+// 测试点：enum 常量默认递增、显式赋值、参与表达式运算、作为 switch/case 标签。
+
+enum Color {
+    RED,
+    GREEN = 5,
+    BLUE
+};
+
+int main() {
+    write(STDOUT, "\n=== Enum Grammar Test ===\n");
+
+    write(STDOUT, "RED: ");
+    write(STDOUT, RED);
+    write(STDOUT, "\nGREEN: ");
+    write(STDOUT, GREEN);
+    write(STDOUT, "\nBLUE: ");
+    write(STDOUT, BLUE);
+    write(STDOUT, "\n");
+
+    int sum = RED + GREEN + BLUE;
+    write(STDOUT, "RED + GREEN + BLUE: ");
+    write(STDOUT, sum);
+    write(STDOUT, "\n");
+
+    int color = BLUE;
+    int result = 0;
+    switch (color) {
+        case RED:
+            result = 1;
+            break;
+        case GREEN:
+            result = 2;
+            break;
+        case BLUE:
+            result = 3;
+            break;
+        default:
+            result = -1;
+            break;
+    }
+    write(STDOUT, "switch on BLUE result: ");
+    write(STDOUT, result);
+    write(STDOUT, "\n");
+
+    return sum;
+}
+
+main();

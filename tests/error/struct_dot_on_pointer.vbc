@@ -1,0 +1,15 @@
+// 预期：对指针类型使用 '.' 应报类型错误，提示改用 '->'
+
+struct Point {
+    int x;
+    int y;
+};
+
+int main() {
+    struct Point p;
+    struct Point* ptr = &p;
+    ptr.x = 1;
+    return 0;
+}
+
+main();

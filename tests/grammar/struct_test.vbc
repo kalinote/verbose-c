@@ -1,0 +1,40 @@
+// 测试点：struct 变量声明、'.' 读写、指针 + '->' 读写、拷贝赋值的值语义（互不影响）。
+
+struct Point {
+    int x;
+    int y;
+};
+
+int main() {
+    write(STDOUT, "\n=== Struct Grammar Test ===\n");
+
+    struct Point p1;
+    p1.x = 1;
+    p1.y = 2;
+    write(STDOUT, "p1.x: ");
+    write(STDOUT, p1.x);
+    write(STDOUT, "\np1.y: ");
+    write(STDOUT, p1.y);
+    write(STDOUT, "\n");
+
+    struct Point* ptr = &p1;
+    ptr->x = 10;
+    write(STDOUT, "p1.x after ptr->x = 10: ");
+    write(STDOUT, p1.x);
+    write(STDOUT, "\nptr->y: ");
+    write(STDOUT, ptr->y);
+    write(STDOUT, "\n");
+
+    struct Point p2;
+    p2 = p1;
+    p2.x = 999;
+    write(STDOUT, "p1.x after p2.x = 999 (value semantics): ");
+    write(STDOUT, p1.x);
+    write(STDOUT, "\np2.x: ");
+    write(STDOUT, p2.x);
+    write(STDOUT, "\n");
+
+    return p1.x + p2.x;
+}
+
+main();

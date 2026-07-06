@@ -27,3 +27,4 @@ class VBCObjectType(Enum):
     NATIVE_FUNCTION = "native_function"
     INSTANCE = "instance"
     RANGE = "range"
+    STRUCT = "struct"

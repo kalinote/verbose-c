@@ -1,0 +1,14 @@
+// 预期：访问结构体不存在的字段应报属性错误
+
+struct Point {
+    int x;
+    int y;
+};
+
+int main() {
+    struct Point p;
+    p.z = 1;
+    return 0;
+}
+
+main();

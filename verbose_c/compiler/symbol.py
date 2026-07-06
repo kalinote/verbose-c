@@ -15,6 +15,7 @@ class Symbol:
         address (Optional[int]): 栈帧中的索引
         scope (Optional['SymbolTable']): 如果符号定义了一个新的作用域（如函数、类），此字段会指向该作用域的符号表
         is_defined (bool): FUNCTION 专用，变量/参数始终 True
+        const_value (Optional[int]): 编译期常量值（目前用于 enum 成员），非常量符号为 None
     """
     def __init__(self,
                 name: str,
@@ -22,13 +23,15 @@ class Symbol:
                 kind: SymbolKind = SymbolKind.VARIABLE,
                 address: int | None = None,
                 scope: Optional['SymbolTable'] = None,
-                is_defined: bool = True):
+                is_defined: bool = True,
+                const_value: int | None = None):
         self.name: str = name
         self.type_: Type = type_
         self.kind: SymbolKind = kind
         self.address: int | None = address
         self.scope: 'SymbolTable' | None = scope
         self.is_defined: bool = is_defined
+        self.const_value: int | None = const_value
 
     def __repr__(self) -> str:
         return f"Symbol(name='{self.name}', type={repr(self.type_)}, kind={self.kind.name}, address={self.address})"
@@ -62,7 +65,7 @@ class SymbolTable:
     def get_nested_scope_length(self):
         return len(self._nested_scopes)
 
-    def add_symbol(self, name: str, type_: Type, kind: SymbolKind = SymbolKind.VARIABLE, is_defined: bool = True) -> Symbol:
+    def add_symbol(self, name: str, type_: Type, kind: SymbolKind = SymbolKind.VARIABLE, is_defined: bool = True, const_value: int | None = None) -> Symbol:
         """
         添加新符号到当前作用域
         """
@@ -70,12 +73,12 @@ class SymbolTable:
             raise NameError(f"符号 '{name}' 在当前作用域已存在")
 
         address: int | None = None
-        # 只有函数或块作用域内的变量/参数才分配局部地址
-        if self._scope_type in (ScopeType.FUNCTION, ScopeType.BLOCK) and kind in (SymbolKind.VARIABLE, SymbolKind.PARAMETER):
+        # 只有函数或块作用域内的变量/参数才分配局部地址；编译期常量（如 enum 成员）不占用局部地址
+        if self._scope_type in (ScopeType.FUNCTION, ScopeType.BLOCK) and kind in (SymbolKind.VARIABLE, SymbolKind.PARAMETER) and const_value is None:
             address = self._next_local_address
             self._next_local_address += 1
         
-        symbol = Symbol(name=name, type_=type_, kind=kind, address=address, is_defined=is_defined)
+        symbol = Symbol(name=name, type_=type_, kind=kind, address=address, is_defined=is_defined, const_value=const_value)
         self._symbols[name] = symbol
 
         # 类名同步注册到类型命名空间，便于在类型位置与值位置分离查找。

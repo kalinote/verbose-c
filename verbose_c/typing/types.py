@@ -117,6 +117,42 @@ class FunctionType(Type):
             return False
         return self.param_types == other.param_types and self.return_type == other.return_type
 
+class StructType(Type):
+    """
+    代表结构体类型，字段按声明顺序有序排列，用于连续内存布局的偏移计算。
+    """
+    def __init__(self, name: str, fields: list[tuple[str, 'Type']] | None = None):
+        self.name = name
+        self.fields: list[tuple[str, 'Type']] = fields if fields is not None else []
+
+    def field_type(self, field_name: str) -> 'Type | None':
+        """按字段名查找字段类型"""
+        for name, type_ in self.fields:
+            if name == field_name:
+                return type_
+        return None
+
+    def field_offset(self, field_name: str) -> int | None:
+        """按字段名计算其在连续内存布局中的槽位偏移（MVP: 字段声明顺序索引）"""
+        for i, (name, _) in enumerate(self.fields):
+            if name == field_name:
+                return i
+        return None
+
+    @property
+    def slot_count(self) -> int:
+        """结构体占用的槽位总数"""
+        return len(self.fields)
+
+    def __repr__(self) -> str:
+        return f"Struct({self.name})"
+
+    def __eq__(self, other):
+        # 结构体类型通过名称判断是否相等（名义类型系统，与 ClassType 一致）
+        if not isinstance(other, StructType):
+            return False
+        return self.name == other.name
+
 class ClassType(Type):
     """
     代表类类型，包含其名称、字段和方法。

@@ -1,0 +1,32 @@
+// 测试点：typedef 用于变量声明、函数参数、指针类型别名。
+
+typedef int MyInt;
+typedef int* IntPtr;
+
+int add_my_int(MyInt a, MyInt b) {
+    return a + b;
+}
+
+int main() {
+    write(STDOUT, "\n=== Typedef Grammar Test ===\n");
+
+    MyInt x = 10;
+    MyInt y = 20;
+    write(STDOUT, "x + y: ");
+    write(STDOUT, x + y);
+    write(STDOUT, "\n");
+
+    write(STDOUT, "add_my_int(3, 4): ");
+    write(STDOUT, add_my_int(3, 4));
+    write(STDOUT, "\n");
+
+    IntPtr p = &x;
+    *p = 99;
+    write(STDOUT, "x after *p = 99: ");
+    write(STDOUT, x);
+    write(STDOUT, "\n");
+
+    return x;
+}
+
+main();

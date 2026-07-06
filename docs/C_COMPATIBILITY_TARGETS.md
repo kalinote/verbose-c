@@ -190,7 +190,8 @@
 - 当前现状：
   - 【已完成】grammar、`SwitchNode`/`SwitchLabelNode`、类型检查、字节码（链式比较分发 + fallthrough + switch 内 break）已闭环
   - 【已完成】验收用例见 `tests/grammar/switch_test.vbc`；编译期错误见 `tests/error/switch_*.vbc`
-  - 【待完善】`enum` 常量 case、编译期常量表达式、`char`/`unsigned`/`long` 扩展、jump table 优化 — 非本期
+  - 【已完成】`enum` 常量可作为 case 标签（随 P0-9 补齐，见 `tests/grammar/enum_test.vbc`）
+  - 【待完善】更复杂的编译期常量表达式、`char`/`unsigned`/`long` 扩展、jump table 优化 — 非本期
 - 验收标准：
   - 可编译执行多分支 `switch` 示例
   - 无 `break` 时能够按 C 语义穿透
@@ -205,11 +206,18 @@
   - 支持 `enum` 枚举常量
   - 支持结构体定义、变量声明、成员访问（`.` 与 `->`）
 - 当前现状：
-  - 语法与类型系统尚未形成这些结构的主路径
+  - 【已完成】`typedef` 类型别名：语法 `typedef_decl`、`TypedefNode`、类型检查阶段解析源类型并复用 `SymbolTable.add_type_alias` 注册，字节码层完全消失；支持普通类型与指针类型别名（`typedef int* IntPtr;`）
+  - 【已完成】`enum` 枚举常量：采用扁平 C 语义，成员是编译期整型常量（默认从 0 递增，支持 `= 表达式` 显式赋值），直接注入外层作用域值命名空间（而非 `Color.RED` 式命名空间对象），代码生成阶段折叠为 `LOAD_CONSTANT`，不占用变量槽
+  - 【已完成】`struct` 结构体：语法 `struct_definition`、`StructType`、连续内存块布局（复用 `MemoryManager`，真实值语义），新增 `ALLOC_STRUCT`/`LOAD_FIELD`/`STORE_FIELD`/`POINTER_ADDRESS`/`COPY_STRUCT` 字节码与 `VBCStructLayout` 运行时布局描述对象；支持变量声明、`.`/`->` 成员读写、同类型拷贝初始化与拷贝赋值（`p2 = p1;` 后互不影响）
+  - 【已完成】验收用例见 `tests/grammar/typedef_test.vbc`、`tests/grammar/enum_test.vbc`、`tests/grammar/struct_test.vbc`；编译期错误见 `tests/error/struct_*.vbc`
+  - 【待完善】结构体嵌套字段（字段本身是 struct）、数组类型字段、结构体数组 — 非本期
+  - 【待完善】结构体聚合初始化 `struct Point p = {1, 2};` — 非本期
+  - 【待完善】函数按值传参/返回值的结构体拷贝语义，目前退化为地址别名，与数组当前的"退化传址"行为一致 — 非本期
+  - 【待完善】匿名 struct + typedef 组合 `typedef struct { ... } Point;` — 非本期
 - 验收标准：
-  - typedef 可用于变量声明/函数参数
-  - enum 常量可参与表达式
-  - 结构体字段读写正确
+  - typedef 可用于变量声明/函数参数/指针类型 ✅
+  - enum 常量可参与表达式，并可作为 `switch/case` 标签 ✅
+  - 结构体字段读写正确，`.`/`->` 语义符合 C 标准，赋值为值拷贝而非引用别名 ✅
 
 ---
 
@@ -611,7 +619,7 @@ verbose_c/error/
 
 ### 阶段 C（补齐 C 核心模型）
 
-- 完成 P0-7 到 P0-9：一维数组、`switch/case/default`、`typedef/enum/struct`
+- 【已完成】完成 P0-7 到 P0-9：一维数组、`switch/case/default`、`typedef/enum/struct`
 
 
 

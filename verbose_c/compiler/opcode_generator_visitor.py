@@ -8,6 +8,7 @@ from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
 from verbose_c.object.t_null import VBCNull
 from verbose_c.object.t_string import VBCString
+from verbose_c.object.struct import VBCStruct
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
@@ -164,6 +165,32 @@ class OpcodeGenerator(VisitorBase):
             raise RuntimeError("内部错误: 不支持的数组元素类型")
         return array_type.size, elem_enum
 
+    def _get_or_add_struct_constant(self, struct_type: StructType) -> int:
+        """将结构体布局注册进当前常量池，依赖 _add_constant 的按值去重实现"一个类型一份描述对象"。"""
+        fields = [(name, self._element_type_enum_from_type(field_type)) for name, field_type in struct_type.fields]
+        layout = VBCStruct(struct_type.name, fields)
+        return self._add_constant(layout)
+
+    def _struct_field_operand(self, node: GetPropertyNode, struct_type: StructType) -> tuple[int, int]:
+        offset = struct_type.field_offset(node.property_name.name)
+        if offset is None:
+            raise RuntimeError(f"内部错误: 结构体 '{struct_type.name}' 缺少字段 '{node.property_name.name}'")
+        return struct_type.slot_count, offset
+
+    def _emit_struct_base(self, obj_node: ASTNode, via_pointer: bool) -> None:
+        """压入结构体基址：'.' 直接读取变量槽中的基址，'->' 先取出指针对象再还原基址"""
+        if via_pointer:
+            self.visit(obj_node)
+            self._emit(Opcode.POINTER_ADDRESS)
+            return
+        if isinstance(obj_node, NameNode):
+            symbol = self.symbol_table.lookup_value(obj_node.name)
+            if symbol is None:
+                raise RuntimeError(f"未定义的标识符: {obj_node.name}")
+            self._emit_load_array_base(symbol)
+            return
+        raise RuntimeError(f"不支持的结构体字段基址来源: {type(obj_node).__name__}")
+
     def _emit_implicit_cast_if_needed(self, expr_node: ASTNode):
         """根据类型检查阶段标记，为表达式补发隐式 CAST 指令。"""
         target_type = getattr(expr_node, "_implicit_cast_target", None)
@@ -185,10 +212,16 @@ class OpcodeGenerator(VisitorBase):
             self.visit(target.expr)
             self._emit(Opcode.LOAD_BY_POINTER)
         elif isinstance(target, GetPropertyNode):
-            self.visit(target.obj)
-            property_name = self._add_constant(VBCString(target.property_name.name))
-            self._emit(Opcode.LOAD_CONSTANT, property_name)
-            self._emit(Opcode.GET_PROPERTY)
+            struct_type = getattr(target, "_struct_type", None)
+            if struct_type is not None:
+                slot_count, offset = self._struct_field_operand(target, struct_type)
+                self._emit_struct_base(target.obj, target.via_pointer)
+                self._emit(Opcode.LOAD_FIELD, (slot_count, offset))
+            else:
+                self.visit(target.obj)
+                property_name = self._add_constant(VBCString(target.property_name.name))
+                self._emit(Opcode.LOAD_CONSTANT, property_name)
+                self._emit(Opcode.GET_PROPERTY)
         elif isinstance(target, SubscriptNode):
             size, elem_enum = self._subscript_operand(target)
             self._emit_subscript_base(target.base)
@@ -212,11 +245,18 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.STORE_BY_POINTER)
             self._emit(Opcode.POP)
         elif isinstance(target, GetPropertyNode):
-            self.visit(target.obj)
-            property_name = self._add_constant(VBCString(target.property_name.name))
-            self._emit(Opcode.LOAD_CONSTANT, property_name)
-            self._emit(Opcode.SET_PROPERTY)
-            self._emit(Opcode.POP)
+            struct_type = getattr(target, "_struct_type", None)
+            if struct_type is not None:
+                slot_count, offset = self._struct_field_operand(target, struct_type)
+                self._emit_struct_base(target.obj, target.via_pointer)
+                self._emit(Opcode.STORE_FIELD, (slot_count, offset))
+                self._emit(Opcode.POP)
+            else:
+                self.visit(target.obj)
+                property_name = self._add_constant(VBCString(target.property_name.name))
+                self._emit(Opcode.LOAD_CONSTANT, property_name)
+                self._emit(Opcode.SET_PROPERTY)
+                self._emit(Opcode.POP)
         elif isinstance(target, SubscriptNode):
             size, elem_enum = self._subscript_operand(target)
             self._emit_subscript_base(target.base)
@@ -241,11 +281,17 @@ class OpcodeGenerator(VisitorBase):
             self.visit(target.expr)
             self._emit(Opcode.STORE_BY_POINTER)
         elif isinstance(target, GetPropertyNode):
+            struct_type = getattr(target, "_struct_type", None)
             self._emit(Opcode.DUP)
-            self.visit(target.obj)
-            property_name = self._add_constant(VBCString(target.property_name.name))
-            self._emit(Opcode.LOAD_CONSTANT, property_name)
-            self._emit(Opcode.SET_PROPERTY)
+            if struct_type is not None:
+                slot_count, offset = self._struct_field_operand(target, struct_type)
+                self._emit_struct_base(target.obj, target.via_pointer)
+                self._emit(Opcode.STORE_FIELD, (slot_count, offset))
+            else:
+                self.visit(target.obj)
+                property_name = self._add_constant(VBCString(target.property_name.name))
+                self._emit(Opcode.LOAD_CONSTANT, property_name)
+                self._emit(Opcode.SET_PROPERTY)
         elif isinstance(target, SubscriptNode):
             size, elem_enum = self._subscript_operand(target)
             self._emit(Opcode.DUP)
@@ -268,6 +314,12 @@ class OpcodeGenerator(VisitorBase):
         symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None:
             raise Exception(f"未定义的标识符: {node.name}, 在行: {node.start_line}, 列: {node.start_column}")
+
+        # enum 成员是编译期常量，直接折叠为 LOAD_CONSTANT，不占用变量槽
+        if symbol.const_value is not None:
+            const_index = self._add_constant(VBCInteger(symbol.const_value, VBCObjectType.INT))
+            self._emit(Opcode.LOAD_CONSTANT, const_index)
+            return
 
         if symbol.address is not None:
             self._emit(Opcode.LOAD_LOCAL_VAR, symbol.address)
@@ -365,6 +417,8 @@ class OpcodeGenerator(VisitorBase):
                 target_type_enum = VBCObjectType.POINTER
             if isinstance(symbol.type_, ClassType):
                 target_type_enum = VBCObjectType.INSTANCE
+            if isinstance(symbol.type_, StructType):
+                target_type_enum = VBCObjectType.STRUCT
             self._emit(Opcode.LOAD_ADDRESS, (identifier, target_type_enum))
             return
         
@@ -469,11 +523,39 @@ class OpcodeGenerator(VisitorBase):
 
         self.symbol_table = original_symbol_table
 
+    def visit_TypedefNode(self, node: TypedefNode):
+        """typedef 纯编译期类型别名，不产生任何指令。"""
+        pass
+
+    def visit_EnumNode(self, node: EnumNode):
+        """enum 成员已在类型检查阶段确定常量值，不产生任何指令。"""
+        pass
+
+    def visit_StructNode(self, node: StructNode):
+        """struct 定义不产生指令，其 VBCStructLayout 由使用处（ALLOC_STRUCT）按需注册进常量池。"""
+        pass
+
     def visit_VarDeclNode(self, node: VarDeclNode):
         """生成变量声明字节码，并在初始化边界执行隐式转换。"""
         symbol = self.symbol_table.lookup_value(node.name.name)
         if symbol is None:
             raise RuntimeError(f"内部错误: 无法找到已由类型检查器验证的符号 '{node.name.name}'")
+
+        if isinstance(symbol.type_, StructType):
+            layout_index = self._get_or_add_struct_constant(symbol.type_)
+            self._emit(Opcode.ALLOC_STRUCT, layout_index)
+            if symbol.address is not None:
+                self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+            else:
+                self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
+            if node.init_exp is not None:
+                self.visit(node.init_exp)
+                self._emit(Opcode.COPY_STRUCT, symbol.type_.slot_count)
+                if symbol.address is not None:
+                    self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
+                else:
+                    self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
+            return
 
         if isinstance(symbol.type_, ArrayType):
             elem_enum = self._element_type_enum_from_type(symbol.type_.element_type)
@@ -541,6 +623,10 @@ class OpcodeGenerator(VisitorBase):
             self.visit(node.value)
             self._emit_implicit_cast_if_needed(node.value)
             self._emit_array_decay_if_needed(node.value)
+            if isinstance(node.target, NameNode):
+                target_symbol = self.symbol_table.lookup_value(node.target.name)
+                if target_symbol is not None and isinstance(target_symbol.type_, StructType):
+                    self._emit(Opcode.COPY_STRUCT, target_symbol.type_.slot_count)
             self._emit_store_lvalue_keep(node.target)
             return
 
@@ -621,9 +707,13 @@ class OpcodeGenerator(VisitorBase):
         self._mark_label(endif_label)
 
     def _eval_case_constant_value(self, expr: ASTNode) -> int:
-        """从已类型检查的 case 标签提取整型常量值"""
+        """从已类型检查的 case 标签提取整型常量值，支持整数字面量与 enum 成员等编译期常量标识符"""
         if isinstance(expr, NumberNode) and isinstance(expr.value, int) and not isinstance(expr.value, bool):
             return expr.value
+        if isinstance(expr, NameNode):
+            symbol = self.symbol_table.lookup_value(expr.name)
+            if symbol is not None and symbol.const_value is not None:
+                return symbol.const_value
         raise RuntimeError(f"内部错误: 无效的 case 常量节点 {expr!r}")
 
     def visit_SwitchNode(self, node: SwitchNode):
@@ -1182,7 +1272,14 @@ class OpcodeGenerator(VisitorBase):
             
             self._emit(Opcode.SUPER_GET)
             return
-        
+
+        struct_type = getattr(node, "_struct_type", None)
+        if struct_type is not None:
+            slot_count, offset = self._struct_field_operand(node, struct_type)
+            self._emit_struct_base(node.obj, node.via_pointer)
+            self._emit(Opcode.LOAD_FIELD, (slot_count, offset))
+            return
+
         self.visit(node.obj)
         
         property_name = self._add_constant(VBCString(node.property_name.name))

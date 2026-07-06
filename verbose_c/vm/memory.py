@@ -33,6 +33,15 @@ class MemoryManager:
             self._heap.append(factory())
         return base
 
+    def allocate_fields(self, factories: list) -> int:
+        """按顺序连续分配 len(factories) 个槽位，每个槽位使用独立工厂产生零值，返回首槽位地址（用于异构字段的 struct 布局）"""
+        if not factories:
+            raise MemoryError("结构体字段分配列表不能为空")
+        base = len(self._heap)
+        for factory in factories:
+            self._heap.append(factory())
+        return base
+
     def read(self, address: int) -> VBCObject:
         """
         根据地址从内存中读取对象。

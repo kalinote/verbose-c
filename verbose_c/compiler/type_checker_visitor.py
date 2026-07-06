@@ -6,7 +6,7 @@ from verbose_c.parser.parser.ast.node import *
 from verbose_c.compiler.symbol import SymbolTable, SymbolKind, Symbol
 from verbose_c.typing.types import (
     Type, VoidType, NullType, IntegerType, FloatType, StringType, BoolType,
-    PointerType, ArrayType, FunctionType, ClassType, AnyType, ErrorType
+    PointerType, ArrayType, FunctionType, ClassType, StructType, AnyType, ErrorType
 )
 from verbose_c.object.enum import VBCObjectType
 
@@ -16,7 +16,7 @@ BUILTIN_TYPE_MAP: dict[str, Type] = {
     "void": VoidType(),
     "char": IntegerType(VBCObjectType.CHAR),
     "int": IntegerType(VBCObjectType.INT),
-    "long": IntegerType(VBCObjectType.LONG),
+    "long": IntegerType(VBCObjectType.LONG), 
     "long long": IntegerType(VBCObjectType.LONGLONG),
     "unlimited int": IntegerType(VBCObjectType.NLINT),
     "float": FloatType(VBCObjectType.FLOAT),
@@ -136,13 +136,24 @@ class TypeChecker(VisitorBase):
                 return value
         return None
 
-    def _eval_case_constant(self, expr: ASTNode) -> int | None:
-        """MVP: 仅支持 NumberNode 整数字面量（允许 0 和负数）"""
+    def _eval_const_int_expr(self, expr: ASTNode) -> int | None:
+        """
+        求值编译期整型常量表达式。
+        支持：整数字面量、已知的编译期常量标识符（如 enum 成员，见 Symbol.const_value）。
+        """
         if isinstance(expr, NumberNode):
             value = expr.value
             if isinstance(value, int) and not isinstance(value, bool):
                 return value
+        if isinstance(expr, NameNode):
+            symbol = self.symbol_table.lookup_value(expr.name)
+            if symbol is not None and symbol.const_value is not None:
+                return symbol.const_value
         return None
+
+    def _eval_case_constant(self, expr: ASTNode) -> int | None:
+        """switch/case 标签常量求值：整数字面量与 int 之间允许的常量（允许 0 和负数）"""
+        return self._eval_const_int_expr(expr)
 
     def _mark_array_decay(self, expr_node: ASTNode) -> None:
         setattr(expr_node, "_needs_array_decay", True)
@@ -153,6 +164,9 @@ class TypeChecker(VisitorBase):
             return ErrorType()
         if not array_dims:
             return base_type
+        if isinstance(base_type, StructType):
+            self.errors.append(f"类型错误: 暂不支持结构体数组, 在 {line} 行")
+            return ErrorType()
         if len(array_dims) > 1:
             self.errors.append(f"类型错误: 当前仅支持一维数组声明, 在 {line} 行")
             return ErrorType()
@@ -534,6 +548,80 @@ class TypeChecker(VisitorBase):
         if isinstance(base, SubscriptNode):
             return self.visit(base)
         return self.visit(base)
+
+    def visit_TypedefNode(self, node: TypedefNode) -> Type:
+        """typedef 类型别名：解析源类型后注册进类型命名空间，不产生值命名空间符号。"""
+        target_type = self.resolve_type_node(node.target_type)
+        if isinstance(target_type, ErrorType):
+            return VoidType()
+        try:
+            self.symbol_table.add_type_alias(node.alias_name.name, target_type)
+        except NameError:
+            self.errors.append(f"命名错误: 类型 '{node.alias_name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
+        return VoidType()
+
+    def visit_EnumNode(self, node: EnumNode) -> Type:
+        """C 语义扁平 enum：成员是普通整型编译期常量，直接注入外层作用域值命名空间。"""
+        int_type = IntegerType(VBCObjectType.INT)
+        next_value = 0
+        seen_names: set[str] = set()
+        for enumerator in node.enumerators:
+            member_name = enumerator.name.name
+            if member_name in seen_names:
+                self.errors.append(f"命名错误: 枚举成员 '{member_name}' 重复, 在 {enumerator.start_line} 行")
+                continue
+            seen_names.add(member_name)
+
+            if enumerator.value is not None:
+                value = self._eval_const_int_expr(enumerator.value)
+                if value is None:
+                    self.errors.append(f"类型错误: 枚举成员 '{member_name}' 的值必须是编译期整型常量, 在 {enumerator.start_line} 行")
+                    value = next_value
+            else:
+                value = next_value
+            next_value = value + 1
+
+            try:
+                self.symbol_table.add_symbol(member_name, int_type, kind=SymbolKind.VARIABLE, const_value=value)
+            except NameError:
+                self.errors.append(f"命名错误: 符号 '{member_name}' 在当前作用域已存在, 在 {enumerator.start_line} 行")
+
+        try:
+            self.symbol_table.add_type_alias(f"enum {node.name.name}", int_type)
+        except NameError:
+            self.errors.append(f"命名错误: 类型 'enum {node.name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
+        return VoidType()
+
+    def visit_StructNode(self, node: StructNode) -> Type:
+        """构造连续内存布局的 StructType 并注册进类型命名空间；MVP 拒绝嵌套 struct 字段和数组字段。"""
+        fields: list[tuple[str, Type]] = []
+        seen_fields: set[str] = set()
+        for field in node.fields:
+            field_name = field.name.name
+            if field_name in seen_fields:
+                self.errors.append(f"命名错误: 结构体字段 '{field_name}' 重复, 在 {field.start_line} 行")
+                continue
+            seen_fields.add(field_name)
+
+            if field.array_dims:
+                self.errors.append(f"类型错误: 暂不支持数组类型的结构体字段 '{field_name}', 在 {field.start_line} 行")
+                continue
+
+            field_type = self.resolve_type_node(field.var_type)
+            if isinstance(field_type, ErrorType):
+                continue
+            if isinstance(field_type, StructType):
+                self.errors.append(f"类型错误: 暂不支持嵌套结构体字段 '{field_name}', 在 {field.start_line} 行")
+                continue
+
+            fields.append((field_name, field_type))
+
+        struct_type = StructType(node.name.name, fields)
+        try:
+            self.symbol_table.add_type_alias(f"struct {node.name.name}", struct_type)
+        except NameError:
+            self.errors.append(f"命名错误: 类型 'struct {node.name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
+        return VoidType()
 
     def visit_InitListNode(self, node: InitListNode) -> Type:
         self.errors.append(f"类型错误: 初始化列表只能出现在数组声明中, 在 {node.start_line} 行")
@@ -1026,8 +1114,33 @@ class TypeChecker(VisitorBase):
             return ErrorType()
         
         obj_type = self.visit(node.obj)
+        if isinstance(obj_type, ErrorType):
+            return ErrorType()
+
+        if node.via_pointer:
+            if not isinstance(obj_type, PointerType):
+                self.errors.append(f"类型错误: '->' 操作符只能用于指针类型, 而不是 '{obj_type}', 在 {node.start_line} 行")
+                return ErrorType()
+            base_type = obj_type.base_type
+            if not isinstance(base_type, StructType):
+                self.errors.append(f"类型错误: '->' 操作符目前仅支持指向结构体的指针, 而不是 '{obj_type}', 在 {node.start_line} 行")
+                return ErrorType()
+            obj_type = base_type
+        elif isinstance(obj_type, PointerType):
+            self.errors.append(f"类型错误: 指针类型不能使用 '.' 访问成员, 请改用 '->', 在 {node.start_line} 行")
+            return ErrorType()
+
+        if isinstance(obj_type, StructType):
+            prop_name = node.property_name.name
+            field_type = obj_type.field_type(prop_name)
+            if field_type is None:
+                self.errors.append(f"属性错误: 结构体 '{obj_type.name}' 没有名为 '{prop_name}' 的字段, 在 {node.start_line} 行")
+                return ErrorType()
+            node._struct_type = obj_type
+            return field_type
+
         if not isinstance(obj_type, ClassType):
-            self.errors.append(f"类型错误: 只有类的实例才能访问属性, 而不是 '{obj_type}', 在 {node.start_line} 行")
+            self.errors.append(f"类型错误: 只有类的实例或结构体才能访问属性, 而不是 '{obj_type}', 在 {node.start_line} 行")
             return ErrorType()
 
         prop_name = node.property_name.name

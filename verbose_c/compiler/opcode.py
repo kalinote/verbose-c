@@ -61,6 +61,11 @@ class Opcode(Enum):
     LOAD_INDEX          = 0x86  # 数组下标读取
     STORE_INDEX         = 0x87  # 数组下标写入
     ARRAY_DECAY         = 0x88  # 数组衰变为指针
+    ALLOC_STRUCT        = 0x89  # 按结构体布局分配连续内存
+    LOAD_FIELD          = 0x8A  # 结构体字段读取 (obj.field / obj->field)
+    STORE_FIELD         = 0x8B  # 结构体字段写入 (obj.field = v / obj->field = v)
+    POINTER_ADDRESS     = 0x8C  # 还原指针保存的原始基址 (用于 -> 定位结构体)
+    COPY_STRUCT         = 0x8D  # 结构体整体值拷贝 (赋值/拷贝初始化)
     
     # === 对象与类操作类 (0x90-0x9F) ===
     GET_PROPERTY        = 0x90  # 获取对象属性

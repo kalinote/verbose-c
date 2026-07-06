@@ -10,6 +10,7 @@ from verbose_c.object.t_integer import VBCInteger
 from verbose_c.object.t_null import VBCNull
 from verbose_c.object.t_pointer import VBCPointer
 from verbose_c.object.t_string import VBCString
+from verbose_c.object.struct import VBCStruct
 from verbose_c.utils.stack import Stack
 from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame, VBCNativeFunction
 from verbose_c.object.t_bool import VBCBool
@@ -726,6 +727,63 @@ class VBCVirtualMachine:
         base = self._pop_array_base_address()
         pointer = self._allocate(VBCPointer(base, element_type_enum))
         self._stack.push(pointer)
+
+    @register_instruction(Opcode.ALLOC_STRUCT)
+    def __handle_alloc_struct(self, operand):
+        """按常量池中的 VBCStructLayout 逐槽分配零值，压入结构体基址"""
+        if operand is None:
+            raise RuntimeError("ALLOC_STRUCT 指令缺少操作数")
+        layout = self._constants[operand]
+        if not isinstance(layout, VBCStruct):
+            raise RuntimeError("ALLOC_STRUCT 操作数必须指向结构体布局描述对象")
+        factories = [(lambda et=field_type: self._zero_value_for_element_type(et)) for _, field_type in layout.fields]
+        base = self.memory.allocate_fields(factories)
+        self._stack.push(VBCInteger(base, VBCObjectType.INT))
+
+    @register_instruction(Opcode.LOAD_FIELD)
+    def __handle_load_field(self, operand):
+        if operand is None:
+            raise RuntimeError("LOAD_FIELD 指令缺少操作数")
+        slot_count, offset = operand
+        base = self._pop_array_base_address()
+        if not (0 <= offset < slot_count):
+            raise RuntimeError(f"结构体字段偏移越界: 偏移 {offset} 超出范围 [0, {slot_count})")
+        self._stack.push(self.memory.read(base + offset))
+
+    @register_instruction(Opcode.STORE_FIELD)
+    def __handle_store_field(self, operand):
+        if operand is None:
+            raise RuntimeError("STORE_FIELD 指令缺少操作数")
+        slot_count, offset = operand
+        base = self._pop_array_base_address()
+        value = self._stack.pop()
+        if not (0 <= offset < slot_count):
+            raise RuntimeError(f"结构体字段偏移越界: 偏移 {offset} 超出范围 [0, {slot_count})")
+        self.memory.write(base + offset, value)
+        self._stack.push(value)
+
+    @register_instruction(Opcode.POINTER_ADDRESS)
+    def __handle_pointer_address(self):
+        """弹出栈顶指针，还原其指向的原始基址整数（用于 -> 定位结构体字段）"""
+        pointer = self._stack.pop()
+        if not isinstance(pointer, VBCPointer):
+            raise TypeError(f"'->' 操作的目标必须是指针，而不是 {type(pointer).__name__}")
+        base_value = self.memory.read(pointer.address)
+        if not isinstance(base_value, VBCInteger):
+            raise TypeError(f"指针未指向有效的结构体基址: {type(base_value).__name__}")
+        self._stack.push(base_value)
+
+    @register_instruction(Opcode.COPY_STRUCT)
+    def __handle_copy_struct(self, operand):
+        """整体拷贝一个结构体内存块到新分配的块，实现赋值/拷贝初始化的值语义"""
+        if operand is None:
+            raise RuntimeError("COPY_STRUCT 指令缺少操作数")
+        slot_count = operand
+        src_base = self._pop_array_base_address()
+        dest_base = self.memory.allocate_fields([(lambda: VBCNull()) for _ in range(slot_count)])
+        for i in range(slot_count):
+            self.memory.write(dest_base + i, self.memory.read(src_base + i))
+        self._stack.push(VBCInteger(dest_base, VBCObjectType.INT))
 
     ## 对象与类操作类
     @register_instruction(Opcode.GET_PROPERTY)
