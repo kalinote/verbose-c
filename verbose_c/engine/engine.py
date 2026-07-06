@@ -65,6 +65,7 @@ class CompileContext:
 class RunResult:
     """单次编译/运行流程的结果。"""
     success: bool
+    exit_code: int = 0
     dump_path: str | None = None
     compilation_output: CompilerOutput | None = None
     warnings: list[str] = field(default_factory=list)
@@ -300,6 +301,7 @@ def run_source_file(
     compilation_result = None
     captured_error = None
     compile_warnings: list[str] = []
+    exit_code = 0
     vm = None
 
     recorder.log_compile_start()
@@ -322,7 +324,7 @@ def run_source_file(
             from verbose_c.vm.core import VBCVirtualMachine
 
             vm = VBCVirtualMachine(debug_log_collector=recorder.create_vm_log_collector())
-            vm.excute(
+            exit_code = vm.excute(
                 bytecode=compilation_result.bytecode,
                 constants=compilation_result.constant_pool,
                 source_path=filename,
@@ -333,9 +335,11 @@ def run_source_file(
 
     except VBCRuntimeError as e:
         captured_error = e
+        exit_code = 1
         recorder.on_error(e)
     except VBCCompileError as e:
         captured_error = e
+        exit_code = 1
         print(f"编译错误: 文件 {e.filepath}")
         for error_line in e.message.split('\n'):
             print(f"    {error_line}")
@@ -346,6 +350,7 @@ def run_source_file(
         recorder.on_error(e)
     except Exception as e:
         captured_error = e
+        exit_code = 1
         print(f"发生了一个意外的内部错误: {e}")
         traceback.print_exc()
         recorder.on_error(e)
@@ -356,6 +361,7 @@ def run_source_file(
 
     return RunResult(
         success=captured_error is None,
+        exit_code=exit_code,
         dump_path=final_path,
         compilation_output=compilation_result,
         warnings=compile_warnings,

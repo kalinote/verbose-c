@@ -1,6 +1,7 @@
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.vm.builtins_functions.typeof import native_typeof
 from verbose_c.vm.builtins_functions.len import native_len
+from verbose_c.vm.builtins_functions.exit import native__exit
 from verbose_c.vm.builtins_functions.io import (
     native_open,
     native_read,
@@ -15,6 +16,7 @@ from verbose_c.typing.types import FunctionType, IntegerType, StringType, VoidTy
 BUILTIN_FUNCTIONS = {
     "typeof": native_typeof,
     "len": native_len,
+    "_exit": native__exit,
     
     # I/O
     'open': native_open,
@@ -29,6 +31,7 @@ BUILTIN_FUNCTIONS = {
 BUILTIN_FUNCTION_SIGNATURES = {
     "typeof": FunctionType(param_types=[AnyType()], return_type=StringType()),
     "len": FunctionType(param_types=[AnyType()], return_type=IntegerType(VBCObjectType.NLINT)),
+    "_exit": FunctionType(param_types=[IntegerType(VBCObjectType.INT)], return_type=VoidType()),
     
     # I/O
     'open': FunctionType(

@@ -1,0 +1,5 @@
+// 审计：P1-8 自动调用无参 void main，正常结束时退出码为 0。
+
+void main() {
+    write(STDOUT, "void main auto entry\n");
+}

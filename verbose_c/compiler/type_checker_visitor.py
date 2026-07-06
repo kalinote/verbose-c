@@ -925,6 +925,8 @@ class TypeChecker(VisitorBase):
 
         # 检查带返回值的函数的 return
         if not node.value:
+            if self.current_function_name == "main" and isinstance(self.current_function_return_type, IntegerType):
+                return VoidType()
             self.errors.append(f"类型错误: 函数需要一个 '{self.current_function_return_type}' 类型的返回值, 但 'return' 语句为空, 在 {node.start_line} 行")
             return VoidType()
         

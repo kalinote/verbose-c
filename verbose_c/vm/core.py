@@ -16,6 +16,7 @@ from verbose_c.object.function import VBCBoundMethod, VBCFunction, CallFrame, VB
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.vm.gc import GarbageCollector
 from verbose_c.vm.builtins_functions import BUILTIN_FUNCTIONS, BUILTIN_CONSTANTS
+from verbose_c.vm.builtins_functions.exit import NativeExitSignal
 from verbose_c.vm.memory import MemoryManager
 
 # 全局的指令处理器映射
@@ -43,6 +44,7 @@ class VBCVirtualMachine:
         self._running = False                   # 是否正在运行
         self._handlers = _vm_handlers           # 使用全局的处理器映射
         self._debug_log_collector = debug_log_collector # 调试日志收集器
+        self._exit_code = 0                     # 程序退出码
         
         # 运行时上下文
         self._bytecode: list = []
@@ -203,7 +205,7 @@ class VBCVirtualMachine:
             source_path: str | None = None,
             lineno_table: list[tuple[int, int]] | None = None,
             source_code: list[str] = []
-        ):
+        ) -> int:
         """
         虚拟机指令执行循环
         """
@@ -211,6 +213,7 @@ class VBCVirtualMachine:
         self._constants = constants
         self._pc = 0
         self._running = True
+        self._exit_code = 0
         self._source_code = source_code
 
         # 为顶层模块创建一个伪函数对象，作为调用栈的根
@@ -241,6 +244,8 @@ class VBCVirtualMachine:
 
             self._execute_instruction(instruction)
             self._pc += 1
+
+        return self._exit_code
 
     ## 栈操作类
     @register_instruction(Opcode.LOAD_CONSTANT)
@@ -507,7 +512,12 @@ class VBCVirtualMachine:
             args.reverse()
             self._stack.pop() # 弹出内置函数对象
 
-            result = callable_obj(*args)
+            try:
+                result = callable_obj(*args)
+            except NativeExitSignal as e:
+                self._exit_code = e.exit_code
+                self._running = False
+                return
             self._stack.push(result)
 
         elif isinstance(callable_obj, VBCBoundMethod):
@@ -941,3 +951,16 @@ class VBCVirtualMachine:
             print(f"DEBUG: 栈顶值 = {self._stack.peek()}")
         else:
             print("DEBUG: 栈为空")
+
+    @register_instruction(Opcode.SET_EXIT_CODE)
+    def __handle_set_exit_code(self):
+        """根据自动入口 main 的返回值设置程序退出码。"""
+        if self._stack.is_empty():
+            self._exit_code = 0
+            return
+
+        exit_value = self._stack.pop()
+        if isinstance(exit_value, VBCInteger):
+            self._exit_code = exit_value.value
+        else:
+            self._exit_code = 0

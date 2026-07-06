@@ -381,6 +381,30 @@ class OpcodeGenerator(VisitorBase):
         # TODO 暂时遍历执行所有语句，后续进一步完善
         for statement in node.body:
             self.visit(statement)
+
+        main_symbol = self.symbol_table.lookup_value("main")
+        main_type = main_symbol.type_ if main_symbol else None
+        has_explicit_main_call = any(
+            isinstance(statement, ExprStmtNode)
+            and isinstance(statement.expr, CallNode)
+            and isinstance(statement.expr.name, NameNode)
+            and statement.expr.name.name == "main"
+            and not statement.expr.args
+            and not statement.expr.kwargs
+            for statement in node.body
+        )
+        if (
+            main_symbol is not None
+            and main_symbol.kind == SymbolKind.FUNCTION
+            and main_symbol.is_defined
+            and isinstance(main_type, FunctionType)
+            and not main_type.param_types
+            and isinstance(main_type.return_type, (IntegerType, VoidType))
+            and not has_explicit_main_call
+        ):
+            self._emit(Opcode.LOAD_GLOBAL_VAR, "main")
+            self._emit(Opcode.CALL_FUNCTION, 0)
+            self._emit(Opcode.SET_EXIT_CODE)
         
         # 解析标签
         for i, instruction in enumerate(self.bytecode):

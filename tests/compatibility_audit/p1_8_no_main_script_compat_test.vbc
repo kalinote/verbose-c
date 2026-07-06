@@ -1,0 +1,3 @@
+// 审计：P1-8 无 main 的脚本式顶层代码保持原行为，退出码为 0。
+
+write(STDOUT, "script mode remains supported\n");

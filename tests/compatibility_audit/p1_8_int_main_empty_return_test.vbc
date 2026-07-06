@@ -1,0 +1,5 @@
+// 审计：P1-8 int main 中的空 return 兼容为退出码 0。
+
+int main() {
+    return;
+}

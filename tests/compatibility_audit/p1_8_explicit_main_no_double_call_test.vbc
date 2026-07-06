@@ -1,0 +1,14 @@
+// 审计：P1-8 顶层已显式调用 main 时，不应再自动调用一次。
+
+int calls = 0;
+
+int main() {
+    calls = calls + 1;
+    write(STDOUT, "main called\n");
+    return calls;
+}
+
+main();
+write(STDOUT, "calls = ");
+write(STDOUT, calls);
+write(STDOUT, "\n");

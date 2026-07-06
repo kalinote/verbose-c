@@ -1,0 +1,5 @@
+// 审计：P1-8 带参 main 不属于 MVP 自动入口签名，不应被自动调用。
+
+int main(int argc) {
+    return 7;
+}

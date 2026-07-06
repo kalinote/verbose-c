@@ -461,17 +461,20 @@ verbose_c/error/
   - 现有测试用例普遍在文件末尾手动调用 `main();`（如 `tests/grammar/functions_test.vbc`），与标准 C 程序习惯不符
   - 标准 C 以 `int main(void)` / `int main(int argc, char *argv[])` 为进程入口；部分环境亦存在非标准的 `void main()`，迁移时应尽量兼容
 - 目标能力：
-  - 在入口模块中识别符合条件的 `main` 函数定义：`int main()`（MVP 先支持无参形式），并兼容非标准的 `void main()`
-  - 若存在上述 `main` 定义，在顶层代码按现有顺序执行完毕后**自动调用** `main()`，无需源码末尾手写 `main();`
-  - **保留**现有顶层顺序执行语义不变：函数/类型定义注册、全局变量声明与初始化、顶层可执行语句、顶层独立代码块等仍按源码顺序在调用 `main` 之前执行
-  - `int main()` 中 `return expr;` 的整型返回值作为进程退出码传递给命令行（CLI 以 `sys.exit(code)` 等形式退出）
-  - `void main()` 正常执行结束时退出码为 `0`；若运行期异常或 `VBCRuntimeError`，退出码为非零（与现有错误处理一致）
-  - 若入口模块不存在 `main` 定义，行为与现在完全一致（纯顺序执行，退出码 `0`）
+  - 【已完成】在入口模块中识别符合条件的 `main` 函数定义：`int main()`（MVP 先支持无参形式），并兼容非标准的 `void main()`
+  - 【已完成】若存在上述 `main` 定义，在顶层代码按现有顺序执行完毕后**自动调用** `main()`，无需源码末尾手写 `main();`
+  - 【已完成】**保留**现有顶层顺序执行语义不变：函数/类型定义注册、全局变量声明与初始化、顶层可执行语句、顶层独立代码块等仍按源码顺序在调用 `main` 之前执行
+  - 【已完成】`int main()` 中 `return expr;` 的整型返回值作为进程退出码传递给命令行（CLI 以 `sys.exit(code)` 退出）
+  - 【已完成】`void main()` 正常执行结束时退出码为 `0`；若运行期异常或 `VBCRuntimeError`，退出码为非零（与现有错误处理一致）
+  - 【已完成】若入口模块不存在 `main` 定义，行为与现在完全一致（纯顺序执行，退出码 `0`）
+  - 【已完成】提供 C 风格内置函数 `_exit(int status)`，可在运行时立即终止程序并使用 `status` 作为进程退出码
 - 当前现状：
-  - `OpcodeGenerator.visit_ModuleNode` 仅遍历执行 `node.body` 中的语句，无入口探测与自动调用逻辑
-  - `VBCVirtualMachine.excute` 以 `<module:entry>` 伪函数为根，从字节码偏移 `0` 起执行至 `HALT`
-  - `cli.main` / `run_source_file` 不读取 VM 返回值，进程始终以 Python 默认退出码 `0` 结束（编译/运行时错误亦未统一映射为 shell 退出码）
-  - 测试用例依赖显式 `main();` 触发入口逻辑
+  - 【已完成】`OpcodeGenerator.visit_ModuleNode` 在顶层语句生成后检测无参 `int main()` / `void main()`，若顶层没有显式 `main();`，则注入自动入口调用
+  - 【已完成】自动入口调用使用 `LOAD_GLOBAL_VAR "main"` + `CALL_FUNCTION 0` + `SET_EXIT_CODE`；专用 `SET_EXIT_CODE` 避免把普通顶层表达式残留值误当退出码
+  - 【已完成】`VBCVirtualMachine.excute` 返回整型退出码，`run_source_file` 通过 `RunResult.exit_code` 暴露，`cli.main` 调用 `sys.exit(result.exit_code)`
+  - 【已完成】`int main` 中的 `return;` 作为兼容特例映射为退出码 `0`，其他非 `void` 函数仍保持必须返回表达式的类型检查规则
+  - 【已完成】`_exit` 实现在 `verbose_c/vm/builtins_functions/exit.py`，通过 `NativeExitSignal` 通知 VM 正常停止执行并设置退出码
+  - 【已完成】新增 P1-8 回归用例：`tests/compatibility_audit/p1_8_auto_main_return_code_test.vbc`、`p1_8_top_level_before_main_test.vbc`、`p1_8_void_main_auto_entry_test.vbc`、`p1_8_explicit_main_no_double_call_test.vbc`、`p1_8_no_main_script_compat_test.vbc`、`p1_8_bad_main_signature_no_auto_test.vbc`、`p1_8_int_main_empty_return_test.vbc`、`p1_8_exit_test.vbc`
 - 与 C 标准差异（可接受/分阶段）：
 
 
@@ -484,18 +487,20 @@ verbose_c/error/
 
 
 - 设计要点（实施参考）：
-  - **检测时机**：编译期在符号表或 AST 阶段标记入口模块是否存在签名匹配的 `main`（名称 `main`，返回 `int` 或 `void`，MVP 形参为空）
-  - **代码生成**：在 `visit_ModuleNode` 或 `visit_RootNode` 末尾，若存在 `main` 且策略允许，生成 `LOAD_FUNCTION` + `CALL_FUNCTION`；`int main` 调用结束后将返回值留在栈顶或写入 VM 退出码槽
-  - **退出码通路**：`run_source_file` / `VBCVirtualMachine.excute` 返回整型退出码 → `cli.main` 调用 `sys.exit(code)`
-  - **重复调用**：若源码中已显式调用 `main()`，自动入口应跳过或仅在不显式调用时生效（推荐：编译期检测顶层是否存在对 `main` 的调用表达式，有则不再注入自动调用）
+  - 【已完成】**检测时机**：代码生成阶段基于全局符号表与入口模块 AST 检测签名匹配的 `main`（名称 `main`，返回 `int` 或 `void`，MVP 形参为空）
+  - 【已完成】**代码生成**：在 `visit_ModuleNode` 末尾，若存在 `main` 且策略允许，生成 `LOAD_GLOBAL_VAR "main"` + `CALL_FUNCTION 0` + `SET_EXIT_CODE`
+  - 【已完成】**退出码通路**：`VBCVirtualMachine.excute` 返回整型退出码 → `run_source_file` 写入 `RunResult.exit_code` → `cli.main` 调用 `sys.exit(code)`
+  - 【已完成】**重复调用**：若源码顶层已显式调用 `main()`，自动入口跳过，避免重复执行
+  - 【已完成】**立即退出**：内置 `_exit(int)` 抛出 VM 内部信号，由 VM 捕获后设置退出码并停止执行，不直接调用 Python `sys.exit`
 - 验收标准：
-  - 仅含 `int main() { return 42; }`、无顶层 `main();` 的 `.vbc` 可编译运行，且 shell 退出码为 `42`
-  - 含顶层初始化语句 + `int main()` 时，初始化语句先于 `main` 体执行（顺序与 `blocks_and_assignments_test.vbc` 中顶层块 + `main` 的组合一致，但无需手写 `main();`）
-  - `void main() { ... }` 可自动进入并正常结束，退出码为 `0`
-  - 无 `main` 定义的脚本式顶层代码行为与改动前一致
-  - 源码末尾已写 `main();` 时 `main` 只执行一次
-  - `return;`（无表达式）在 `int main` 中退出码为 `0`（与 C 一致）
-  - 至少 2 类测试：正向（自动入口 + 退出码）、反向（多个 `main` 定义或签名不匹配时不应误触发自动入口，若实现选择报错则需有专用错误用例）
+  - 【已完成】仅含 `int main() { return 42; }`、无顶层 `main();` 的 `.vbc` 可编译运行，且 shell 退出码为 `42`
+  - 【已完成】含顶层初始化语句 + `int main()` 时，初始化语句先于 `main` 体执行（`p1_8_top_level_before_main_test.vbc` 退出码为 `3`）
+  - 【已完成】`void main() { ... }` 可自动进入并正常结束，退出码为 `0`
+  - 【已完成】无 `main` 定义的脚本式顶层代码行为与改动前一致
+  - 【已完成】源码末尾已写 `main();` 时 `main` 只执行一次
+  - 【已完成】`return;`（无表达式）在 `int main` 中退出码为 `0`（与 C 一致）
+  - 【已完成】签名不匹配的带参 `main` 不会误触发自动入口
+  - 【已完成】`_exit(7);` 可立即终止程序，shell 退出码为 `7`
 
 
 

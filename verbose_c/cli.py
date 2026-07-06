@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 from verbose_c.engine.engine import run_parser_generation, run_source_file, grammar_file
 from verbose_c.engine.recorder import create_dump_path
 
@@ -53,11 +54,11 @@ def main():
     args = parse_args()
     log_modules, dump_modules = _parse_module_sets(args)
     if log_modules is None:
-        return
+        sys.exit(1)
 
     if not args.compile_parser and args.filename and not os.path.exists(args.filename):
         print(f"错误: 文件 '{args.filename}' 不存在")
-        return
+        sys.exit(1)
 
     if args.compile_parser:
         dump_path = create_dump_path(grammar_file) if dump_modules else None
@@ -66,9 +67,10 @@ def main():
             dump_modules=dump_modules,
             dump_path=dump_path,
         )
+        sys.exit(0)
     else:
         dump_path = create_dump_path(args.filename) if dump_modules else None
-        run_source_file(
+        result = run_source_file(
             filename=args.filename,
             log_modules=log_modules,
             dump_modules=dump_modules,
@@ -77,6 +79,7 @@ def main():
             refresh_parser=args.refresh_parser,
             show_warnings=not args.no_warn,
         )
+        sys.exit(result.exit_code)
 
 
 if __name__ == "__main__":

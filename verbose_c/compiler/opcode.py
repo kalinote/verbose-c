@@ -77,6 +77,7 @@ class Opcode(Enum):
     NOP                 = 0xA0  # 空操作
     HALT                = 0xA1  # 停机指令
     DEBUG_PRINT         = 0xA2  # 调试输出
+    SET_EXIT_CODE       = 0xA3  # 设置程序退出码
     
     def __str__(self):
         """返回操作码的字符串表示"""
