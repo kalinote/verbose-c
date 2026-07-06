@@ -1,0 +1,12 @@
+// 审计：P0-3 无宏体的 #define NAME（include guard 常用形式）
+
+#ifndef AUDIT_EMPTY_GUARD
+#define AUDIT_EMPTY_GUARD
+#define GUARD_MARKER 42
+#endif
+
+int main() {
+    return GUARD_MARKER;
+}
+
+main();

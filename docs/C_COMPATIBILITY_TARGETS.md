@@ -41,7 +41,7 @@
   - 【已完成】`#define A 1` 不会误替换 `DATA`、字符串字面量或注释中的 `A`
   - 【已完成】预处理后的 Token 能直接进入 parser，编译管线无需重新从文本做词法分析
   - 【已完成】调试 dump 可分别展示预处理前、预处理后的 Token 序列
-  - 【已完成】`tests/grammar_preprocessor_test.vbc` 预处理测试通过
+  - 【已完成】`tests/grammar/preprocessor_test.vbc` 预处理测试通过
   - 【已完成】include 文件 token 的解析错误可输出对应文件的源码上下文
   - 【已完成】新增 Token 边界相关回归测试（`tests/grammar/preprocessor_token_boundary_test.vbc`：字符串内宏名、标识符子串、注释、函数式宏无括号等专用用例）
 
@@ -65,7 +65,7 @@
   - 【待完善】`__VA_ARGS__` / 可变参宏（见下方 P0-2 后续）
 - 验收标准：
   - 【已完成】`#define A A`、`#define A B` + `#define B A` 等循环宏有专用回归测试（`tests/grammar/preprocessor_circular_macro_test.vbc`）
-  - 【已完成】`#define A B` + `#define B 1` 可继续展开为最终值（`grammar_preprocessor_test.vbc` 覆盖）
+  - 【已完成】`#define A B` + `#define B 1` 可继续展开为最终值（`tests/grammar/preprocessor_test.vbc` 覆盖）
   - 【已完成】复杂宏样例（如 `BUILD_TOTAL(START_VALUE)`、include 导入宏）可稳定得到预期展开结果
   - 【已完成】`tests/grammar/predefined_macros_test.vbc` 覆盖预定义宏与 `__func__`
   - 【已完成】`tests/grammar/preprocessor_stringify_concat_test.vbc` 覆盖 `#` 字符串化、`##` 拼接、嵌套宏展开顺序、include 导入宏
@@ -150,7 +150,7 @@
   - 【已完成】`Grammar/verbose_c.gram` 新增 `function_decl`、`param_item`；`TypeChecker` 实现 `_register_function_declaration` / `_register_function_definition`、`visit_FunctionDeclNode`；`OpcodeGenerator.visit_FunctionDeclNode` 为空实现
   - 【已完成】模块遍历结束后统一检查「已声明未定义」的被调函数（支持 `main` 先于定义调用、定义在后的 C 惯用顺序）
   - 【待完善】`extern` / `static` 链接语义、`int f()` 旧式非原型声明、K&R 风格定义、可变参数 `...`、类方法原型
-  - 【待完善】未被调用且仅有原型的函数允许存在（不强制链接期报错）
+  - 【已完成】未被调用且仅有原型的函数允许存在（不强制链接期报错）
 - 验收标准：
   - 【已完成】`int add(int, int);` + 后续带函数体定义可编译运行（`tests/grammar/function_prototype_test.vbc`）
   - 【已完成】调用参数个数/类型错误由 `visit_CallNode` 按原型拒绝（同上）
@@ -171,14 +171,17 @@
   - 【待完善】变长数组 VLA、`restrict`、柔性数组成员 — 非本期，随 P0-9 struct 或后续扩展推进
 - 当前现状：
   - 【已完成】grammar、`ArrayType`、`SubscriptNode`/`InitListNode`、类型检查、字节码（`ALLOC_ARRAY`/`LOAD_INDEX`/`STORE_INDEX`/`ARRAY_DECAY`）与 VM 连续堆布局已闭环
-  - 【已完成】验收用例见 `tests/grammar/array_subscript_test.vbc`；越界为运行时 `RuntimeError` 中文报错
+  - 【已完成】验收用例见 `tests/grammar/array_subscript_test.vbc`
+  - 【待完善】越界为运行时 `RuntimeError` 中文报错（见下方「发现问题」）
 - 验收标准：
-  - `int arr[3]; arr[0] = 1; arr[1] = arr[0] + 1;` 可编译运行且结果正确
-  - `int arr[] = {1, 2, 3};` 长度推导为 3，读写下标正确
-  - `int arr[5] = {1, 2};` 其余元素为 0
-  - 数组实参传入 `void f(int *p)` 可编译（衰变语义）
-  - 非整型下标、长度非法、越界（按既定策略）有明确中文错误
-  - 现有 `pointer_test` 等回归不退化
+  - 【已完成】`int arr[3]; arr[0] = 1; arr[1] = arr[0] + 1;` 可编译运行且结果正确
+  - 【已完成】`int arr[] = {1, 2, 3};` 长度推导为 3，读写下标正确
+  - 【已完成】`int arr[5] = {1, 2};` 其余元素为 0
+  - 【已完成】数组实参传入 `void f(int *p)` 可编译（衰变语义）
+  - 【待完善】越界时有明确中文运行时错误（编译期：非整型下标、长度非法等已正常报错）
+  - 【已完成】现有 `pointer_test` 等回归不退化
+- 发现问题：
+  - 数组下标越界时 VM 会抛出 `RuntimeError("数组下标越界: ...")`，但 `engine.run_source_file` 传入 VM 的 `source_code` 取自空的 `processed_code`（token 化管线后未再生成源码文本）。生成 `VBCRuntimeError` 时按行号取源码上下文触发 `IndexError`，终端显示「意外的内部错误」而非中文运行时诊断。审计用例：`tests/compatibility_audit/p0_7_array_oob_runtime_test.vbc`。
 
 
 
@@ -619,7 +622,9 @@ verbose_c/error/
 
 ### 阶段 C（补齐 C 核心模型）
 
-- 【已完成】完成 P0-7 到 P0-9：一维数组、`switch/case/default`、`typedef/enum/struct`
+- 【待完善】P0-7：一维数组（运行时越界错误展示未完成，见 P0-7 发现问题）
+- 【已完成】P0-8：`switch/case/default`
+- 【已完成】P0-9：`typedef` / `enum` / `struct`
 
 
 

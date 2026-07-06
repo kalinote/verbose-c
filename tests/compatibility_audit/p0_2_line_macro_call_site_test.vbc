@@ -1,0 +1,13 @@
+// 审计：P0-2 __LINE__ 经用户宏传递时保留宏调用点行号（文档声称第 12 行）
+
+#define SHOW_LINE() __LINE__
+
+int main() {
+    int line_at_call = SHOW_LINE();
+    if (line_at_call != 12) {
+        return line_at_call;
+    }
+    return 0;
+}
+
+main();

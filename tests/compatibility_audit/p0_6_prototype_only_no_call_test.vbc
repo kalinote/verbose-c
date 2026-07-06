@@ -1,0 +1,9 @@
+// 审计：P0-6「未被调用且仅有原型的函数允许存在」——文档【待完善】但不应误报链接错误
+
+int unused_proto(int, int);
+
+int main() {
+    return 0;
+}
+
+main();

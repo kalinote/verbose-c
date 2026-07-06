@@ -1,0 +1,16 @@
+// 审计：P0-4 do-while 标量条件（文档要求 if/while/do-while/for 均支持标量条件）
+
+int main() {
+    int n = 2;
+    int count = 0;
+    do {
+        count = count + 1;
+        n = n - 1;
+    } while (n);
+    if (count == 2) {
+        return 0;
+    }
+    return 1;
+}
+
+main();

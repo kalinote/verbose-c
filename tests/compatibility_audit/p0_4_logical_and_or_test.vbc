@@ -1,0 +1,22 @@
+// 审计：P0-4 && / || 接受标量操作数
+
+int main() {
+    int a = 1;
+    int* p = &a;
+    int r1 = a && p;
+    int r2 = !a || p;
+    if (r1 != 1) {
+        return 1;
+    }
+    if (r2 != 1) {
+        return 2;
+    }
+    float f = 0.0;
+    int r3 = f || a;
+    if (r3 == 1) {
+        return 0;
+    }
+    return 3;
+}
+
+main();

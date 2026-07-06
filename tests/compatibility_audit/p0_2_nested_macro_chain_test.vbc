@@ -1,0 +1,11 @@
+// 审计：P0-2 #define A B + #define B 1 链式展开到最终值
+
+#define A B
+#define B C
+#define C 99
+
+int main() {
+    return A;
+}
+
+main();

@@ -1,0 +1,14 @@
+// 审计：P0-6 允许多次完全相同的原型重复声明
+
+int foo(int, int);
+int foo(int, int);
+
+int foo(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    return foo(3, 4);
+}
+
+main();
