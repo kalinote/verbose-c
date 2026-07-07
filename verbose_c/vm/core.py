@@ -129,13 +129,15 @@ class VBCVirtualMachine:
 
         if self._current_function:
             line = self._find_line_from_pc(self._current_function, self._pc)
+            source_line_context = []
+            if 1 <= line <= len(self._source_code):
+                source_line_context = [self._source_code[line - 1].strip()]
             traceback_frames.append(
                 TracebackFrame(
                     filepath=self._current_function.source_path or "<unknown>",
                     line=line,
                     scope_name=self._current_function.name,
-                    # TODO 完善源代码显示
-                    source_line_context=[self._source_code[line - 1].strip()],
+                    source_line_context=source_line_context,
                 )
             )
 
@@ -148,13 +150,15 @@ class VBCVirtualMachine:
 
             if isinstance(func, VBCFunction):
                 line = self._find_line_from_pc(func, pc)
+                source_line_context = []
+                if 1 <= line <= len(self._source_code):
+                    source_line_context = [self._source_code[line - 1].strip()]
                 traceback_frames.append(
                     TracebackFrame(
                         filepath=func.source_path or "<unknown>",
                         line=line,
                         scope_name=func.name,
-                        # TODO 完善源代码显示
-                        source_line_context=[self._source_code[line - 1].strip()]
+                        source_line_context=source_line_context
                     )
                 )
         

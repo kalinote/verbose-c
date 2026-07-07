@@ -1,0 +1,15 @@
+// 审计：P1-5 底层 open/write/lseek/read/close 原语经 SystemRuntime 完成文件 I/O 往返。
+
+int main() {
+    int fd = open("p1_5_runtime_io.tmp", O_CREAT + O_TRUNC + O_RDWR, 420);
+    write(fd, "p1_5_runtime_io_ok");
+    lseek(fd, 0, SEEK_SET);
+
+    string content = read(fd, 64);
+    close(fd);
+
+    write(STDOUT, "content:\n");
+    write(STDOUT, content);
+    write(STDOUT, "\n");
+    return 0;
+}

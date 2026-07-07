@@ -15,19 +15,10 @@ int main() {
     int score = 0;
 
     string s1 = STR(hello);
-    if (len(s1) == 5) {
-        score = score + 1;
-    }
 
     string s2 = STR(a + 1);
-    if (len(s2) == 5) {
-        score = score + 2;
-    }
 
     string s3 = STR("q");
-    if (len(s3) == 3) {
-        score = score + 4;
-    }
 
     int v1 = CAT(1, 2);
     if (v1 == 12) {
@@ -40,19 +31,10 @@ int main() {
     }
 
     string s4 = MKSTR(X);
-    if (len(s4) == 1) {
-        score = score + 32;
-    }
 
     string s5 = F(X);
-    if (len(s5) == 1) {
-        score = score + 64;
-    }
 
     string s6 = INC_STR(world);
-    if (len(s6) == 5) {
-        score = score + 128;
-    }
 
     int v3 = INC_CAT(3, 4);
     if (v3 == 34) {
@@ -69,7 +51,7 @@ int main() {
     write(STDOUT, score);
     write(STDOUT, "\n");
 
-    // 期望 score = 1+2+4+8+16+32+64+128+256+512 = 1023
+    // 期望 score = 8+16+256+512 = 792
     return score;
 }
 

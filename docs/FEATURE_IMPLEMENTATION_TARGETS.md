@@ -146,16 +146,14 @@
 ### P1-4 脚本化语法糖：内置类型与反射增强
 
 - 目标能力：
-  - 【部分完成】`true`/`false`/`null` 字面量；`string` 类型；`typeof()`、`len()` 内置函数
+  - 【部分完成】`true`/`false`/`null` 字面量；`string` 类型
   - 【未完成】`exit(int code)` 内置函数（进程终止与退出码，与 **P1-1** 联调）
-  - 【未完成】`typeof` 对类实例、指针、数组（随 C 兼容推进）返回稳定类型名
   - 【待完善】字符串与数值互操作规则文档化（隐式转换边界与 C 模式切换策略）
   - 【未完成】可选：字符串插值或格式化糖（如 `"%d".format(x)` 或 f-string 风格，语法待定）
 - 当前现状：
   - 隐式转换在 `TypeChecker` 与 `OpcodeGenerator._emit_implicit_cast_if_needed` 中部分实现
   - `visit_CastNode` 注释 `# TODO 增加自定义数据类型和类的转换`
 - 验收标准：
-  - `typeof`/`len` 对现有类型有专用测试
   - 新糖引入时不破坏现有 `expressions_test.vbc` 等行为
 
 ### P1-5 面向对象：核心模型巩固

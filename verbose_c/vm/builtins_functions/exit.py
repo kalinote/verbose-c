@@ -1,4 +1,5 @@
 from verbose_c.object.t_integer import VBCInteger
+from verbose_c.vm.builtins_functions.system_runtime import SystemRuntime
 
 
 class NativeExitSignal(Exception):
@@ -14,4 +15,4 @@ def native__exit(status: VBCInteger):
     if not isinstance(status, VBCInteger):
         raise TypeError("_exit 的参数必须是整数")
 
-    raise NativeExitSignal(status.value)
+    raise NativeExitSignal(SystemRuntime.instance().exit_status(status.value))

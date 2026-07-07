@@ -279,13 +279,50 @@
 
 
 
-### P1-5 标准库最小可迁移接口（libc 最小子集）
+### P1-5 底层运行时原语（标准库底座）
 
+- 背景与动机：
+  - `verbose_c/vm/builtins_functions` 的职责应定位为 **VM 可直接调用的底层运行时原语层**，类似系统调用或 POSIX/CRT fd 接口，而不是 C 标准库本身。
+  - 当前已有底层原语基线：`open/read/write/close/lseek/_exit`。这些函数应尽量对齐平台底层 I/O 语义，作为后续 `<stdio.h>`、`<stdlib.h>`、`<string.h>` 等标准库实现的底座。
+  - C 标准库函数应建立在 `builtins_functions` 提供的底层原语之上，但标准库本身应作为独立于 VM 的 VBC 脚本/头文件层实现，而不是 Python 内置函数或 VM 内部功能。
 - 目标能力：
-  - 在现有 I/O 基础上，补齐常用 C 风格接口映射（可分阶段）
-  - 至少保证常见输入输出与字符串基础能力可迁移
+  - 【已完成】明确 `builtins_functions` 为底层原语注册中心：只暴露 VM 需要的最小平台能力，如 fd I/O、进程退出、后续可能的内存/时间等原语；不得把 `printf/strlen/malloc` 等标准库用户接口直接混入该层。
+  - 【已完成】新增统一平台适配类 `SystemRuntime`（`verbose_c/vm/builtins_functions/system_runtime.py`），负责加载、缓存和管理底层 libc/CRT/POSIX 入口；底层 I/O 原语不再直接调用 Python `os` / `sys` 完成同等工作。
+  - 【已完成】平台适配类根据平台自动识别可用动态库：Windows 优先 CRT（`ucrtbase` / `msvcrt`）并处理 `_open/_read/_write/_close/_lseek/_exit` 函数名差异；Linux 优先 `libc.so.6`；macOS 优先 `libc.dylib`。
+  - 【已完成】平台适配类统一管理底层函数签名、参数/返回值转换、错误码读取（`errno` / Windows CRT errno）和资源生命周期；对外暴露稳定的 Python 调用包装，VM 只依赖该适配层。
+  - 【已完成】将 `verbose_c/vm/builtins_functions` 中现有函数迁移到底层平台适配层：`open/read/write/close/lseek/_exit` 首批迁移；后续新增的底层原语也必须经由该适配层或 VM 内存模型实现。
+  - 【已完成】为后续 VBC 标准库层提供稳定、最小、可测试的底层原语契约；本节不规划 `printf/strlen/fopen/malloc` 等标准库函数的实现。
+- 设计要点（实施参考）：
+  - 底层平台适配类建议放在独立模块（如 `verbose_c/vm/builtins_functions/libc.py`），由 `builtins_functions` 调用；不要把平台判断散落在每个内置函数文件中。
+  - 标准库实现应放在独立的 VBC 脚本/头文件层，依赖 `builtins_functions` 暴露的底层原语；`builtins_functions` 不承担 C 标准库缓冲、格式化、`FILE*`、字符串 API 等高层语义。
+  - `printf/puts/fread/fwrite/fclose/strlen/strcmp/malloc/free` 等接口不应在 VM 层用 Python 实现；后续若要支持，应通过 VBC 标准库代码进一步封装底层原语和 VM 内存模型。
+  - 使用 `ctypes.CDLL(..., use_errno=True)` / Windows 对应 CRT 加载能力作为 MVP；若后续需要更强 ABI 控制，可再评估 `cffi` 或专用原生扩展，但不应在 MVP 引入新依赖。
+  - 平台适配类初始化时完成平台探测和函数注册，缺失函数应以结构化错误暴露，避免运行到内置函数内部才出现裸 `AttributeError`。
+  - 参数转换必须明确边界：`VBCInteger` ↔ `c_int` / `c_long` / `size_t`，`VBCString` ↔ `char*` / `bytes`，指针类对象 ↔ VM 内存地址或临时缓冲区；涉及 VM 堆内存的函数（如 `malloc/free/memcpy`）需要先明确与现有 `MemoryManager` 的所有权关系。
+  - 底层 I/O 原语迁移时保持当前用户可见错误为中文 `VBCIOError`，底层错误码来自 libc/CRT；错误格式后续接入 P1-7。
+  - 【已完成】Windows 与 POSIX 差异需显式记录：Windows 映射 `_open/_read/_write/_close/_lseek/_exit`，POSIX 映射 `open/read/write/close/lseek/_exit`；文件标志常量来自 `SystemRuntime` 维护的 CRT/POSIX 常量表，而不是直接复用 Python `os.O_*`。
+  - 【MVP 边界】`O_*` / `SEEK_*` 在 C 中通常是头文件宏，不是 libc 导出的函数或变量；当前实现不尝试从动态库读取宏值，而是在 `SystemRuntime` 中按平台维护常量表。
+  - 【MVP 边界】`read/write` 仍以 UTF-8 字符串桥接 VM：`read` 返回 `VBCString`，`write` 保留现有 `AnyType` 字符串化行为；真正二进制缓冲区、指针 I/O 与 VM 堆内存所有权留到后续内存模型扩展。
+- 分阶段实施：
+
+#### 步骤 1（必须）：建立底层平台适配层
+
+- 【已完成】实现平台探测、动态库加载、函数签名注册和调用包装。
+- 【已完成】提供平台适配单例 `SystemRuntime.instance()`，避免每次内置函数调用重复加载动态库。
+- 【已完成】为 `errno`、缺失符号、参数转换失败提供中文运行时错误；Windows CRT 非法 fd 会在调用前拦截，避免 invalid parameter 直接终止宿主 Python 进程。
+
+#### 步骤 2（必须）：迁移现有底层 I/O 与退出原语
+
+- 【已完成】`native_open/read/write/close/lseek` 改为调用底层平台适配层，不再直接使用 `os.open/read/write/close/lseek`。
+- 【已完成】`native__exit` 改为与 libc `_exit` / CRT `_exit` 语义对齐，同时保留 VM 内部 `NativeExitSignal` 的退出码通路，避免直接终止 Python 进程导致 dump/错误处理绕过。
+- 【已完成】`STDIN/STDOUT/STDERR` 与 `O_*` / `SEEK_*` 常量改由 `SystemRuntime` 的 libc/CRT 兼容常量表定义。
+
 - 验收标准：
-  - 迁移小型 C 示例（输入输出+字符串处理）无需大改
+  - 【已完成】`builtins_functions` 文档和实现边界清晰：它提供类似系统调用/POSIX/CRT fd 的底层原语，不直接承载 C 标准库高层接口。
+  - 【已完成】`open/read/write/close/lseek/_exit` 的实现路径不再调用 Python `os` / `sys` 完成同等底层能力，而是统一经过平台适配层。
+  - 【已完成】Windows、Linux、macOS 至少有平台探测分支；当前平台缺少目标符号时给出明确中文错误。
+  - 【已完成】底层原语接口契约清晰，可被后续独立 VBC 标准库层调用；标准库函数不作为本节 VM 内置函数验收项。
+  - 【已完成】新增回归测试覆盖：`SystemRuntime` 加载成功、I/O 成功路径（`tests/compatibility_audit/p1_5_file_io_roundtrip_test.vbc`）、I/O 错误路径（`tests/compatibility_audit/p1_5_file_io_error_test.vbc`）、`_exit` 退出码（`tests/compatibility_audit/p1_8_exit_test.vbc`）。
 
 
 
@@ -518,7 +555,7 @@ verbose_c/error/
 - 依赖关系：
   - **P0-3** 条件编译（`NDEBUG` 分支）
   - **P0-4** 标量真值规则（`assert` 条件判断）
-  - **P1-5** 标准库最小子集（`abort` 或等价进程异常退出）
+  - **P1-5** 底层运行时原语（`_exit` 或等价进程退出通路；`abort` 由后续 VBC 标准库层封装）
   - **P1-6** `#include <assert.h>` 搜索路径（若采用系统头风格）
   - **P1-7** 统一错误诊断（断言失败输出格式）
 - 当前现状：
@@ -635,7 +672,7 @@ verbose_c/error/
 
 ### 阶段 D（提升迁移能力）
 
-- 推进 P1：指针语义、类型转换规则、`sizeof`、`const/static`、最小标准库兼容、**统一错误诊断与输出（P1-7 步骤 1–3）**、**程序入口 `main` 与进程退出码（P1-8）**、**断言 `assert` / `<assert.h>`（P1-9，依赖 P1-5 与 P1-7）**
+- 推进 P1：指针语义、类型转换规则、`sizeof`、`const/static`、**底层平台适配层与运行时原语迁移（P1-5 步骤 1–2）**、**统一错误诊断与输出（P1-7 步骤 1–3）**、**程序入口 `main` 与进程退出码（P1-8）**、**断言 `assert` / `<assert.h>`（P1-9，依赖 P1-5 与 P1-7）**
 
 
 

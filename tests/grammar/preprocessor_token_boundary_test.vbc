@@ -33,14 +33,8 @@ int main() {
 
     // 字符串字面量中的宏名保持原文
     string literal = "macro A not expanded";
-    if (len(literal) == 20) {
-        score = score + 16;
-    }
 
     string with_suffix = "prefixA1suffix";
-    if (len(with_suffix) == 14) {
-        score = score + 32;
-    }
 
     // 注释中的宏名不影响代码中的宏展开（下方 X 仍应展开）
     // X is 0 in comment
@@ -68,7 +62,7 @@ int main() {
     write(STDOUT, score);
     write(STDOUT, "\n");
 
-    // 期望 score = 1+2+4+8+16+32+64+128+256 = 511
+    // 期望 score = 1+2+4+8+64+128+256 = 463
     return score;
 }
 

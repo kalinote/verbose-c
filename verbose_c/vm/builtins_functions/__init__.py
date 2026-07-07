@@ -1,6 +1,4 @@
 from verbose_c.object.enum import VBCObjectType
-from verbose_c.vm.builtins_functions.typeof import native_typeof
-from verbose_c.vm.builtins_functions.len import native_len
 from verbose_c.vm.builtins_functions.exit import native__exit
 from verbose_c.vm.builtins_functions.io import (
     native_open,
@@ -14,8 +12,6 @@ from verbose_c.typing.types import FunctionType, IntegerType, StringType, VoidTy
 
 # 将所有内置函数收集到一个字典中，方便注册
 BUILTIN_FUNCTIONS = {
-    "typeof": native_typeof,
-    "len": native_len,
     "_exit": native__exit,
     
     # I/O
@@ -29,8 +25,6 @@ BUILTIN_FUNCTIONS = {
 # 内置函数的类型签名，用于编译时类型检查
 # TODO: 所有 AnyType 后续可以完善为更精确的类型
 BUILTIN_FUNCTION_SIGNATURES = {
-    "typeof": FunctionType(param_types=[AnyType()], return_type=StringType()),
-    "len": FunctionType(param_types=[AnyType()], return_type=IntegerType(VBCObjectType.NLINT)),
     "_exit": FunctionType(param_types=[IntegerType(VBCObjectType.INT)], return_type=VoidType()),
     
     # I/O

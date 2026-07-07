@@ -110,8 +110,6 @@ flowchart TD
         MemoryManager["MemoryManager<br/>地址分配、读写、释放"]
         GC["GarbageCollector<br/>标记-清除 GC"]
         BuiltinsModule["builtins_functions<br/>BUILTIN_FUNCTIONS / BUILTIN_FUNCTION_SIGNATURES / BUILTIN_CONSTANTS"]
-        BuiltinTypeof["typeof.native_typeof"]
-        BuiltinLen["len.native_len"]
         BuiltinIO["io.native_open/read/write/close/lseek<br/>以及 IO_CONSTANTS"]
     end
 
@@ -289,8 +287,6 @@ flowchart TD
     MemoryManager --> RuntimeObjects
 
     %% Builtins
-    BuiltinsModule --> BuiltinTypeof
-    BuiltinsModule --> BuiltinLen
     BuiltinsModule --> BuiltinIO
     BuiltinsModule --> FunctionObjects
     BuiltinsModule --> TypeSystem
