@@ -1,0 +1,15 @@
+// 测试点：直接 include 其他 .vbc 时，该 .vbc 作为依赖参与缓存失效。
+
+#include "helper_functions.vbc"
+
+int main() {
+    int result = incremental_helper(5);
+
+    write(STDOUT, "\n=== Incremental Include Source ===\n");
+    write(STDOUT, "helper result: ");
+    write(STDOUT, result);
+    write(STDOUT, "\n");
+
+    return result;
+}
+

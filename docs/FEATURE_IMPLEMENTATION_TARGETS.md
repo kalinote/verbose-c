@@ -10,7 +10,7 @@
 1.  F-P0-1  .vbb 格式与序列化          【已完成】稳定字节码产物
 2.  F-P0-2  .vbb 直接加载执行          【已完成】跳过前端直接运行
 3.  F-P0-3  O1 字节码级优化            【已完成】窥孔优化，语义不变
-4.  F-P1-8  增量编译与依赖追踪         【未完成】源未变时复用 .vbb
+4.  F-P1-8  增量编译与依赖追踪         【已完成】源未变时复用 .vbb
 5.  F-P2-1  IR 与控制流图              【未完成】多后端统一中间表示
 6.  F-P2-2  O2/O3 优化等级             【未完成】AST/IR 层高级优化
 7.  F-P2-3  AOT C 后端                 【未完成】emit-c / emit-exe 独立可执行文件
@@ -229,17 +229,24 @@
 ### 【依赖 C-P1-6】【依赖 F-P0-1】【依赖 F-P0-2】P1-8 增量编译与依赖追踪
 
 - 目标能力：
-  - 【未完成】实现 `IncrementalCompiler`（`verbose_c/fs/incremental_compile.py`）
-  - 【未完成】记录 `#include` 依赖边；源文件或头文件变更时 `needs_recompile()` 为真
-  - 【未完成】与 `.vbb` 产物时间戳或内容哈希联动
-  - 【未完成】依赖图持久化（侧车 `.vbc.deps.json` 或写入 `.vbb` 元数据）
+  - 【已完成】实现 `IncrementalCompiler`（`verbose_c/fs/incremental_compile.py`），定位为**依赖感知的入口翻译单元缓存复用**，而非 include 文件级独立编译
+  - 【已完成】记录入口 `.vbc` 在预处理阶段实际读入的 `#include` 依赖文件，包含暂定头文件 `.inc` 以及被直接 include 的 `.vbc`
+  - 【已完成】源文件、任一 include 依赖、编译参数或编译器/字节码格式版本变更时，`needs_recompile()` 为真，并重新编译整个入口翻译单元
+  - 【已完成】未变更时跳过 tokenize / preprocess / parse / type check / codegen，直接复用入口文件对应的 `.vbb`
+  - 【已完成】与 `.vbb` 产物存在性和内容哈希联动，MVP 使用 SHA-256 内容哈希，不依赖文件时间戳
+  - 【已完成】依赖图持久化为侧车 `<artifact_path>.deps.json`；未修改 `.vbb` 二进制格式
 - 当前现状：
-  - 全部为 `NotImplementedError` 占位
-  - 预处理器已有 `_included_files` 去重，但未暴露给增量层
+  - `IncrementalCompiler` 已支持 manifest 写入、SHA-256 校验、缓存失效判断、依赖读取与 `invalidate(path)`
+  - 当前编译流程在 `Preprocessor.process_tokens()` 中递归展开 `#include` 并拼接为单一 token 流，后续 parser/compiler 只处理入口翻译单元整体
+  - `Preprocessor.dependencies` 已暴露“本次实际依赖文件集合”，仅记录生效条件分支中成功读入的 include 文件
+  - `.vbc` 被 include 时与 `.inc` 一样参与预处理拼接，不产生独立模块产物，也不单独缓存编译结果
+  - `run_source_file()` 默认启用增量缓存；命中时直接加载入口 `.vbb`，未命中时重新编译并刷新侧车依赖清单
 - 验收标准：
-  - 修改被 include 的头文件后，再次编译入口文件会触发重编译
-  - 未变更时跳过编译，直接加载 `.vbb`（与 P0-2 联调）
-  - `invalidate(path)` 可使缓存失效
+  - 【已完成】修改入口文件、被 include 的 `.inc` 或被 include 的 `.vbc` 后，再次编译入口文件会触发整个入口翻译单元重编译
+  - 【已完成】未变更时跳过完整前端编译，直接加载入口文件对应的 `.vbb`（与 P0-2 联调）
+  - 【已完成】依赖侧车文件记录入口路径、产物路径、编译参数、依赖文件列表与每个文件的内容哈希
+  - 【已完成】`invalidate(path)` 可使指定入口或依赖相关的缓存失效；依赖文件失效时，引用它的入口产物也会失效
+  - 【已完成】增量缓存命中与未命中两条路径的执行结果和退出码与 freshly compile 保持一致
 
 ---
 
@@ -515,7 +522,7 @@ flowchart LR
 | Range / 关键字参数 | 【未实现】 | AST 占位，generator 抛 `NotImplementedError` |
 | 数组切片 `[start:end:step]` | 【未实现，见 P2-6】 | 依赖 C 兼容 P0-7 |
 | `exit()` 内置函数 | 【未实现】 | — |
-| 增量编译 | 【未实现】 | `IncrementalCompiler` 占位 |
+| 增量编译 | 【已完成】 | `IncrementalCompiler`、`Preprocessor.dependencies`、`run_source_file()` |
 | 字节码优化 | 【已实现】 | `-O1` 启用 O1 字节码优化 |
 | IR / 机器码 / AOT | 【未实现】 | 无后端目录 |
 | JIT | 【未实现】 | 无 |

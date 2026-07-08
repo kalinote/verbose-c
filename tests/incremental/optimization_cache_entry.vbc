@@ -1,0 +1,18 @@
+// 测试点：同一入口在 -O0 与 -O1 下应使用不同缓存参数判断。
+
+int main() {
+    int total = 0;
+    int i = 0;
+
+    while (i < 4) {
+        total = total + i;
+        i = i + 1;
+    }
+
+    write(STDOUT, "\n=== Incremental Optimization Cache ===\n");
+    write(STDOUT, "total: ");
+    write(STDOUT, total);
+    write(STDOUT, "\n");
+
+    return total;
+}

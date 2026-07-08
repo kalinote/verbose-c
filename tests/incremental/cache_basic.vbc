@@ -1,0 +1,8 @@
+// 测试点：无 include 的入口文件可生成并复用入口 .vbb 缓存。
+
+int main() {
+    write(STDOUT, "\n=== Incremental Cache Basic ===\n");
+    write(STDOUT, "exit code: 11\n");
+    return 11;
+}
+

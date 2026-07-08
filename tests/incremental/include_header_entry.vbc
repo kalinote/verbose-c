@@ -1,0 +1,15 @@
+// 测试点：修改被 include 的 .inc 后，入口翻译单元应重新编译。
+
+#include "values.inc"
+
+int main() {
+    int result = BASE_VALUE + STEP_VALUE;
+
+    write(STDOUT, "\n=== Incremental Include Header ===\n");
+    write(STDOUT, "result: ");
+    write(STDOUT, result);
+    write(STDOUT, "\n");
+
+    return result;
+}
+

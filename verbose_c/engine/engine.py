@@ -15,6 +15,7 @@ from verbose_c.parser.ppg.build import build_python_parser_and_generator
 from verbose_c.parser.ppg.validator import validate_grammar
 from verbose_c.error import VBCCompileError, VBCRuntimeError
 from verbose_c.fs.artifact_store import ArtifactStore
+from verbose_c.fs.incremental_compile import IncrementalCompiler
 from verbose_c.engine.recorder import PipelineRecorder, create_dump_path
 
 default_parser_output = "parser.py"
@@ -51,6 +52,7 @@ class CompilerOutput:
     warnings: list[str] = field(default_factory=list)
     parser_generation_report: ParserGenerationReport | None = None
     optimization_result: Any | None = None
+    dependencies: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -234,10 +236,47 @@ def compile_module(
         warnings=compiler.warnings,
         parser_generation_report=context.parser_generation_report,
         optimization_result=opcode_gen.optimization_result,
+        dependencies=sorted(preprocessor.dependencies),
     )
     if recorder:
         recorder.on_compiled(output)
     return output
+
+
+def _load_bytecode_compilation_output(filename: str) -> tuple[CompilerOutput, str]:
+    """加载 .vbb 并恢复为运行所需的编译输出结构。"""
+    artifact_store = ArtifactStore()
+    bytecode, metadata = artifact_store.load_bytecode(filename)
+    constant_pool = metadata.get("constant_pool", [])
+    lineno_table = metadata.get("lineno_table", [])
+    source_path = metadata.get("source_path") or filename
+    compilation_output = CompilerOutput(
+        bytecode=bytecode,
+        constant_pool=constant_pool,
+        function_compilation_results=metadata.get("function_compilation_results", {}),
+        labels=metadata.get("labels", {}),
+        lineno_table=lineno_table,
+    )
+    return compilation_output, source_path
+
+
+def _execute_compilation_output(
+    compilation_output: CompilerOutput,
+    source_path: str,
+    recorder: PipelineRecorder,
+) -> tuple[int, Any]:
+    """执行已恢复或刚生成的字节码。"""
+    from verbose_c.vm.core import VBCVirtualMachine
+
+    vm = VBCVirtualMachine(debug_log_collector=recorder.create_vm_log_collector())
+    exit_code = vm.excute(
+        bytecode=compilation_output.bytecode,
+        constants=compilation_output.constant_pool,
+        source_path=source_path,
+        lineno_table=compilation_output.lineno_table,
+        source_code=_read_source_lines(source_path),
+    )
+    return exit_code, vm
 
 
 def run_parser_generation(
@@ -310,48 +349,61 @@ def run_source_file(
     compile_warnings: list[str] = []
     exit_code = 0
     vm = None
-    artifact_path = None
+    artifact_store = ArtifactStore()
+    incremental_compiler = IncrementalCompiler(artifact_store)
+    artifact_path = output_path or artifact_store.artifact_path_for_source(filename)
 
     recorder.log_compile_start()
     try:
-        recorder.log_compile_engine()
-        compilation_result = compile_module(
-            file_path=filename,
-            refresh_parser=refresh_parser,
-            recorder=recorder,
+        needs_recompile = incremental_compiler.needs_recompile(
+            filename,
+            artifact_path=artifact_path,
             optimize_level=optimize_level,
+            refresh_parser=refresh_parser,
         )
-        compile_warnings = compilation_result.warnings or []
-        if show_warnings and compile_warnings:
-            for warning_line in compile_warnings:
-                print(f"警告: {warning_line}")
+        if needs_recompile:
+            recorder.log_compile_engine()
+            compilation_result = compile_module(
+                file_path=filename,
+                refresh_parser=refresh_parser,
+                recorder=recorder,
+                optimize_level=optimize_level,
+            )
+            compile_warnings = compilation_result.warnings or []
+            if show_warnings and compile_warnings:
+                for warning_line in compile_warnings:
+                    print(f"警告: {warning_line}")
 
-        artifact_store = ArtifactStore()
-        artifact_path = output_path or artifact_store.artifact_path_for_source(filename)
-        artifact_store.save_bytecode(
-            artifact_path,
-            compilation_result.bytecode,
-            metadata={
-                "constant_pool": compilation_result.constant_pool,
-                "lineno_table": compilation_result.lineno_table,
-                "source_path": os.path.abspath(filename),
-                "labels": compilation_result.labels,
-                "function_compilation_results": compilation_result.function_compilation_results,
-            },
-        )
-        recorder.log_compile_done()
+            artifact_store.save_bytecode(
+                artifact_path,
+                compilation_result.bytecode,
+                metadata={
+                    "constant_pool": compilation_result.constant_pool,
+                    "lineno_table": compilation_result.lineno_table,
+                    "source_path": os.path.abspath(filename),
+                    "labels": compilation_result.labels,
+                    "function_compilation_results": compilation_result.function_compilation_results,
+                },
+            )
+            incremental_compiler.write_manifest(
+                filename,
+                compilation_result.dependencies,
+                artifact_path=artifact_path,
+                optimize_level=optimize_level,
+                refresh_parser=refresh_parser,
+            )
+            recorder.log_compile_done()
+            source_path = filename
+        else:
+            compilation_result, source_path = _load_bytecode_compilation_output(artifact_path)
+            recorder.on_compiled(compilation_result)
 
         if execute:
             recorder.log_vm_start()
-            from verbose_c.vm.core import VBCVirtualMachine
-
-            vm = VBCVirtualMachine(debug_log_collector=recorder.create_vm_log_collector())
-            exit_code = vm.excute(
-                bytecode=compilation_result.bytecode,
-                constants=compilation_result.constant_pool,
-                source_path=filename,
-                lineno_table=compilation_result.lineno_table,
-                source_code=compilation_result.processed_code.split("\n")
+            exit_code, vm = _execute_compilation_output(
+                compilation_result,
+                source_path=source_path,
+                recorder=recorder,
             )
             recorder.log_vm_done()
 

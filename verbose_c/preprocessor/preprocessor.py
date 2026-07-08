@@ -63,6 +63,7 @@ class Preprocessor:
         self.show_warnings = show_warnings
         self.macro_register: dict[str, MacroDefinition] = {}
         self._included_files = set()
+        self.dependencies: set[str] = set()
         self._compile_time = compile_time or datetime.now()
         self._cond_stack: list[_CondFrame] = []
         self._register_static_predefined_macros()
@@ -393,6 +394,7 @@ class Preprocessor:
             self._warn(f"#include 文件未找到 '{abs_path}'", token)
             return []
 
+        self.dependencies.add(os.path.abspath(abs_path))
         self._included_files.add(abs_path)
         try:
             content = self.source_manager.read(abs_path)

@@ -1,0 +1,19 @@
+// 测试点：仅生效条件分支中的 include 会进入依赖清单。
+
+#define USE_ACTIVE_HEADER 1
+
+#if USE_ACTIVE_HEADER
+#include "active_config.inc"
+#else
+#include "inactive_config.inc"
+#endif
+
+int main() {
+    write(STDOUT, "\n=== Incremental Conditional Include ===\n");
+    write(STDOUT, "selected value: ");
+    write(STDOUT, SELECTED_VALUE);
+    write(STDOUT, "\n");
+
+    return SELECTED_VALUE;
+}
+

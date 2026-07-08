@@ -1,0 +1,2 @@
+#define SELECTED_VALUE 99
+
