@@ -64,7 +64,8 @@ class OpcodeGenerator(VisitorBase):
         self._nested_scope_indices: dict[SymbolTable, int] = {} # 跟踪每个父作用域下嵌套作用域的访问索引
 
     def visit(self, node: ASTNode):
-        self.current_line = node.start_line
+        if node.start_line is not None:
+            self.current_line = node.start_line
         return super().visit(node)
 
     # 工具方法
@@ -78,7 +79,9 @@ class OpcodeGenerator(VisitorBase):
         """
         # 记录行号映射：当前字节码的偏移量 -> 当前行号
         # 只有当行号变化时才记录，以节省空间
-        if not self.lineno_table or self.lineno_table[-1][1] != self.current_line:
+        if self.current_line is not None and (
+            not self.lineno_table or self.lineno_table[-1][1] != self.current_line
+        ):
             self.lineno_table.append((len(self.bytecode), self.current_line))
 
         if operand is not None:
@@ -1172,10 +1175,19 @@ class OpcodeGenerator(VisitorBase):
                 field_name = statement.name.name
                 vbc_class._fields[field_name] = VBCNull()
                 if statement.init_exp:
-                    this_node = NameNode("this")
+                    line = statement.start_line
+                    column = statement.start_column
+                    this_node = NameNode("this", start_line=line, start_column=column)
                     assignment_node = AssignmentNode(
-                        target=GetPropertyNode(obj=this_node, property_name=statement.name),
-                        value=statement.init_exp
+                        target=GetPropertyNode(
+                            obj=this_node,
+                            property_name=statement.name,
+                            start_line=line,
+                            start_column=column,
+                        ),
+                        value=statement.init_exp,
+                        start_line=line,
+                        start_column=column,
                     )
                     field_init_statements.append(assignment_node)
 
@@ -1190,11 +1202,17 @@ class OpcodeGenerator(VisitorBase):
             final_init_body_statements = field_init_statements
 
         final_init_method_node = FunctionNode(
-            return_type=TypeNode(NameNode("void")),
-            name=NameNode("__init__"),
+            return_type=TypeNode(NameNode("void", start_line=node.start_line, start_column=node.start_column)),
+            name=NameNode("__init__", start_line=node.start_line, start_column=node.start_column),
             args=final_init_args,
             kwargs={},
-            body=BlockNode(final_init_body_statements)
+            body=BlockNode(
+                final_init_body_statements,
+                start_line=node.start_line,
+                start_column=node.start_column,
+            ),
+            start_line=node.start_line,
+            start_column=node.start_column,
         )
 
         original_init_table = self.symbol_table

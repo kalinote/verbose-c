@@ -17,7 +17,7 @@ class Lexer:
         'unsigned', 'void', 'volatile', 'while',
 
         # 面向对象功能扩展
-        'class', 'public', 'private', 'protected', 'virtual', 'override',
+        'new', 'class', 'public', 'private', 'protected', 'virtual', 'override',
         'final', 'extends', 'implements', 'interface', 'abstract',
     }
 

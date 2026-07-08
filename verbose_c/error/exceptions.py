@@ -25,6 +25,12 @@ class VBCCompileError(VBCError):
         super().__init__(message, line, filepath)
         self.warnings = warnings or []
 
+
+class VBCBytecodeError(VBCCompileError):
+    """字节码产物格式错误"""
+    pass
+
+
 class VBCRuntimeError(VBCError):
     """
     运行时错误

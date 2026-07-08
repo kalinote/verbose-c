@@ -1,7 +1,7 @@
 import argparse
 import os
 import sys
-from verbose_c.engine.engine import run_parser_generation, run_source_file, grammar_file
+from verbose_c.engine.engine import run_bytecode_file, run_parser_generation, run_source_file, grammar_file
 from verbose_c.engine.recorder import create_dump_path
 
 
@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument("--no-warn", help="静默编译告警输出", action="store_true")
     parser.add_argument("-cp", "--compile-parser", help="编译语法文件生成解析器", action="store_true")
     parser.add_argument("--compile-only", help="只编译不执行源代码", action="store_true")
+    parser.add_argument("-o", "--output", help="指定 .vbb 字节码产物输出路径")
     parser.add_argument("-rp", "--refresh-parser", help="重新生成解析器", action="store_true")
     return parser.parse_args()
 
@@ -70,15 +71,31 @@ def main():
         sys.exit(0)
     else:
         dump_path = create_dump_path(args.filename) if dump_modules else None
-        result = run_source_file(
-            filename=args.filename,
-            log_modules=log_modules,
-            dump_modules=dump_modules,
-            dump_path=dump_path,
-            execute=not args.compile_only,
-            refresh_parser=args.refresh_parser,
-            show_warnings=not args.no_warn,
-        )
+        ext = os.path.splitext(args.filename)[1].lower()
+        if ext == ".vbb":
+            if args.output:
+                print("错误: .vbb 输入不支持 -o/--output")
+                sys.exit(1)
+            if args.compile_only:
+                print("错误: .vbb 输入不支持 --compile-only")
+                sys.exit(1)
+            result = run_bytecode_file(
+                filename=args.filename,
+                log_modules=log_modules,
+                dump_modules=dump_modules,
+                dump_path=dump_path,
+            )
+        else:
+            result = run_source_file(
+                filename=args.filename,
+                log_modules=log_modules,
+                dump_modules=dump_modules,
+                dump_path=dump_path,
+                output_path=args.output,
+                execute=not args.compile_only,
+                refresh_parser=args.refresh_parser,
+                show_warnings=not args.no_warn,
+            )
         sys.exit(result.exit_code)
 
 

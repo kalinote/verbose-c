@@ -18,3 +18,5 @@ coverage.xml
 dumps/
 parser.py
 .cursor/
+
+__vbccache__/

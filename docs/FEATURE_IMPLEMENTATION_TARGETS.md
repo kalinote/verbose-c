@@ -23,16 +23,16 @@
 ### P0-1 字节码二进制格式与序列化闭环
 
 - 目标能力：
-  - 【未完成】定义稳定的 `.vbb`（Verbose-C Bytecode）文件格式：魔数、版本号、目标 ABI、常量池、函数表、模块级字节码、行号表、调试元数据
-  - 【未完成】常量池支持现有运行时对象的可序列化子集：`int`/`float`/`bool`/`string`/`null`、函数元数据、类元数据（方法字节码嵌套或索引引用）
-  - 【未完成】实现 `ArtifactStore.save_bytecode()` / `load_bytecode()`（`verbose_c/fs/artifact_store.py`）
-  - 【未完成】实现 `artifact_path_for_source()`：由 `.vbc` 推导默认 `.vbb` 路径（可与输出目录、`-o` 参数配合）
-  - 【未完成】格式版本向前兼容策略：读旧版、写新版时给出明确错误或自动迁移说明
+  - 【已完成】定义稳定的 `.vbb`（Verbose-C Bytecode）紧凑二进制格式：魔数、版本号、目标 ABI、常量池、函数表、类表、结构体表、模块级字节码、行号表、调试元数据（详见 [VBB_FORMAT.md](./VBB_FORMAT.md)）
+  - 【已完成】常量池支持现有运行时对象的可序列化子集：`int`/`float`/`bool`/`string`/`null`、函数元数据、类元数据（方法字节码通过索引引用）、结构体布局；`VBCPointer`/`VBCInstance`/`VBCNativeFunction` 暂不支持
+  - 【已完成】实现 `ArtifactStore.save_bytecode()` / `load_bytecode()`（`verbose_c/fs/artifact_store.py`）
+  - 【已完成】实现 `artifact_path_for_source()`：由 `.vbc` 推导默认 `.vbb` 路径为 `<源目录>/__vbccache__/<stem>.vbb`，可与 `-o/--output` 配合
+  - 【待完善】格式版本策略：版本不匹配、魔数错误、截断、section checksum/SHA 失败时抛出 `VBCBytecodeError`（含文件路径）；当前仅定义 version 1，不提供旧版 JSON 载荷或跨版本自动迁移
 - 当前现状：
-  - 字节码仅存在于内存：`CompilerOutput.bytecode` 为 `list[tuple[Opcode, ...]]`，`constant_pool` 为 Python 对象列表
-  - 函数/方法字节码分散在 `function_compilation_results` 与 `VBCFunction` 运行时对象中，尚无统一打包规范
-  - `ArtifactStore` 全部为 `NotImplementedError` 占位
-  - CLI 有 `--compile-only`，但无字节码文件输出选项
+  - `ArtifactStore` 已实现紧凑二进制读写，section 化打包函数/类/常量池/字节码块/行号表/调试信息
+  - 编译 `.vbc` 时始终写出 `.vbb`（`run_source_file()` 在编译成功后调用 `save_bytecode()`）
+  - CLI 支持 `-o/--output` 指定产物路径；未指定时写入 `__vbccache__`
+  - 回归测试：`tests/test_artifact_store.py`（round-trip、损坏文件、section 校验）、`tests/test_cli_bytecode.py`（默认缓存目录与 `-o` 输出）
 - 验收标准：
   - 给定 `tests/grammar/functions_test.vbc`，编译后可写出 `.vbb`，再次加载后与内存编译结果字节码等价（逐指令比对或哈希一致）
   - 常量池中字符串、数值、函数引用在加载后可被 VM 正确还原
@@ -42,14 +42,15 @@
 ### 【依赖 F-P0-1】P0-2 字节码文件直接读取与执行
 
 - 目标能力：
-  - 【未完成】CLI 支持直接运行 `.vbb`：`verbose-c program.vbb` 或显式 `--bytecode` 模式
-  - 【未完成】`engine` 层新增 `run_bytecode_file()`：跳过词法/语法/类型检查，直接构造 `VBCVirtualMachine` 并 `excute()`
-  - 【未完成】加载路径与源码路径解耦：无源码时仍可运行；有调试信息时可选用 `--source-map` 或内嵌路径做错误回溯
-  - 【未完成】`--compile-only` 与字节码输出打通：编译 `.vbc` 默认或可选写出 `.vbb` 后退出
+  - 【已完成】CLI 支持直接运行 `.vbb`：输入文件后缀为 `.vbb` 时走字节码加载执行（无需 `--bytecode` 显式模式）
+  - 【已完成】`engine` 层新增 `run_bytecode_file()`：跳过词法/语法/类型检查，直接构造 `VBCVirtualMachine` 并 `excute()`
+  - 【待完善】加载路径与源码路径解耦：`.vbb` 内嵌 `source_path`，加载后若源文件仍存在则用于运行时错误回溯；尚无 `--source-map` 参数，无源码时仍可运行
+  - 【已完成】`--compile-only` 与字节码输出打通：编译 `.vbc` 始终写出 `.vbb`；`--compile-only` 只控制是否执行，不控制是否生成产物
 - 当前现状：
-  - 执行入口 `run_source_file()` 固定走完整编译管线
-  - VM 已支持接收 `bytecode` + `constant_pool` + `lineno_table`（`VBCVirtualMachine.excute`），缺的是持久化加载层
-  - `PipelineRecorder` 可将字节码 dump 为 markdown，非可执行二进制格式
+  - `run_source_file()` 编译成功后保存 `.vbb`，可选执行内存编译结果
+  - `run_bytecode_file()` 通过 `ArtifactStore.load_bytecode()` 恢复字节码与常量池后执行
+  - CLI 已支持 `-o/--output`、`.vbb` 输入分支；`.vbb` 输入不支持 `-o` 与 `--compile-only`
+  - 回归测试：`tests/test_cli_bytecode.py` 覆盖 `.vbc → .vbb → 执行` 闭环
 - 验收标准：
   - `verbose-c foo.vbb` 执行结果与 `verbose-c foo.vbc` 一致（同一源码 freshly 编译对比）
   - `--compile-only -o foo.vbb foo.vbc` 生成文件后，单独执行 `.vbb` 成功
@@ -475,19 +476,20 @@ flowchart LR
 
 ---
 
-## 11. 当前基线快照（2026-07-01）
+## 11. 当前基线快照（2026-07-08）
 
 | 能力域 | 状态 | 关键模块 |
 | ------ | ---- | -------- |
 | 栈式字节码 VM | 【已完成】 | `verbose_c/vm/core.py`、`Opcode` |
 | 源码 → 字节码编译 | 【已完成】 | `Compiler`、`OpcodeGenerator` |
+| 字节码文件 `.vbb` 序列化/加载 | 【已完成】 | `verbose_c/fs/artifact_store.py`、[VBB_FORMAT.md](./VBB_FORMAT.md) |
+| `.vbb` 直接执行 | 【已完成】 | `run_bytecode_file()`、`cli.py` |
 | 类 / 继承 / new / super | 【部分完成】 | `opcode_generator_visitor`、`VBCClass` |
 | 隐式 `main` 脚本入口（无 `main` 定义） | 【部分完成】 | 顶层顺序执行已有，未形式化/无 `exit` |
 | 显式 `main` 自动调用与退出码 | 【见 C 兼容 P1-8】 | 不在本文重复 |
 | Range / 关键字参数 | 【未实现】 | AST 占位，generator 抛 `NotImplementedError` |
 | 数组切片 `[start:end:step]` | 【未实现，见 P2-6】 | 依赖 C 兼容 P0-7 |
 | `exit()` 内置函数 | 【未实现】 | — |
-| 字节码文件 .vbb | 【未实现】 | `ArtifactStore` 占位 |
 | 增量编译 | 【未实现】 | `IncrementalCompiler` 占位 |
 | 字节码优化 | 【未实现】 | `optimize_level` 未使用 |
 | IR / 机器码 / AOT | 【未实现】 | 无后端目录 |

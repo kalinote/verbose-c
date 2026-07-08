@@ -14,6 +14,7 @@ from verbose_c.compiler.compiler import Compiler
 from verbose_c.parser.ppg.build import build_python_parser_and_generator
 from verbose_c.parser.ppg.validator import validate_grammar
 from verbose_c.error import VBCCompileError, VBCRuntimeError
+from verbose_c.fs.artifact_store import ArtifactStore
 from verbose_c.engine.recorder import PipelineRecorder, create_dump_path
 
 default_parser_output = "parser.py"
@@ -67,6 +68,7 @@ class RunResult:
     success: bool
     exit_code: int = 0
     dump_path: str | None = None
+    artifact_path: str | None = None
     compilation_output: CompilerOutput | None = None
     warnings: list[str] = field(default_factory=list)
     error: Exception | None = None
@@ -283,6 +285,7 @@ def run_source_file(
     log_modules: set[str],
     dump_modules: set[str],
     dump_path: str | None = None,
+    output_path: str | None = None,
     execute: bool = True,
     refresh_parser: bool = False,
     show_warnings: bool = True,
@@ -303,6 +306,7 @@ def run_source_file(
     compile_warnings: list[str] = []
     exit_code = 0
     vm = None
+    artifact_path = None
 
     recorder.log_compile_start()
     try:
@@ -317,6 +321,19 @@ def run_source_file(
             for warning_line in compile_warnings:
                 print(f"警告: {warning_line}")
 
+        artifact_store = ArtifactStore()
+        artifact_path = output_path or artifact_store.artifact_path_for_source(filename)
+        artifact_store.save_bytecode(
+            artifact_path,
+            compilation_result.bytecode,
+            metadata={
+                "constant_pool": compilation_result.constant_pool,
+                "lineno_table": compilation_result.lineno_table,
+                "source_path": os.path.abspath(filename),
+                "labels": compilation_result.labels,
+                "function_compilation_results": compilation_result.function_compilation_results,
+            },
+        )
         recorder.log_compile_done()
 
         if execute:
@@ -363,7 +380,102 @@ def run_source_file(
         success=captured_error is None,
         exit_code=exit_code,
         dump_path=final_path,
+        artifact_path=artifact_path,
         compilation_output=compilation_result,
         warnings=compile_warnings,
         error=captured_error,
     )
+
+
+def run_bytecode_file(
+    filename: str,
+    *,
+    log_modules: set[str],
+    dump_modules: set[str],
+    dump_path: str | None = None,
+) -> RunResult:
+    """加载并执行字节码产物。"""
+    if dump_path is None and dump_modules:
+        dump_path = create_dump_path(filename)
+
+    recorder = PipelineRecorder(
+        source_filename=filename,
+        log_modules=log_modules,
+        dump_modules=dump_modules,
+        dump_path=dump_path,
+    )
+
+    captured_error = None
+    exit_code = 0
+    vm = None
+    compilation_output = None
+    artifact_store = ArtifactStore()
+
+    try:
+        bytecode, metadata = artifact_store.load_bytecode(filename)
+        constant_pool = metadata.get("constant_pool", [])
+        lineno_table = metadata.get("lineno_table", [])
+        source_path = metadata.get("source_path") or filename
+        compilation_output = CompilerOutput(
+            bytecode=bytecode,
+            constant_pool=constant_pool,
+            function_compilation_results=metadata.get("function_compilation_results", {}),
+            labels=metadata.get("labels", {}),
+            lineno_table=lineno_table,
+        )
+        recorder.on_compiled(compilation_output)
+
+        recorder.log_vm_start()
+        from verbose_c.vm.core import VBCVirtualMachine
+
+        vm = VBCVirtualMachine(debug_log_collector=recorder.create_vm_log_collector())
+        exit_code = vm.excute(
+            bytecode=bytecode,
+            constants=constant_pool,
+            source_path=source_path,
+            lineno_table=lineno_table,
+            source_code=_read_source_lines(source_path),
+        )
+        recorder.log_vm_done()
+
+    except VBCRuntimeError as e:
+        captured_error = e
+        exit_code = 1
+        recorder.on_error(e)
+    except VBCCompileError as e:
+        captured_error = e
+        exit_code = 1
+        print(f"编译错误: 文件 {e.filepath}")
+        for error_line in e.message.split('\n'):
+            print(f"    {error_line}")
+        recorder.on_error(e)
+    except Exception as e:
+        captured_error = e
+        exit_code = 1
+        print(f"发生了一个意外的内部错误: {e}")
+        traceback.print_exc()
+        recorder.on_error(e)
+    finally:
+        if vm is not None:
+            recorder.on_memory(vm.memory)
+        final_path = recorder.finalize(success=captured_error is None)
+
+    return RunResult(
+        success=captured_error is None,
+        exit_code=exit_code,
+        dump_path=final_path,
+        artifact_path=os.path.abspath(filename),
+        compilation_output=compilation_output,
+        error=captured_error,
+    )
+
+
+def _read_source_lines(source_path: str | None) -> list[str]:
+    """读取源码行用于运行时错误上下文。"""
+    if not source_path or not os.path.exists(source_path):
+        return []
+    try:
+        with open(source_path, "r", encoding="utf-8") as file:
+            return file.read().split("\n")
+    except OSError:
+        return []
