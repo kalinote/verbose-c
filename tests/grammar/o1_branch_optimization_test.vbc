@@ -1,0 +1,63 @@
+// 测试点：O1 typed AST 简单分支优化。
+
+int main() {
+    int selected_true = 0;
+    int selected_false = 0;
+    int folded_condition = 0;
+    int untouched = 7;
+    int merged = 0;
+    int loop_guard = 5;
+
+    if (true) {
+        selected_true = 11;
+    } else {
+        selected_true = 99;
+    }
+
+    if (false) {
+        selected_false = 99;
+    } else {
+        selected_false = 22;
+    }
+
+    if (1 < 2) {
+        folded_condition = 33;
+    } else {
+        folded_condition = 99;
+    }
+
+    if (false) {
+        untouched = 99;
+    }
+
+    if (selected_true > 0) {
+        merged = 44;
+    } else {
+        merged = 44;
+    }
+
+    while (false) {
+        loop_guard = 99;
+    }
+
+    for (int skipped = 0; false; skipped = skipped + 1) {
+        loop_guard = 100;
+    }
+
+    write(STDOUT, "\n=== O1 Branch Optimization Test ===\n");
+    write(STDOUT, "selected_true: ");
+    write(STDOUT, selected_true);
+    write(STDOUT, ", selected_false: ");
+    write(STDOUT, selected_false);
+    write(STDOUT, ", folded_condition: ");
+    write(STDOUT, folded_condition);
+    write(STDOUT, ", untouched: ");
+    write(STDOUT, untouched);
+    write(STDOUT, ", merged: ");
+    write(STDOUT, merged);
+    write(STDOUT, ", loop_guard: ");
+    write(STDOUT, loop_guard);
+    write(STDOUT, "\n");
+
+    return 0;
+}

@@ -81,6 +81,13 @@ class NullNode(ASTNode):
     """
     def __init__(self, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+
+
+class ConstantValueNode(ASTNode):
+    """优化器内部使用的已求值常量节点。"""
+    def __init__(self, value, start_line: int | None = None, start_column: int | None = None, end_line: int | None = None, end_column: int | None = None) -> None:
+        super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
+        self.value = value
     
 class TypeNode(ASTNode):
     """

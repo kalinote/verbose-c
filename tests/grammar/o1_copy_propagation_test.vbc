@@ -1,0 +1,26 @@
+// 测试点：O1 typed AST 拷贝传播。
+
+int identity(int value) {
+    return value;
+}
+
+int main() {
+    int source = identity(4);
+    int copy = source;
+    int chained = copy;
+    int invalidated = chained;
+
+    source = 5;
+    invalidated = invalidated + source;
+
+    write(STDOUT, "\n=== O1 Copy Propagation Test ===\n");
+    write(STDOUT, "copy: ");
+    write(STDOUT, copy);
+    write(STDOUT, ", chained: ");
+    write(STDOUT, chained);
+    write(STDOUT, ", invalidated: ");
+    write(STDOUT, invalidated);
+    write(STDOUT, "\n");
+
+    return 0;
+}

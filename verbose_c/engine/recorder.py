@@ -227,6 +227,11 @@ class PipelineRecorder:
             self._append_section("字节码", self._format_bytecode_section(output.optimization_result.original_bytecode))
         if self._dump_opcode and output.bytecode and not output.optimization_result:
             self._append_section("字节码", self._format_bytecode_section(output.bytecode))
+        if self._dump_optimize and output.ast_optimization_result:
+            self._append_section(
+                "AST 优化",
+                self._format_ast_optimization_section(output.ast_optimization_result, output.function_compilation_results),
+            )
         if self._dump_optimize and output.optimization_result:
             self._append_section(
                 "优化字节码",
@@ -371,17 +376,25 @@ class PipelineRecorder:
 
     def _format_optimization_section(self, module_result, function_results: dict[str, Any]) -> str:
         lines = ["## 优化字节码\n\n"]
-        lines.extend(self._format_optimized_bytecode_result("module", module_result.optimized_bytecode, 3))
+        lines.extend(self._format_optimized_bytecode_result("module", module_result, 3))
         for func_name, result in function_results.items():
             opt_result = result.get("optimization_result") if isinstance(result, dict) else None
             if opt_result:
-                lines.extend(self._format_optimized_bytecode_result(func_name, opt_result.optimized_bytecode, 3))
+                lines.extend(self._format_optimized_bytecode_result(func_name, opt_result, 3))
         return "".join(lines)
 
-    def _format_optimized_bytecode_result(self, name: str, bytecode: list[tuple[Any, ...]], heading_level: int) -> list[str]:
+    def _format_optimized_bytecode_result(self, name: str, result: Any, heading_level: int) -> list[str]:
         heading = "#" * heading_level
+        stats = result.stats
         lines = [f"{heading} `{_escape_markdown_table_cell(name)}`\n\n"]
-        lines.extend(self._format_bytecode_table(bytecode))
+        lines.extend([
+            f"- 删除 NOP: `{stats.removed_nops}`\n",
+            f"- 删除不可达指令: `{stats.removed_unreachable}`\n",
+            f"- 删除无意义跳转: `{stats.removed_redundant_jumps}`\n",
+            f"- 合并跳转链: `{stats.redirected_jumps}`\n",
+            f"- 优化轮次: `{stats.passes}`\n\n",
+        ])
+        lines.extend(self._format_bytecode_table(result.optimized_bytecode))
         return lines
 
     def _format_bytecode_table(self, bytecode: list[tuple[Any, ...]]) -> list[str]:
@@ -392,6 +405,35 @@ class PipelineRecorder:
             else:
                 opcode_text = _escape_markdown_table_cell(f"{instruction[0].name} {instruction[1]!r}")
                 lines.append(f"| {i} | `{opcode_text}` |\n")
+        lines.append("\n")
+        return lines
+
+    def _format_ast_optimization_section(self, module_result, function_results: dict[str, Any]) -> str:
+        lines = ["## AST 优化\n\n"]
+        lines.extend(self._format_ast_optimization_result("module", module_result, 3))
+        for func_name, result in function_results.items():
+            opt_result = result.get("ast_optimization_result") if isinstance(result, dict) else None
+            if opt_result:
+                lines.extend(self._format_ast_optimization_result(func_name, opt_result, 3))
+        return "".join(lines)
+
+    def _format_ast_optimization_result(self, name: str, result: Any, heading_level: int) -> list[str]:
+        heading = "#" * heading_level
+        stats = result.stats
+        lines = [
+            f"{heading} `{_escape_markdown_table_cell(name)}`\n\n",
+            f"- 常量折叠: `{stats.folded_constants}`\n",
+            f"- 常量传播: `{stats.propagated_constants}`\n",
+            f"- 拷贝传播: `{stats.propagated_copies}`\n",
+            f"- 分支优化: `{stats.optimized_branches}`\n",
+            f"- 公共子表达式消除: `{stats.eliminated_common_subexpressions}`\n",
+            f"- 简单内联: `{stats.inlined_functions}`\n",
+        ]
+        if stats.skipped:
+            lines.append("\n| 跳过原因 | 次数 |\n")
+            lines.append("| --- | --- |\n")
+            for reason, count in sorted(stats.skipped.items()):
+                lines.append(f"| `{_escape_markdown_table_cell(reason)}` | {count} |\n")
         lines.append("\n")
         return lines
 

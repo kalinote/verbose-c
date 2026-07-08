@@ -64,8 +64,10 @@ class CompilerPass(str, Enum):
     
     ALL: 全部执行
     TYPE_CHECK: 类型检查
+    OPTIMIZE_AST: AST 优化
     GENERATE_CODE: 代码生成
     """
     ALL = "all"
     TYPE_CHECK = "type_check"
+    OPTIMIZE_AST = "optimize_ast"
     GENERATE_CODE = "generate_code"

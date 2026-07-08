@@ -52,6 +52,7 @@ class CompilerOutput:
     warnings: list[str] = field(default_factory=list)
     parser_generation_report: ParserGenerationReport | None = None
     optimization_result: Any | None = None
+    ast_optimization_result: Any | None = None
     dependencies: list[str] = field(default_factory=list)
 
 
@@ -236,6 +237,7 @@ def compile_module(
         warnings=compiler.warnings,
         parser_generation_report=context.parser_generation_report,
         optimization_result=opcode_gen.optimization_result,
+        ast_optimization_result=compiler.ast_optimization_result,
         dependencies=sorted(preprocessor.dependencies),
     )
     if recorder:

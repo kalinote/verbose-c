@@ -1,6 +1,9 @@
 from verbose_c.compiler.enum import ScopeType
+from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
+from verbose_c.object.t_null import VBCNull
+from verbose_c.object.t_string import VBCString
 from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
 from verbose_c.compiler.symbol import SymbolTable, SymbolKind, Symbol
@@ -337,6 +340,20 @@ class TypeChecker(VisitorBase):
 
     def visit_NullNode(self, node: NullNode) -> Type:
         return NullType()
+
+    def visit_ConstantValueNode(self, node: ConstantValueNode) -> Type:
+        value = node.value
+        if isinstance(value, VBCInteger):
+            return IntegerType(value._object_type)
+        if isinstance(value, VBCFloat):
+            return FloatType(value._object_type)
+        if isinstance(value, VBCBool):
+            return BoolType()
+        if isinstance(value, VBCString):
+            return StringType()
+        if isinstance(value, VBCNull):
+            return NullType()
+        return ErrorType()
 
     def visit_NameNode(self, node: NameNode) -> Type:
         if node.name == "__func__":

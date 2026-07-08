@@ -1,0 +1,27 @@
+// 测试点：O1 typed AST 公共子表达式消除。
+
+int identity(int value) {
+    return value;
+}
+
+int square_sum(int a, int b) {
+    return (a + b) * (a + b);
+}
+
+int main() {
+    int source = identity(4);
+    int init_value = (source + 5) * (source + 5);
+    int triple = (source + 6) + (source + 6) + (source + 6);
+    int returned = square_sum(source, 3);
+
+    write(STDOUT, "\n=== O1 CSE Test ===\n");
+    write(STDOUT, "init_value: ");
+    write(STDOUT, init_value);
+    write(STDOUT, ", triple: ");
+    write(STDOUT, triple);
+    write(STDOUT, ", returned: ");
+    write(STDOUT, returned);
+    write(STDOUT, "\n");
+
+    return 0;
+}

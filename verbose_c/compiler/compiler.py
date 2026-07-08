@@ -2,6 +2,7 @@ from verbose_c.compiler.enum import CompilerPass, ScopeType
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.compiler.opcode_generator_visitor import OpcodeGenerator
 from verbose_c.compiler.symbol import SymbolTable, SymbolKind
+from verbose_c.compiler.ast_optimizer import optimize_typed_ast
 from verbose_c.compiler.type_checker_visitor import TypeChecker
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.t_null import VBCNull
@@ -41,6 +42,7 @@ class Compiler:
 
         self._bytecode = []
         self._constant_pool = []
+        self._ast_optimization_result = None
 
     def _populate_builtins(self):
         # 加载内置函数
@@ -62,6 +64,10 @@ class Compiler:
     @property
     def opcode_generator(self):
         return self._opcode_generator
+
+    @property
+    def ast_optimization_result(self):
+        return self._ast_optimization_result
 
     @property
     def warnings(self):
@@ -88,7 +94,20 @@ class Compiler:
                 combined_error_message = "\n".join(self._type_checker.errors)
                 raise VBCCompileError(combined_error_message, filepath=self._source_path, warnings=self._type_checker.warnings)
         
-        if run_all or CompilerPass.GENERATE_CODE in passes:
+        should_generate = run_all or CompilerPass.GENERATE_CODE in passes
+        should_optimize_ast = (
+            self._optimize_level > 0
+            and (run_all or CompilerPass.OPTIMIZE_AST in passes or should_generate)
+        )
+
+        if should_optimize_ast:
+            self._ast_optimization_result = optimize_typed_ast(
+                self._target_ast,
+                self._symbol_table,
+                self._optimize_level,
+            )
+
+        if should_generate:
             # 代码生成
             self._opcode_generator.visit(self._target_ast)
             if self._scope_type == ScopeType.FUNCTION and (

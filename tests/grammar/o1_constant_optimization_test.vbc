@@ -1,0 +1,22 @@
+// 测试点：O1 typed AST 常量折叠与常量传播。
+
+int main() {
+    int folded = 1 + 2 * 3;
+    int propagated = folded + 4;
+    int guarded = 2;
+
+    if (propagated > 0) {
+        guarded = guarded + 1;
+    }
+
+    write(STDOUT, "\n=== O1 Constant Optimization Test ===\n");
+    write(STDOUT, "folded: ");
+    write(STDOUT, folded);
+    write(STDOUT, ", propagated: ");
+    write(STDOUT, propagated);
+    write(STDOUT, ", guarded: ");
+    write(STDOUT, guarded);
+    write(STDOUT, "\n");
+
+    return 0;
+}

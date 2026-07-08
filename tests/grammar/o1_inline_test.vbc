@@ -1,0 +1,34 @@
+// 测试点：O1 typed AST 简单内联。
+
+int add_small(int left, int right) {
+    return left + right;
+}
+
+int square_small(int value) {
+    return value * value;
+}
+
+int recursive_skip(int value) {
+    if (value <= 0) {
+        return 0;
+    }
+    return recursive_skip(value - 1);
+}
+
+int main() {
+    int base = 4;
+    int total = add_small(base, 3);
+    int squared = square_small(total);
+    int skipped = recursive_skip(1);
+
+    write(STDOUT, "\n=== O1 Inline Test ===\n");
+    write(STDOUT, "total: ");
+    write(STDOUT, total);
+    write(STDOUT, ", squared: ");
+    write(STDOUT, squared);
+    write(STDOUT, ", skipped: ");
+    write(STDOUT, skipped);
+    write(STDOUT, "\n");
+
+    return 0;
+}

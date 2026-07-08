@@ -393,6 +393,10 @@ class OpcodeGenerator(VisitorBase):
         const_index = self._add_constant(VBCNull())
         self._emit(Opcode.LOAD_CONSTANT, const_index)
 
+    def visit_ConstantValueNode(self, node: ConstantValueNode):
+        const_index = self._add_constant(node.value)
+        self._emit(Opcode.LOAD_CONSTANT, const_index)
+
     def visit_TypeNode(self, node: TypeNode):
         raise RuntimeError(f"{node.__class__.__name__} 节点不应该被 visit")
 
@@ -559,6 +563,24 @@ class OpcodeGenerator(VisitorBase):
 
     def visit_BlockNode(self, node: BlockNode):
         original_symbol_table = self.symbol_table
+        explicit_symbol_table = getattr(node, "_optimized_symbol_table", None)
+        if explicit_symbol_table is not None:
+            parent_table = getattr(node, "_optimized_parent_symbol_table", None)
+            parent_scope_index_after = getattr(node, "_optimized_parent_scope_index_after", None)
+            if parent_table is original_symbol_table and parent_scope_index_after is not None:
+                current_index = self._nested_scope_indices.get(original_symbol_table, 0)
+                self._nested_scope_indices[original_symbol_table] = max(current_index, parent_scope_index_after)
+
+            emit_runtime_scope = getattr(node, "_optimized_emit_runtime_scope", False)
+            self.symbol_table = explicit_symbol_table
+            if emit_runtime_scope:
+                self._emit(Opcode.ENTER_SCOPE)
+            for statement in node.statements:
+                self.visit(statement)
+            if emit_runtime_scope:
+                self._emit(Opcode.EXIT_SCOPE)
+            self.symbol_table = original_symbol_table
+            return
 
         current_index = self._nested_scope_indices.get(original_symbol_table, 0)
 
@@ -766,6 +788,8 @@ class OpcodeGenerator(VisitorBase):
             symbol = self.symbol_table.lookup_value(expr.name)
             if symbol is not None and symbol.const_value is not None:
                 return symbol.const_value
+        if isinstance(expr, ConstantValueNode) and isinstance(expr.value, VBCInteger):
+            return expr.value.value
         raise RuntimeError(f"内部错误: 无效的 case 常量节点 {expr!r}")
 
     def visit_SwitchNode(self, node: SwitchNode):
@@ -1033,6 +1057,7 @@ class OpcodeGenerator(VisitorBase):
             'constants': function_op_generator.constant_pool,
             'labels': function_op_generator.labels,
             'optimization_result': function_op_generator.optimization_result,
+            'ast_optimization_result': function_compiler.ast_optimization_result,
         }
 
         function_bytecode = function_op_generator.bytecode
@@ -1175,6 +1200,7 @@ class OpcodeGenerator(VisitorBase):
                     'constants': method_op_generator.constant_pool,
                     'labels': method_op_generator.labels,
                     'optimization_result': method_op_generator.optimization_result,
+                    'ast_optimization_result': method_compiler.ast_optimization_result,
                 }
 
                 function_bytecode = method_op_generator.bytecode
@@ -1287,6 +1313,14 @@ class OpcodeGenerator(VisitorBase):
         init_local_count = init_compiler.opcode_generator.symbol_table._next_local_address
         if init_local_count == 0:
             init_local_count = 1
+
+        self.function_compilation_results[f"{class_name}.__init__"] = {
+            'bytecode': init_op_generator.bytecode,
+            'constants': init_op_generator.constant_pool,
+            'labels': init_op_generator.labels,
+            'optimization_result': init_op_generator.optimization_result,
+            'ast_optimization_result': init_compiler.ast_optimization_result,
+        }
 
         vbc_init_method = VBCFunction(
             name="__init__",
