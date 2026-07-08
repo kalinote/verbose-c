@@ -799,6 +799,36 @@ class VBCVirtualMachine:
             self.memory.write(dest_base + i, self.memory.read(src_base + i))
         self._stack.push(VBCInteger(dest_base, VBCObjectType.INT))
 
+    def _pop_pointer_offset_operands(self, op_name: str) -> tuple[VBCPointer, int]:
+        """弹出指针和整数偏移操作数。"""
+        offset = self._stack.pop()
+        pointer = self._stack.pop()
+        if not isinstance(pointer, VBCPointer):
+            raise TypeError(f"{op_name} 的左操作数必须是指针，而不是 {type(pointer).__name__}")
+        if not isinstance(offset, VBCInteger):
+            raise TypeError(f"{op_name} 的右操作数必须是整数，而不是 {type(offset).__name__}")
+        return pointer, offset.value
+
+    @register_instruction(Opcode.POINTER_ADD)
+    def __handle_pointer_add(self):
+        pointer, offset = self._pop_pointer_offset_operands("指针加法")
+        self._stack.push(VBCPointer(pointer.address + offset, pointer.target_type))
+
+    @register_instruction(Opcode.POINTER_SUB)
+    def __handle_pointer_sub(self):
+        pointer, offset = self._pop_pointer_offset_operands("指针减法")
+        self._stack.push(VBCPointer(pointer.address - offset, pointer.target_type))
+
+    @register_instruction(Opcode.POINTER_DIFF)
+    def __handle_pointer_diff(self):
+        right = self._stack.pop()
+        left = self._stack.pop()
+        if not isinstance(left, VBCPointer) or not isinstance(right, VBCPointer):
+            raise TypeError("指针差值运算的两个操作数都必须是指针")
+        if left.target_type != right.target_type:
+            raise TypeError("指针差值运算要求两个指针目标类型相同")
+        self._stack.push(VBCInteger(left.address - right.address, VBCObjectType.INT))
+
     ## 对象与类操作类
     @register_instruction(Opcode.GET_PROPERTY)
     def __handle_get_property(self):

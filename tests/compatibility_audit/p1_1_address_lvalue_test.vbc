@@ -1,0 +1,38 @@
+// P1-1 更完整左值取址：数组元素、&*p 和结构体字段。
+
+struct Point {
+    int x;
+    int y;
+};
+
+int main() {
+    int arr[3] = {3, 4, 5};
+    int* second = &arr[1];
+    if (*second != 4) {
+        return 1;
+    }
+
+    int* same = &*second;
+    *same = 8;
+    if (arr[1] != 8) {
+        return 2;
+    }
+
+    struct Point point;
+    point.x = 10;
+    point.y = 20;
+    int* field = &point.y;
+    *field = 30;
+    if (point.y != 30) {
+        return 3;
+    }
+
+    struct Point* point_ptr = &point;
+    int* x_field = &point_ptr->x;
+    *x_field = 12;
+    if (point.x != 12) {
+        return 4;
+    }
+
+    return 0;
+}

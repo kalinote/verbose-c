@@ -1,0 +1,6 @@
+int main() {
+    int a = 1;
+    void* p = &a;
+    p++;
+    return 0;
+}

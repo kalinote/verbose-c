@@ -78,6 +78,9 @@ class Opcode(Enum):
     HALT                = 0xA1  # 停机指令
     DEBUG_PRINT         = 0xA2  # 调试输出
     SET_EXIT_CODE       = 0xA3  # 设置程序退出码
+    POINTER_ADD         = 0xA4  # 指针加整数槽位偏移
+    POINTER_SUB         = 0xA5  # 指针减整数槽位偏移
+    POINTER_DIFF        = 0xA6  # 同类型指针差值
     
     def __str__(self):
         """返回操作码的字符串表示"""

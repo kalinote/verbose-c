@@ -108,7 +108,7 @@ unary:
     | '-' operand=unary { UnaryOpNode(Operator.SUBTRACT, operand, LOCATIONS) }
     | '+' operand=unary { UnaryOpNode(Operator.ADD, operand, LOCATIONS) }
     | '!' operand=unary { UnaryOpNode(Operator.NOT, operand, LOCATIONS) }
-    | '&' operand=unary { UnaryOpNode(Operator.ADDRESS_OF, operand, LOCATIONS) }
+    | '&' operand=factor { UnaryOpNode(Operator.ADDRESS_OF, operand, LOCATIONS) }
     | member_update_expr
 member_update_expr:
     | base=member_expr '++' { UpdateExprNode(base, Operator.INCREMENT, is_prefix=False, LOCATIONS) }
@@ -119,7 +119,7 @@ member_expr:
     | member_expr '.' property=NAME { GetPropertyNode(member_expr, NameNode(property.string, LOCATIONS), LOCATIONS) }
     | member_expr '->' property=NAME { GetPropertyNode(member_expr, NameNode(property.string, LOCATIONS), via_pointer=True, LOCATIONS) }
     | member_expr '(' args=func_call_param? ')' { CallNode(member_expr, args or [], {}, LOCATIONS) }
-    | '*' member_expr { UnaryOpNode(Operator.DEREFERENCE, member_expr, LOCATIONS) }
+    | '*' operand=factor { UnaryOpNode(Operator.DEREFERENCE, operand, LOCATIONS) }
     | atom
 func_call_param[list[ASTNode]]: head=expr tail=(',' expr)* { [head] + [t[1] for t in tail] }
 

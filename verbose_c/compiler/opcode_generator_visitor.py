@@ -151,6 +151,14 @@ class OpcodeGenerator(VisitorBase):
             return type_obj.kind
         if isinstance(type_obj, BoolType):
             return VBCObjectType.BOOL
+        if isinstance(type_obj, StringType):
+            return VBCObjectType.STRING
+        if isinstance(type_obj, PointerType):
+            return VBCObjectType.POINTER
+        if isinstance(type_obj, ClassType):
+            return VBCObjectType.INSTANCE
+        if isinstance(type_obj, StructType):
+            return VBCObjectType.STRUCT
         return None
 
     def _element_type_enum_from_type(self, type_obj: Type | None):
@@ -184,14 +192,24 @@ class OpcodeGenerator(VisitorBase):
         else:
             raise RuntimeError(f"不支持的数组下标基址: {type(base).__name__}")
 
-    def _subscript_operand(self, node: SubscriptNode) -> tuple[int, VBCObjectType]:
+    def _subscript_operand(self, node: SubscriptNode) -> tuple[int, VBCObjectType] | None:
         array_type = getattr(node, "_array_type", None)
+        if array_type is None:
+            return None
         if not isinstance(array_type, ArrayType):
             raise RuntimeError("内部错误: SubscriptNode 缺少有效的 _array_type")
         elem_enum = self._element_type_enum_from_type(array_type.element_type)
         if elem_enum is None:
             raise RuntimeError("内部错误: 不支持的数组元素类型")
         return array_type.size, elem_enum
+
+    def _pointer_target_enum(self, pointer_type: PointerType | None) -> VBCObjectType:
+        if not isinstance(pointer_type, PointerType):
+            raise RuntimeError("内部错误: 缺少有效的指针目标类型")
+        target_enum = self._element_type_enum_from_type(pointer_type.base_type)
+        if target_enum is None:
+            raise RuntimeError("内部错误: 不支持的指针目标类型")
+        return target_enum
 
     def _get_or_add_struct_constant(self, struct_type: StructType) -> int:
         """将结构体布局注册进当前常量池，依赖 _add_constant 的按值去重实现"一个类型一份描述对象"。"""
@@ -226,6 +244,68 @@ class OpcodeGenerator(VisitorBase):
         if target_enum is not None:
             self._emit(Opcode.CAST, target_enum)
 
+    def _emit_expr_with_array_decay(self, expr_node: ASTNode) -> None:
+        self.visit(expr_node)
+        self._emit_array_decay_if_needed(expr_node)
+
+    def _emit_pointer_index_address(self, base: ASTNode, index: ASTNode) -> None:
+        self._emit_expr_with_array_decay(base)
+        self.visit(index)
+        self._emit(Opcode.POINTER_ADD)
+
+    def _emit_lvalue_address(self, target: ASTNode) -> None:
+        """生成左值地址，栈顶结果为 VBCPointer。"""
+        if isinstance(target, NameNode):
+            symbol = self.symbol_table.lookup_value(target.name)
+            if symbol is None:
+                raise RuntimeError(f"未定义的标识符: {target.name}")
+            if isinstance(symbol.type_, ArrayType):
+                raise RuntimeError(f"内部错误: 数组变量 '{target.name}' 不能直接取地址")
+            target_enum = self._element_type_enum_from_type(symbol.type_)
+            if target_enum is None:
+                raise RuntimeError(f"内部错误: 不支持取地址的类型 '{symbol.type_}'")
+            identifier = symbol.address if symbol.address is not None else symbol.name
+            self._emit(Opcode.LOAD_ADDRESS, (identifier, target_enum))
+            return
+
+        if isinstance(target, UnaryOpNode) and target.op == Operator.DEREFERENCE:
+            self._emit_expr_with_array_decay(target.expr)
+            return
+
+        if isinstance(target, SubscriptNode):
+            pointer_type = getattr(target, "_subscript_base_type", None)
+            if not isinstance(pointer_type, PointerType):
+                raise RuntimeError("内部错误: 下标表达式缺少指针基址类型")
+            operand = self._subscript_operand(target)
+            if operand is not None:
+                _size, elem_enum = operand
+                self._emit_subscript_base(target.base)
+                self.visit(target.index)
+                self._emit(Opcode.ADD)
+                self._emit(Opcode.ARRAY_DECAY, elem_enum)
+            else:
+                self._emit_pointer_index_address(target.base, target.index)
+            return
+
+        if isinstance(target, GetPropertyNode):
+            struct_type = getattr(target, "_struct_type", None)
+            if not isinstance(struct_type, StructType):
+                raise RuntimeError("内部错误: 当前仅支持结构体字段取地址")
+            field_type = struct_type.field_type(target.property_name.name)
+            target_enum = self._element_type_enum_from_type(field_type)
+            if target_enum is None:
+                raise RuntimeError(f"内部错误: 不支持字段 '{target.property_name.name}' 的取地址类型")
+            _slot_count, offset = self._struct_field_operand(target, struct_type)
+            self._emit_struct_base(target.obj, target.via_pointer)
+            if offset:
+                offset_index = self._add_constant(VBCInteger(offset, VBCObjectType.INT))
+                self._emit(Opcode.LOAD_CONSTANT, offset_index)
+                self._emit(Opcode.ADD)
+            self._emit(Opcode.ARRAY_DECAY, target_enum)
+            return
+
+        raise RuntimeError(f"不支持取地址的左值: {type(target).__name__}")
+
     def _emit_load_lvalue(self, target: ASTNode) -> None:
         """将左值当前值压栈：NameNode / *p / obj.field"""
         if isinstance(target, NameNode):
@@ -251,10 +331,15 @@ class OpcodeGenerator(VisitorBase):
                 self._emit(Opcode.LOAD_CONSTANT, property_name)
                 self._emit(Opcode.GET_PROPERTY)
         elif isinstance(target, SubscriptNode):
-            size, elem_enum = self._subscript_operand(target)
-            self._emit_subscript_base(target.base)
-            self.visit(target.index)
-            self._emit(Opcode.LOAD_INDEX, (size, elem_enum))
+            operand = self._subscript_operand(target)
+            if operand is not None:
+                size, elem_enum = operand
+                self._emit_subscript_base(target.base)
+                self.visit(target.index)
+                self._emit(Opcode.LOAD_INDEX, (size, elem_enum))
+            else:
+                self._emit_lvalue_address(target)
+                self._emit(Opcode.LOAD_BY_POINTER)
         else:
             raise RuntimeError(f"不支持的左值读取目标: {type(target).__name__}")
 
@@ -286,11 +371,17 @@ class OpcodeGenerator(VisitorBase):
                 self._emit(Opcode.SET_PROPERTY)
                 self._emit(Opcode.POP)
         elif isinstance(target, SubscriptNode):
-            size, elem_enum = self._subscript_operand(target)
-            self._emit_subscript_base(target.base)
-            self.visit(target.index)
-            self._emit(Opcode.STORE_INDEX, (size, elem_enum))
-            self._emit(Opcode.POP)
+            operand = self._subscript_operand(target)
+            if operand is not None:
+                size, elem_enum = operand
+                self._emit_subscript_base(target.base)
+                self.visit(target.index)
+                self._emit(Opcode.STORE_INDEX, (size, elem_enum))
+                self._emit(Opcode.POP)
+            else:
+                self._emit_lvalue_address(target)
+                self._emit(Opcode.STORE_BY_POINTER)
+                self._emit(Opcode.POP)
         else:
             raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
 
@@ -321,11 +412,16 @@ class OpcodeGenerator(VisitorBase):
                 self._emit(Opcode.LOAD_CONSTANT, property_name)
                 self._emit(Opcode.SET_PROPERTY)
         elif isinstance(target, SubscriptNode):
-            size, elem_enum = self._subscript_operand(target)
+            operand = self._subscript_operand(target)
             self._emit(Opcode.DUP)
-            self._emit_subscript_base(target.base)
-            self.visit(target.index)
-            self._emit(Opcode.STORE_INDEX, (size, elem_enum))
+            if operand is not None:
+                size, elem_enum = operand
+                self._emit_subscript_base(target.base)
+                self.visit(target.index)
+                self._emit(Opcode.STORE_INDEX, (size, elem_enum))
+            else:
+                self._emit_lvalue_address(target)
+                self._emit(Opcode.STORE_BY_POINTER)
         else:
             raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
 
@@ -451,34 +547,11 @@ class OpcodeGenerator(VisitorBase):
         
     # 表达式
     def visit_UnaryOpNode(self, node: UnaryOpNode):
-        # 取地址只能对标识符进行，所以不需要计算表达式
         if node.op == Operator.ADDRESS_OF:
-            if not isinstance(node.expr, NameNode):
-                raise RuntimeError(f"内部错误: 取地址操作的目标不是一个有效的标识符, 在 {node.start_line} 行")
-            
-            symbol = self.symbol_table.lookup_value(node.expr.name)
-            if symbol is None:
-                raise RuntimeError(f"内部错误: 无法找到符号 '{node.expr.name}', 在 {node.start_line} 行")
-
-            identifier = symbol.address if symbol.address is not None else symbol.name
-            if isinstance(symbol.type_, IntegerType):
-                target_type_enum = symbol.type_.kind
-            if isinstance(symbol.type_, FloatType):
-                target_type_enum = symbol.type_.kind
-            if isinstance(symbol.type_, StringType):
-                target_type_enum = VBCObjectType.STRING
-            if isinstance(symbol.type_, BoolType):
-                target_type_enum = VBCObjectType.BOOL
-            if isinstance(symbol.type_, PointerType):
-                target_type_enum = VBCObjectType.POINTER
-            if isinstance(symbol.type_, ClassType):
-                target_type_enum = VBCObjectType.INSTANCE
-            if isinstance(symbol.type_, StructType):
-                target_type_enum = VBCObjectType.STRUCT
-            self._emit(Opcode.LOAD_ADDRESS, (identifier, target_type_enum))
+            self._emit_lvalue_address(node.expr)
             return
         
-        self.visit(node.expr)
+        self._emit_expr_with_array_decay(node.expr)
         if node.op == Operator.DEREFERENCE:
             self._emit(Opcode.LOAD_BY_POINTER)
         elif node.op == Operator.SUBTRACT:
@@ -526,8 +599,23 @@ class OpcodeGenerator(VisitorBase):
             
             self._mark_label(end_label)
         else:
-            self.visit(node.left)
-            self.visit(node.right)
+            self._emit_expr_with_array_decay(node.left)
+            self._emit_expr_with_array_decay(node.right)
+
+            pointer_arithmetic = getattr(node, "_pointer_arithmetic", None)
+            if pointer_arithmetic == "add":
+                self._emit(Opcode.POINTER_ADD)
+                return
+            if pointer_arithmetic == "add_reversed":
+                self._emit(Opcode.SWAP)
+                self._emit(Opcode.POINTER_ADD)
+                return
+            if pointer_arithmetic == "sub":
+                self._emit(Opcode.POINTER_SUB)
+                return
+            if pointer_arithmetic == "diff":
+                self._emit(Opcode.POINTER_DIFF)
+                return
 
             match node.op:
                 case Operator.ADD:
@@ -658,6 +746,7 @@ class OpcodeGenerator(VisitorBase):
                 setattr(node.init_exp, "inferred_type", symbol.type_.kind)
             self.visit(node.init_exp)
             self._emit_implicit_cast_if_needed(node.init_exp)
+            self._emit_array_decay_if_needed(node.init_exp)
         else:
             # 没有初始化，将默认值null压入栈
             const_index = self._add_constant(VBCNull())
@@ -670,27 +759,22 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
 
     def visit_SubscriptNode(self, node: SubscriptNode):
-        size, elem_enum = self._subscript_operand(node)
-        self._emit_subscript_base(node.base)
-        self.visit(node.index)
-        self._emit(Opcode.LOAD_INDEX, (size, elem_enum))
+        self._emit_load_lvalue(node)
 
     def visit_AssignmentNode(self, node: AssignmentNode):
         """生成赋值字节码，并在赋值边界执行隐式转换。"""
         if isinstance(node.target, UnaryOpNode) and node.target.op == Operator.DEREFERENCE:
             self.visit(node.value)
             self._emit_implicit_cast_if_needed(node.value)
+            self._emit_array_decay_if_needed(node.value)
             self.visit(node.target.expr)
             self._emit(Opcode.STORE_BY_POINTER)
             return
 
         if isinstance(node.target, SubscriptNode):
-            size, elem_enum = self._subscript_operand(node.target)
             self.visit(node.value)
             self._emit_implicit_cast_if_needed(node.value)
-            self._emit_subscript_base(node.target.base)
-            self.visit(node.target.index)
-            self._emit(Opcode.STORE_INDEX, (size, elem_enum))
+            self._emit_store_lvalue_keep(node.target)
             return
 
         if isinstance(node.target, (NameNode, GetPropertyNode)):
@@ -720,14 +804,28 @@ class OpcodeGenerator(VisitorBase):
         self._emit_load_lvalue(node.left)
         self.visit(node.right)
         self._emit_implicit_cast_if_needed(node.right)
-        self._emit(op_to_opcode[node.op])
+        pointer_arithmetic = getattr(node, "_pointer_arithmetic", None)
+        if pointer_arithmetic == "add":
+            self._emit(Opcode.POINTER_ADD)
+        elif pointer_arithmetic == "sub":
+            self._emit(Opcode.POINTER_SUB)
+        else:
+            self._emit(op_to_opcode[node.op])
         self._emit_implicit_cast_if_needed(node)
         self._emit_store_lvalue_keep(node.left)
 
     def visit_UpdateExprNode(self, node: UpdateExprNode):
         base = node.base
         step_index = self._add_constant(VBCInteger(1, VBCObjectType.INT))
-        arith_op = Opcode.ADD if node.op == Operator.INCREMENT else Opcode.SUBTRACT
+        base_type = getattr(base, "_subscript_base_type", None)
+        if isinstance(base, NameNode):
+            symbol = self.symbol_table.lookup_value(base.name)
+            base_type = symbol.type_ if symbol is not None else None
+        arith_op = Opcode.POINTER_ADD if isinstance(base_type, PointerType) and node.op == Operator.INCREMENT else (
+            Opcode.POINTER_SUB if isinstance(base_type, PointerType) else (
+                Opcode.ADD if node.op == Operator.INCREMENT else Opcode.SUBTRACT
+            )
+        )
 
         if node.is_prefix:
             self._emit_load_lvalue(base)

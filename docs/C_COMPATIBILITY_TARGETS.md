@@ -233,16 +233,21 @@
 ### 【依赖 C-P0-7】P1-1 指针语义增强
 
 - 目标能力：
-  - 指针算术：`ptr + n`、`ptr - n`、`ptr1 - ptr2`（步长按指向类型大小）
-  - `&` 作用于更完整左值场景（数组元素、下标表达式等）
-  - 数组—指针等价：`a[i]` 与 `*(a + i)`、数组名衰变与 `&a[0]` 等（依赖 P0-7）
+  - 【已完成】指针算术：`ptr + n`、`ptr - n`、`ptr1 - ptr2`（MVP 以 VM 堆槽位为元素步长）
+  - 【已完成】`&` 作用于更完整左值场景（数组元素、指针下标、`&*p`、结构体字段）
+  - 【已完成】数组—指针等价：`a[i]` 与 `*(a + i)`、数组名衰变与 `&a[0]` 等（依赖 P0-7）
 - 当前现状：
-  - 【部分完成】基础取址 `&var`、解引用 `*p`、指针比较与标量条件
-  - 【未完成】指针算术、数组元素取址、指针差值类型为 `ptrdiff_t` 等价语义
+  - 【已完成】基础取址 `&var`、解引用 `*p`、指针比较与标量条件
+  - 【已完成】`pointer + int`、`int + pointer`、`pointer - int`、同类型 `pointer - pointer`，差值暂返回 `int` 作为 `ptrdiff_t` MVP 等价语义
+  - 【已完成】`SubscriptNode` 同时支持数组和指针：数组下标保留边界检查，指针下标按 `*(p + i)` 生成
+  - 【已完成】新增 `POINTER_ADD` / `POINTER_SUB` / `POINTER_DIFF` 字节码与 VM 运行时实现；`VBCPointer` 支持同类型指针大小比较
+  - 【MVP 边界】`void*` 算术、`&arr`（指向数组的指针）、真实字节级步长、标准 `ptrdiff_t` typedef 不在本期
 - 验收标准：
-  - 数组与指针联动场景可运行（如 `for (p = arr; p < arr + n; p++)`）
-  - 指针运算结果与元素步长语义一致
-  - 非法指针算术（如 `int*` 与 `float*` 相减）编译报错
+  - 【已完成】数组与指针联动场景可运行（如 `for (p = arr; p < arr + n; p++)`，见 `tests/compatibility_audit/p1_1_pointer_loop_test.vbc`）
+  - 【已完成】指针运算结果与元素步长语义一致（见 `p1_1_pointer_arithmetic_test.vbc`）
+  - 【已完成】`a[i]`、`p[i]`、`*(a + i)`、`*(p + i)` 与 `&a[0]` 等价场景通过（见 `p1_1_pointer_subscript_equivalence_test.vbc`）
+  - 【已完成】数组元素、`&*p`、结构体字段取址可运行（见 `p1_1_address_lvalue_test.vbc`）
+  - 【已完成】非法指针算术（如 `int*` 与 `float*` 相减、指针相加、`void*` 自增）编译报错（见 `tests/error/pointer_*.vbc`）
 
 
 
@@ -714,4 +719,3 @@ verbose_c/error/
 - 有对应回归测试用例
 - 已更新用户文档（语法说明与示例）
 - 不引入现有 C 兼容能力回退
-

@@ -161,6 +161,19 @@ class TypeChecker(VisitorBase):
     def _mark_array_decay(self, expr_node: ASTNode) -> None:
         setattr(expr_node, "_needs_array_decay", True)
 
+    def _decay_array_expression(self, expr_node: ASTNode, type_: Type) -> Type:
+        """在表达式上下文中把数组标记为衰变后的元素指针。"""
+        if isinstance(type_, ArrayType):
+            self._mark_array_decay(expr_node)
+            return PointerType(type_.element_type)
+        return type_
+
+    def _is_same_pointer_type(self, left_type: Type, right_type: Type) -> bool:
+        return isinstance(left_type, PointerType) and isinstance(right_type, PointerType) and left_type == right_type
+
+    def _is_pointer_arithmetic_type(self, type_: Type) -> bool:
+        return isinstance(type_, PointerType) and not isinstance(type_.base_type, VoidType)
+
     def _resolve_declared_type(self, type_node: TypeNode, array_dims: list[ASTNode | None], line: int | None) -> Type:
         base_type = self.resolve_type_node(type_node)
         if isinstance(base_type, ErrorType):
@@ -369,7 +382,7 @@ class TypeChecker(VisitorBase):
 
     def visit_UnaryOpNode(self, node: UnaryOpNode) -> Type:
         if node.op == Operator.DEREFERENCE:
-            operand_type = self.visit(node.expr)
+            operand_type = self._decay_array_expression(node.expr, self.visit(node.expr))
             if isinstance(operand_type, ErrorType):
                 return ErrorType()
             if not isinstance(operand_type, PointerType):
@@ -379,9 +392,11 @@ class TypeChecker(VisitorBase):
             return operand_type.base_type
 
         if node.op == Operator.ADDRESS_OF:
-            # 取地址操作符只能用于变量名
-            if not isinstance(node.expr, NameNode):
-                self.errors.append(f"语法错误: 取地址操作符 '&' 只能用于变量, 在 {node.start_line} 行")
+            if not (
+                isinstance(node.expr, (NameNode, SubscriptNode, GetPropertyNode))
+                or (isinstance(node.expr, UnaryOpNode) and node.expr.op == Operator.DEREFERENCE)
+            ):
+                self.errors.append(f"语法错误: 取地址操作符 '&' 只能用于可取地址的左值, 在 {node.start_line} 行")
                 return ErrorType()
             
             operand_type = self.visit(node.expr)
@@ -414,14 +429,10 @@ class TypeChecker(VisitorBase):
 
     def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
         """检查二元表达式类型并推导结果类型。"""
-        left_type = self.visit(node.left)
-        right_type = self.visit(node.right)
+        left_type = self._decay_array_expression(node.left, self.visit(node.left))
+        right_type = self._decay_array_expression(node.right, self.visit(node.right))
 
         if isinstance(left_type, ErrorType) or isinstance(right_type, ErrorType):
-            return ErrorType()
-
-        if isinstance(left_type, ArrayType) or isinstance(right_type, ArrayType):
-            self.errors.append(f"类型错误: 数组不能用于二元运算 '{node.op.value}', 在 {node.start_line} 行")
             return ErrorType()
 
         op = node.op
@@ -435,6 +446,44 @@ class TypeChecker(VisitorBase):
 
         # 算术运算
         if op in (Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE):
+            is_left_pointer = isinstance(left_type, PointerType)
+            is_right_pointer = isinstance(right_type, PointerType)
+            if is_left_pointer or is_right_pointer:
+                if op == Operator.ADD:
+                    if is_left_pointer and self._is_integer_index_type(right_type):
+                        if not self._is_pointer_arithmetic_type(left_type):
+                            self.errors.append(f"类型错误: void* 不支持指针算术, 在 {node.start_line} 行")
+                            return ErrorType()
+                        node._pointer_arithmetic = "add"
+                        return left_type
+                    if self._is_integer_index_type(left_type) and is_right_pointer:
+                        if not self._is_pointer_arithmetic_type(right_type):
+                            self.errors.append(f"类型错误: void* 不支持指针算术, 在 {node.start_line} 行")
+                            return ErrorType()
+                        node._pointer_arithmetic = "add_reversed"
+                        return right_type
+                    self.errors.append(f"类型错误: 指针加法只能用于指针和整数, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                    return ErrorType()
+
+                if op == Operator.SUBTRACT:
+                    if is_left_pointer and self._is_integer_index_type(right_type):
+                        if not self._is_pointer_arithmetic_type(left_type):
+                            self.errors.append(f"类型错误: void* 不支持指针算术, 在 {node.start_line} 行")
+                            return ErrorType()
+                        node._pointer_arithmetic = "sub"
+                        return left_type
+                    if self._is_same_pointer_type(left_type, right_type):
+                        if not self._is_pointer_arithmetic_type(left_type):
+                            self.errors.append(f"类型错误: void* 不支持指针差值运算, 在 {node.start_line} 行")
+                            return ErrorType()
+                        node._pointer_arithmetic = "diff"
+                        return IntegerType(VBCObjectType.INT)
+                    self.errors.append(f"类型错误: 指针减法只能用于指针减整数或相同类型指针相减, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                    return ErrorType()
+
+                self.errors.append(f"类型错误: 操作符 '{op.value}' 不能用于指针类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                return ErrorType()
+
             # 规则 1: 字符串拼接
             if op == Operator.ADD and isinstance(left_type, StringType) and isinstance(right_type, StringType):
                 return StringType()
@@ -470,10 +519,20 @@ class TypeChecker(VisitorBase):
                 )
                 if pointer_null_compare:
                     return BoolType()
+                if isinstance(left_type, PointerType) or isinstance(right_type, PointerType):
+                    if self._is_same_pointer_type(left_type, right_type):
+                        return BoolType()
+                    self.errors.append(f"类型错误: 无法比较不兼容的指针类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                    return ErrorType()
+            elif isinstance(left_type, PointerType) or isinstance(right_type, PointerType):
+                if self._is_same_pointer_type(left_type, right_type):
+                    return BoolType()
+                self.errors.append(f"类型错误: 指针大小比较要求两侧类型相同, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                return ErrorType()
 
             # 允许数字之间，或相同类型之间比较
             is_numeric = isinstance(left_type, (IntegerType, FloatType)) and isinstance(right_type, (IntegerType, FloatType))
-            is_same_type = type(left_type) is type(right_type)
+            is_same_type = type(left_type) is type(right_type) and left_type == right_type
 
             if not (is_numeric or is_same_type):
                 self.errors.append(f"类型错误: 无法比较不兼容的类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
@@ -524,6 +583,8 @@ class TypeChecker(VisitorBase):
             if not self._is_assignable(declared_type, init_type):
                 self.errors.append(f"类型错误: 不能将类型 '{init_type}' 的值赋给类型为 '{declared_type}' 的变量 '{node.name.name}', 在 {node.start_line} 行")
             else:
+                if isinstance(declared_type, PointerType) and isinstance(init_type, ArrayType):
+                    self._mark_array_decay(node.init_exp)
                 self._warn_implicit_conversion_if_needed(declared_type, init_type, node.start_line, f"变量 '{node.name.name}' 初始化")
                 self._mark_implicit_cast_if_needed(node.init_exp, declared_type, init_type)
 
@@ -535,14 +596,11 @@ class TypeChecker(VisitorBase):
         return VoidType()
 
     def visit_SubscriptNode(self, node: SubscriptNode) -> Type:
-        base_type = self._visit_subscript_base_type(node.base)
+        base_type = self._decay_array_expression(node.base, self._visit_subscript_base_type(node.base))
         if isinstance(base_type, ErrorType):
             return ErrorType()
-        if not isinstance(base_type, ArrayType):
-            if isinstance(base_type, PointerType):
-                self.errors.append(f"类型错误: 指针类型不能用于下标访问, 在 {node.start_line} 行")
-            else:
-                self.errors.append(f"类型错误: 下标操作只能用于数组, 而不是 '{base_type}', 在 {node.start_line} 行")
+        if not isinstance(base_type, PointerType):
+            self.errors.append(f"类型错误: 下标操作只能用于数组或指针, 而不是 '{base_type}', 在 {node.start_line} 行")
             return ErrorType()
 
         index_type = self.visit(node.index)
@@ -552,8 +610,14 @@ class TypeChecker(VisitorBase):
             self.errors.append(f"类型错误: 数组下标必须是整数类型, 而不是 '{index_type}', 在 {node.start_line} 行")
             return ErrorType()
 
-        node._array_type = base_type
-        return base_type.element_type
+        if isinstance(base_type.base_type, VoidType):
+            self.errors.append(f"类型错误: void* 不能用于下标访问, 在 {node.start_line} 行")
+            return ErrorType()
+        node._subscript_base_type = base_type
+        array_type = self._visit_subscript_base_type(node.base)
+        if isinstance(array_type, ArrayType):
+            node._array_type = array_type
+        return base_type.base_type
 
     def _visit_subscript_base_type(self, base: ASTNode) -> Type:
         if isinstance(base, NameNode):
@@ -658,6 +722,8 @@ class TypeChecker(VisitorBase):
             if not self._is_assignable(target_type, value_type):
                 self.errors.append(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的指针目标, 在 {node.start_line} 行")
                 return ErrorType()
+            if isinstance(target_type, PointerType) and isinstance(value_type, ArrayType):
+                self._mark_array_decay(node.value)
             self._warn_implicit_conversion_if_needed(target_type, value_type, node.start_line, "指针解引用赋值")
             self._mark_implicit_cast_if_needed(node.value, target_type, value_type)
             return target_type
@@ -699,6 +765,9 @@ class TypeChecker(VisitorBase):
         cast_target = getattr(bin_expr, "_implicit_cast_target", None)
         if cast_target is not None:
             setattr(node, "_implicit_cast_target", cast_target)
+        pointer_arithmetic = getattr(bin_expr, "_pointer_arithmetic", None)
+        if pointer_arithmetic is not None:
+            setattr(node, "_pointer_arithmetic", pointer_arithmetic)
         if isinstance(final_result, ErrorType):
             return ErrorType()
 
@@ -718,8 +787,13 @@ class TypeChecker(VisitorBase):
         base_type = self.visit(base)
         if isinstance(base_type, ErrorType):
             return ErrorType()
+        if isinstance(base_type, PointerType):
+            if isinstance(base_type.base_type, VoidType):
+                self.errors.append(f"类型错误: void* 不支持自增/自减, 在 {node.start_line} 行")
+                return ErrorType()
+            return base_type
         if not isinstance(base_type, (IntegerType, FloatType)):
-            self.errors.append(f"类型错误: 自增/自减操作数必须是整数或浮点类型, 而不是 '{base_type}', 在 {node.start_line} 行")
+            self.errors.append(f"类型错误: 自增/自减操作数必须是整数、浮点或指针类型, 而不是 '{base_type}', 在 {node.start_line} 行")
             return ErrorType()
         return base_type
 

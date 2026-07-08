@@ -34,9 +34,35 @@ class VBCPointer(VBCObject):
 
     def __eq__(self, other):
         from verbose_c.object.t_bool import VBCBool
+        from verbose_c.object.t_null import VBCNull
         if isinstance(other, VBCPointer):
             return VBCBool(self.address == other.address and self.target_type == other.target_type)
+        if isinstance(other, VBCNull):
+            return VBCBool(self.address == 0)
         return VBCBool(False)
+
+    def __ne__(self, other):
+        from verbose_c.object.t_bool import VBCBool
+        eq_result = self.__eq__(other)
+        return VBCBool(not eq_result.value)
+
+    def _compare_address(self, other, op_name: str, op):
+        from verbose_c.object.t_bool import VBCBool
+        if isinstance(other, VBCPointer) and self.target_type == other.target_type:
+            return VBCBool(op(self.address, other.address))
+        raise TypeError(f"无法对不同类型的指针使用 '{op_name}' 运算符")
+
+    def __lt__(self, other):
+        return self._compare_address(other, "<", lambda a, b: a < b)
+
+    def __le__(self, other):
+        return self._compare_address(other, "<=", lambda a, b: a <= b)
+
+    def __gt__(self, other):
+        return self._compare_address(other, ">", lambda a, b: a > b)
+
+    def __ge__(self, other):
+        return self._compare_address(other, ">=", lambda a, b: a >= b)
 
     def __bool__(self):
         return self.address != 0

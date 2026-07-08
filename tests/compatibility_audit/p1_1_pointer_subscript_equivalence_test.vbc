@@ -1,0 +1,29 @@
+// P1-1 数组、指针、下标和解引用等价语义。
+
+int main() {
+    int arr[3] = {5, 6, 7};
+    int* p = arr;
+    int* first = &arr[0];
+
+    if (*first != arr[0]) {
+        return 1;
+    }
+    if (arr[2] != *(arr + 2)) {
+        return 2;
+    }
+    if (p[1] != *(p + 1)) {
+        return 3;
+    }
+
+    p[2] = 11;
+    if (arr[2] != 11) {
+        return 4;
+    }
+
+    *(arr + 1) = 9;
+    if (arr[1] != 9) {
+        return 5;
+    }
+
+    return 0;
+}
