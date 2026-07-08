@@ -77,3 +77,8 @@ python -m verbose_c.cli example.vbc --debug-vm --log all
 ```bash
 nuitka verbose_c/cli.py --follow-imports --standalone
 ```
+
+## O1 字节码优化
+```bash
+python -m verbose_c.cli example.vbc -O1
+```

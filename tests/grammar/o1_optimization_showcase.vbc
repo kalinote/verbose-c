@@ -1,0 +1,20 @@
+// 测试点：O1 字节码优化展示。
+// return 分支之后会生成不可达的作用域退出/跳转指令，-O1 可明显减少指令数。
+
+int choose(int value) {
+    if (value > 0) {
+        return value;
+    } else {
+        return 0;
+    }
+}
+
+int main() {
+    int total = 0;
+
+    for (int i = 0; i < 4; i = i + 1) {
+        total = total + choose(i);
+    }
+
+    return total;
+}

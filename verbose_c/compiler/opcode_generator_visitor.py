@@ -48,14 +48,16 @@ class OpcodeGenerator(VisitorBase):
     """
     根据AST生成机器码的访问者类
     """
-    def __init__(self, symbol_table: SymbolTable, source_path: str | None = None, function_name: str | None = None):
+    def __init__(self, symbol_table: SymbolTable, source_path: str | None = None, function_name: str | None = None, optimize_level: int = 0):
         self.symbol_table: SymbolTable = symbol_table
         self.source_path = source_path
         self.current_function_name: str | None = function_name
+        self.optimize_level = optimize_level
         self.bytecode: list[tuple] = []
         self.labels = {}
         self.constant_pool = []
         self.lineno_table: list[tuple[int, int]] = [] # (字节码偏移, 行号)
+        self.optimization_result = None
         self.current_line = -1
         self.next_label_id = 0
         self.loop_stack: list[LoopContext] = []  # 循环标签栈，后续支持嵌套循环和多层跳出
@@ -117,6 +119,29 @@ class OpcodeGenerator(VisitorBase):
     def _mark_label(self, label):
         """标记标签位置"""
         self.labels[label] = len(self.bytecode)
+
+    def resolve_labels(self):
+        for i, instruction in enumerate(self.bytecode):
+            if len(instruction) != 2:
+                continue
+            opcode, operand = instruction
+            if isinstance(operand, str) and operand in self.labels:
+                self.bytecode[i] = (opcode, self.labels[operand])
+
+    def optimize_bytecode(self):
+        from verbose_c.compiler.bytecode_optimizer import optimize_bytecode
+
+        if self.optimize_level <= 0:
+            return None
+        if self.optimize_level != 1:
+            raise RuntimeError(f"Unsupported optimize level: {self.optimize_level}")
+
+        result = optimize_bytecode(self.bytecode, self.lineno_table, self.labels)
+        self.bytecode = result.optimized_bytecode
+        self.lineno_table = result.optimized_lineno_table
+        self.labels = result.optimized_labels
+        self.optimization_result = result
+        return result
 
     def _runtime_type_enum_from_type(self, type_obj: Type | None):
         """把编译期 Type 映射为运行时 CAST 所需的对象类型枚举。"""
@@ -978,7 +1003,7 @@ class OpcodeGenerator(VisitorBase):
             
         function_compiler = Compiler(
             target_ast=node.body,
-            optimize_level=0,
+            optimize_level=self.optimize_level,
             symbol_table=function_symbol_table,
             scope_type=ScopeType.FUNCTION,
             source_path=self.source_path,
@@ -1006,7 +1031,8 @@ class OpcodeGenerator(VisitorBase):
         self.function_compilation_results[node.name.name] = {
             'bytecode': function_op_generator.bytecode,
             'constants': function_op_generator.constant_pool,
-            'labels': function_op_generator.labels
+            'labels': function_op_generator.labels,
+            'optimization_result': function_op_generator.optimization_result,
         }
 
         function_bytecode = function_op_generator.bytecode
@@ -1119,7 +1145,7 @@ class OpcodeGenerator(VisitorBase):
                 # 传递已经由TypeChecker填充好的符号表
                 method_compiler = Compiler(
                     target_ast=statement.body,
-                    optimize_level=0,
+                    optimize_level=self.optimize_level,
                     symbol_table=method_symbol_table,
                     scope_type=ScopeType.FUNCTION,
                     source_path=self.source_path,
@@ -1147,7 +1173,8 @@ class OpcodeGenerator(VisitorBase):
                 self.function_compilation_results[f"{class_name}.{method_name}"] = {
                     'bytecode': method_op_generator.bytecode,
                     'constants': method_op_generator.constant_pool,
-                    'labels': method_op_generator.labels
+                    'labels': method_op_generator.labels,
+                    'optimization_result': method_op_generator.optimization_result,
                 }
 
                 function_bytecode = method_op_generator.bytecode
@@ -1236,7 +1263,7 @@ class OpcodeGenerator(VisitorBase):
         # TypeChecker已经填充了'this'和参数，这里直接编译
         init_compiler = Compiler(
             target_ast=final_init_method_node.body,
-            optimize_level=0,
+            optimize_level=self.optimize_level,
             symbol_table=init_symbol_table,
             scope_type=ScopeType.FUNCTION,
             source_path=self.source_path,

@@ -1,9 +1,10 @@
 from verbose_c.compiler.enum import CompilerPass, ScopeType
-from verbose_c.compiler.enum import CompilerPass, ScopeType
+from verbose_c.compiler.opcode import Opcode
 from verbose_c.compiler.opcode_generator_visitor import OpcodeGenerator
 from verbose_c.compiler.symbol import SymbolTable, SymbolKind
 from verbose_c.compiler.type_checker_visitor import TypeChecker
 from verbose_c.object.enum import VBCObjectType
+from verbose_c.object.t_null import VBCNull
 from verbose_c.parser.parser.ast.node import ASTNode
 from verbose_c.typing.types import IntegerType
 from verbose_c.vm.builtins_functions import BUILTIN_FUNCTION_SIGNATURES, BUILTIN_CONSTANTS
@@ -35,6 +36,7 @@ class Compiler:
             self._symbol_table,
             source_path=self._source_path,
             function_name=function_name,
+            optimize_level=optimize_level,
         )
 
         self._bytecode = []
@@ -89,5 +91,14 @@ class Compiler:
         if run_all or CompilerPass.GENERATE_CODE in passes:
             # 代码生成
             self._opcode_generator.visit(self._target_ast)
+            if self._scope_type == ScopeType.FUNCTION and (
+                not self._opcode_generator.bytecode
+                or self._opcode_generator.bytecode[-1][0] != Opcode.RETURN
+            ):
+                const_index = self._opcode_generator._add_constant(VBCNull())
+                self._opcode_generator._emit(Opcode.LOAD_CONSTANT, const_index)
+                self._opcode_generator._emit(Opcode.RETURN)
+            self._opcode_generator.resolve_labels()
+            self._opcode_generator.optimize_bytecode()
             self._bytecode = self._opcode_generator.bytecode
             self._constant_pool = self._opcode_generator.constant_pool

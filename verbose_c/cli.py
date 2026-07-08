@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument("--compile-only", help="只编译不执行源代码", action="store_true")
     parser.add_argument("-o", "--output", help="指定 .vbb 字节码产物输出路径")
     parser.add_argument("-rp", "--refresh-parser", help="重新生成解析器", action="store_true")
+    parser.add_argument("-O", dest="optimize_level", type=int, default=0, choices=[0, 1], help="优化等级：-O0 或 -O1")
     return parser.parse_args()
 
 
@@ -27,7 +28,7 @@ def _parse_module_sets(args):
     log_modules = set()
     dump_modules = set()
     allowed_log_modules = {"compile", "vm", "parser", "all"}
-    allowed_dump_modules = {"parser", "preprocess", "tokens", "ast", "opcode", "const", "label", "vm", "memory", "all"}
+    allowed_dump_modules = {"parser", "preprocess", "tokens", "ast", "opcode", "optimize", "const", "label", "vm", "memory", "all"}
 
     if args.log is not None:
         log_modules = {module.strip().lower() for module in args.log.split(",") if module.strip()}
@@ -95,6 +96,7 @@ def main():
                 execute=not args.compile_only,
                 refresh_parser=args.refresh_parser,
                 show_warnings=not args.no_warn,
+                optimize_level=args.optimize_level,
             )
         sys.exit(result.exit_code)
 

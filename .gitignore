@@ -20,3 +20,4 @@ parser.py
 .cursor/
 
 __vbccache__/
+.venv/

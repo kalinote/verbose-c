@@ -154,6 +154,7 @@ class PipelineRecorder:
         self._dump_tokens = dump_all or "tokens" in dump_modules
         self._dump_ast = dump_all or "ast" in dump_modules
         self._dump_opcode = dump_all or "opcode" in dump_modules
+        self._dump_optimize = dump_all or "optimize" in dump_modules
         self._dump_const = dump_all or "const" in dump_modules
         self._dump_label = dump_all or "label" in dump_modules
         self._dump_vm = dump_all or "vm" in dump_modules
@@ -222,11 +223,20 @@ class PipelineRecorder:
     def on_compiled(self, output) -> None:
         if not self.dump_path:
             return
-        if self._dump_opcode and output.bytecode:
-            self._append_section("操作码", self._format_bytecode_section(output.bytecode))
+        if self._dump_opcode and output.bytecode and output.optimization_result:
+            self._append_section("字节码", self._format_bytecode_section(output.optimization_result.original_bytecode))
+        if self._dump_opcode and output.bytecode and not output.optimization_result:
+            self._append_section("字节码", self._format_bytecode_section(output.bytecode))
+        if self._dump_optimize and output.optimization_result:
+            self._append_section(
+                "优化字节码",
+                self._format_optimization_section(output.optimization_result, output.function_compilation_results),
+            )
         if self._dump_const and output.constant_pool:
             self._append_section("常量池", self._format_constant_pool_section(output.constant_pool))
-        if self._dump_label and output.labels:
+        if self._dump_label and output.labels and output.optimization_result:
+            self._append_section("标签", self._format_labels_section(output.optimization_result.original_labels))
+        if self._dump_label and output.labels and not output.optimization_result:
             self._append_section("标签", self._format_labels_section(output.labels))
         if self._dump_opcode and output.function_compilation_results:
             self._append_section("函数编译结果", self._format_function_results_section(output.function_compilation_results))
@@ -349,7 +359,7 @@ class PipelineRecorder:
         return "".join(lines)
 
     def _format_bytecode_section(self, bytecode: list[tuple[Any, ...]]) -> str:
-        lines = ["## 操作码\n\n", "| 索引 | 指令 |\n", "| --- | --- |\n"]
+        lines = ["## 字节码\n\n", "| 索引 | 指令 |\n", "| --- | --- |\n"]
         for i, instruction in enumerate(bytecode):
             if len(instruction) == 1:
                 lines.append(f"| {i} | `{instruction[0].name}` |\n")
@@ -358,6 +368,32 @@ class PipelineRecorder:
                 lines.append(f"| {i} | `{opcode_text}` |\n")
         lines.append("\n")
         return "".join(lines)
+
+    def _format_optimization_section(self, module_result, function_results: dict[str, Any]) -> str:
+        lines = ["## 优化字节码\n\n"]
+        lines.extend(self._format_optimized_bytecode_result("module", module_result.optimized_bytecode, 3))
+        for func_name, result in function_results.items():
+            opt_result = result.get("optimization_result") if isinstance(result, dict) else None
+            if opt_result:
+                lines.extend(self._format_optimized_bytecode_result(func_name, opt_result.optimized_bytecode, 3))
+        return "".join(lines)
+
+    def _format_optimized_bytecode_result(self, name: str, bytecode: list[tuple[Any, ...]], heading_level: int) -> list[str]:
+        heading = "#" * heading_level
+        lines = [f"{heading} `{_escape_markdown_table_cell(name)}`\n\n"]
+        lines.extend(self._format_bytecode_table(bytecode))
+        return lines
+
+    def _format_bytecode_table(self, bytecode: list[tuple[Any, ...]]) -> list[str]:
+        lines = ["| 索引 | 指令 |\n", "| --- | --- |\n"]
+        for i, instruction in enumerate(bytecode):
+            if len(instruction) == 1:
+                lines.append(f"| {i} | `{instruction[0].name}` |\n")
+            else:
+                opcode_text = _escape_markdown_table_cell(f"{instruction[0].name} {instruction[1]!r}")
+                lines.append(f"| {i} | `{opcode_text}` |\n")
+        lines.append("\n")
+        return lines
 
     def _format_constant_pool_section(self, constants: list[Any]) -> str:
         lines = ["## 常量池\n\n", "| 索引 | 值 |\n", "| --- | --- |\n"]
@@ -378,11 +414,14 @@ class PipelineRecorder:
         lines = ["## 函数编译结果\n\n"]
         for func_name, result in function_results.items():
             lines.append(f"### 函数 `{func_name}`\n\n")
-            if result.get("bytecode"):
+            opt_result = result.get("optimization_result") if isinstance(result, dict) else None
+            bytecode = opt_result.original_bytecode if opt_result else result.get("bytecode")
+            labels = opt_result.original_labels if opt_result else result.get("labels")
+            if bytecode:
                 lines.append("#### 操作码\n\n")
                 lines.append("| 索引 | 指令 |\n")
                 lines.append("| --- | --- |\n")
-                for i, instruction in enumerate(result["bytecode"]):
+                for i, instruction in enumerate(bytecode):
                     if len(instruction) == 1:
                         lines.append(f"| {i} | `{instruction[0].name}` |\n")
                     else:
@@ -397,11 +436,11 @@ class PipelineRecorder:
                     constant_text = _escape_markdown_table_cell(repr(constant))
                     lines.append(f"| {i} | `{constant_text}` |\n")
                 lines.append("\n")
-            if result.get("labels"):
+            if labels:
                 lines.append("#### 标签\n\n")
                 lines.append("| 标签 | 位置 |\n")
                 lines.append("| --- | --- |\n")
-                for label, pos in result["labels"].items():
+                for label, pos in labels.items():
                     lines.append(f"| `{label}` | {pos} |\n")
                 lines.append("\n")
         return "".join(lines)

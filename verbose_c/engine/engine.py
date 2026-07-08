@@ -50,6 +50,7 @@ class CompilerOutput:
     lineno_table: list[tuple[int, int]] | None = None
     warnings: list[str] = field(default_factory=list)
     parser_generation_report: ParserGenerationReport | None = None
+    optimization_result: Any | None = None
 
 
 @dataclass
@@ -165,6 +166,7 @@ def compile_module(
     file_path: str,
     refresh_parser: bool = False,
     recorder: PipelineRecorder | None = None,
+    optimize_level: int = 0,
 ) -> CompilerOutput:
     """
     编译单个模块文件，分阶段执行并在每阶段完成后通知 recorder。
@@ -215,7 +217,7 @@ def compile_module(
     if recorder:
         recorder.on_ast(ast_node)
 
-    compiler = Compiler(ast_node, source_path=file_path)
+    compiler = Compiler(ast_node, source_path=file_path, optimize_level=optimize_level)
     compiler.compile()
     opcode_gen = compiler.opcode_generator
     context.warnings = compiler.warnings
@@ -230,7 +232,8 @@ def compile_module(
         processed_code="",
         lineno_table=opcode_gen.lineno_table,
         warnings=compiler.warnings,
-        parser_generation_report=context.parser_generation_report
+        parser_generation_report=context.parser_generation_report,
+        optimization_result=opcode_gen.optimization_result,
     )
     if recorder:
         recorder.on_compiled(output)
@@ -289,6 +292,7 @@ def run_source_file(
     execute: bool = True,
     refresh_parser: bool = False,
     show_warnings: bool = True,
+    optimize_level: int = 0,
 ) -> RunResult:
     """编译并可选执行单个源文件，由 recorder 负责 log 与 dump 输出。"""
     if dump_path is None and dump_modules:
@@ -315,6 +319,7 @@ def run_source_file(
             file_path=filename,
             refresh_parser=refresh_parser,
             recorder=recorder,
+            optimize_level=optimize_level,
         )
         compile_warnings = compilation_result.warnings or []
         if show_warnings and compile_warnings:
