@@ -1,0 +1,20 @@
+// 测试点：IR lowering 覆盖常量、局部变量、算术、比较、显式 return。
+
+int main() {
+    write(STDOUT, "\n=== IR Arithmetic And Locals Test ===\n");
+
+    int left = 9;
+    int right = 4;
+    int total = (left + right) * 2 - 5;
+    bool bigger = total > 20;
+
+    write(STDOUT, "total = ");
+    write(STDOUT, total);
+    write(STDOUT, "\nbigger = ");
+    write(STDOUT, bigger);
+    write(STDOUT, "\n");
+
+    return total;
+}
+
+main();

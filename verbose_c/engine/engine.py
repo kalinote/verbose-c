@@ -43,6 +43,8 @@ class CompilerOutput:
     """用于封装单次编译结果的数据类。"""
     bytecode: list[tuple[Any, ...]]
     constant_pool: list[Any]
+    ir_program: Any | None = None
+    ir_error: Exception | None = None
     function_compilation_results: dict[str, Any] = field(default_factory=dict)
     labels: dict[str, int] = field(default_factory=dict)
     tokens: list[Token] | None = None
@@ -170,6 +172,7 @@ def compile_module(
     refresh_parser: bool = False,
     recorder: PipelineRecorder | None = None,
     optimize_level: int = 0,
+    require_ir: bool = False,
 ) -> CompilerOutput:
     """
     编译单个模块文件，分阶段执行并在每阶段完成后通知 recorder。
@@ -240,6 +243,14 @@ def compile_module(
         ast_optimization_result=compiler.ast_optimization_result,
         dependencies=sorted(preprocessor.dependencies),
     )
+    from verbose_c.compiler.ir import lower_compiler_output_to_ir
+
+    try:
+        output.ir_program = lower_compiler_output_to_ir(output)
+    except Exception as error:
+        if require_ir:
+            raise
+        output.ir_error = error
     if recorder:
         recorder.on_compiled(output)
     return output
@@ -370,6 +381,7 @@ def run_source_file(
                 refresh_parser=refresh_parser,
                 recorder=recorder,
                 optimize_level=optimize_level,
+                require_ir=("all" in dump_modules or "ir" in dump_modules),
             )
             compile_warnings = compilation_result.warnings or []
             if show_warnings and compile_warnings:

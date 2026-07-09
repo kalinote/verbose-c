@@ -71,3 +71,4 @@ class CompilerPass(str, Enum):
     TYPE_CHECK = "type_check"
     OPTIMIZE_AST = "optimize_ast"
     GENERATE_CODE = "generate_code"
+    LOWER_IR = "lower_ir"

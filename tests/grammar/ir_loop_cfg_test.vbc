@@ -1,0 +1,31 @@
+// 测试点：IR lowering 覆盖 while/for 循环、回边和循环内局部变量更新。
+
+int sum_to(int limit) {
+    int index = 0;
+    int total = 0;
+
+    while (index < limit) {
+        total = total + index;
+        index = index + 1;
+    }
+
+    return total;
+}
+
+int main() {
+    write(STDOUT, "\n=== IR Loop CFG Test ===\n");
+
+    int total = sum_to(5);
+
+    for (int i = 0; i < 3; i = i + 1) {
+        total = total + i;
+    }
+
+    write(STDOUT, "loop total = ");
+    write(STDOUT, total);
+    write(STDOUT, "\n");
+
+    return total;
+}
+
+main();

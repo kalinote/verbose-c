@@ -1149,20 +1149,23 @@ class OpcodeGenerator(VisitorBase):
                 if isinstance(operand, str) and operand in function_op_generator.labels:
                     function_op_generator.bytecode[i] = (opcode, function_op_generator.labels[operand])
         
-        # 收集函数编译结果
-        self.function_compilation_results[node.name.name] = {
-            'bytecode': function_op_generator.bytecode,
-            'constants': function_op_generator.constant_pool,
-            'labels': function_op_generator.labels,
-            'optimization_result': function_op_generator.optimization_result,
-            'ast_optimization_result': function_compiler.ast_optimization_result,
-        }
-
         function_bytecode = function_op_generator.bytecode
         function_constants = function_op_generator.constant_pool
         
         param_count = len(node.args)
         local_count = function_symbol_table._next_local_address
+
+        # 收集函数编译结果
+        self.function_compilation_results[node.name.name] = {
+            'bytecode': function_op_generator.bytecode,
+            'constants': function_op_generator.constant_pool,
+            'labels': function_op_generator.labels,
+            'lineno_table': function_op_generator.lineno_table,
+            'param_count': param_count,
+            'local_count': local_count,
+            'optimization_result': function_op_generator.optimization_result,
+            'ast_optimization_result': function_compiler.ast_optimization_result,
+        }
 
         vbc_function = VBCFunction(
             name=node.name.name,
@@ -1292,20 +1295,23 @@ class OpcodeGenerator(VisitorBase):
                         if isinstance(operand, str) and operand in method_op_generator.labels:
                             method_op_generator.bytecode[i] = (opcode, method_op_generator.labels[operand])
                 
-                # 收集函数编译结果
-                self.function_compilation_results[f"{class_name}.{method_name}"] = {
-                    'bytecode': method_op_generator.bytecode,
-                    'constants': method_op_generator.constant_pool,
-                    'labels': method_op_generator.labels,
-                    'optimization_result': method_op_generator.optimization_result,
-                    'ast_optimization_result': method_compiler.ast_optimization_result,
-                }
-
                 function_bytecode = method_op_generator.bytecode
                 function_constants = method_op_generator.constant_pool
                 
                 param_count = len(statement.args)
                 local_count = method_compiler.opcode_generator.symbol_table._next_local_address
+
+                # 收集函数编译结果
+                self.function_compilation_results[f"{class_name}.{method_name}"] = {
+                    'bytecode': method_op_generator.bytecode,
+                    'constants': method_op_generator.constant_pool,
+                    'labels': method_op_generator.labels,
+                    'lineno_table': method_op_generator.lineno_table,
+                    'param_count': param_count,
+                    'local_count': local_count,
+                    'optimization_result': method_op_generator.optimization_result,
+                    'ast_optimization_result': method_compiler.ast_optimization_result,
+                }
 
                 vbc_method = VBCFunction(
                     name=method_name,
@@ -1416,6 +1422,9 @@ class OpcodeGenerator(VisitorBase):
             'bytecode': init_op_generator.bytecode,
             'constants': init_op_generator.constant_pool,
             'labels': init_op_generator.labels,
+            'lineno_table': init_op_generator.lineno_table,
+            'param_count': len(final_init_args),
+            'local_count': init_local_count,
             'optimization_result': init_op_generator.optimization_result,
             'ast_optimization_result': init_compiler.ast_optimization_result,
         }

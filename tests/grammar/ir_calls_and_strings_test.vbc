@@ -1,0 +1,28 @@
+// 测试点：IR lowering 覆盖函数调用、字符串常量、布尔返回和自动 main 退出码路径。
+
+int double_value(int value) {
+    return value * 2;
+}
+
+bool is_even(int value) {
+    return value % 2 == 0;
+}
+
+int main() {
+    write(STDOUT, "\n=== IR Calls And Strings Test ===\n");
+
+    string label = "answer";
+    int doubled = double_value(21);
+    bool even = is_even(doubled);
+
+    write(STDOUT, label);
+    write(STDOUT, " = ");
+    write(STDOUT, doubled);
+    write(STDOUT, "\neven = ");
+    write(STDOUT, even);
+    write(STDOUT, "\n");
+
+    return doubled;
+}
+
+main();

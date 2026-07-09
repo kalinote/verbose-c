@@ -73,6 +73,13 @@ python -m verbose_c.cli --compile-parser
 python -m verbose_c.cli example.vbc --debug-vm --log all
 ```
 
+### 导出 IR 与控制流图
+```bash
+python -m verbose_c.cli example.vbc --dump ir --compile-only
+```
+
+`--dump` 支持 `parser`、`tokens`、`preprocess`、`ast`、`opcode`、`ir`、`optimize`、`const`、`label`、`vm`、`memory`、`all`。
+
 ## 编译为可执行文件
 ```bash
 nuitka verbose_c/cli.py --follow-imports --standalone

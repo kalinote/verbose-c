@@ -1,0 +1,25 @@
+// 测试点：IR lowering 覆盖 if/else CFG、条件跳转和空栈合流。
+
+int main() {
+    write(STDOUT, "\n=== IR Branch CFG Test ===\n");
+
+    int value = 0;
+
+    if (value < 0) {
+        write(STDOUT, "negative\n");
+    } else {
+        if (value == 0) {
+            write(STDOUT, "zero\n");
+        } else {
+            write(STDOUT, "positive\n");
+        }
+    }
+
+    write(STDOUT, "branch result = ");
+    write(STDOUT, 6);
+    write(STDOUT, "\n");
+
+    return 6;
+}
+
+main();
