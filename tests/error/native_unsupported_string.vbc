@@ -1,0 +1,5 @@
+int main() {
+    string label = "native";
+    return 0;
+}
+

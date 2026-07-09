@@ -1,0 +1,11 @@
+int main() {
+    int left = 9;
+    int right = 4;
+    int total = (left + right) * 2 - 5;
+    bool bigger = total > 20;
+    if (bigger) {
+        return total;
+    }
+    return 0;
+}
+

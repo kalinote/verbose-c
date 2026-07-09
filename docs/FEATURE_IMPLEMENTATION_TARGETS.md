@@ -13,9 +13,9 @@
 4.  F-P1-8  增量编译与依赖追踪         【已完成】源未变时复用 .vbb
 5.  F-P2-1  IR 与控制流图              【已完成】操作码 lowering 到三地址码 IR / CFG
 6.  F-P2-2  O2/O3 优化等级             【未完成】IR/CFG 层高级优化
-7.  F-P2-3  AOT C 后端                 【未完成】三地址码 IR → C / exe
-8.  F-P2-4  AOT 运行时 libvbcrt        【未完成】IR 后端运行时 ABI
-9.  F-P2-5  Native 机器码后端           【未完成】IR → LLVM/汇编/对象文件
+7.  F-P2-3  Native 后端设计与目标 ABI   【未完成】目标平台、调用约定、机器级 IR
+8.  F-P2-4  x64 机器码后端 MVP          【未完成】IR → 自研机器码生成
+9.  F-P2-5  PE/COFF 可执行文件与运行时   【未完成】机器码 → 独立 exe
 10. F-P3-2  热点识别与 JIT 报告         【未完成】统计热点，不生成机器码
 11. F-P3-3  JIT 代码缓存与可执行内存    【未完成】trampoline 与代码页
 12. F-P3-4  受限整数热循环 JIT MVP      【未完成】首版 JIT 执行
@@ -23,7 +23,7 @@
 14. F-P3-6  OSR 栈上替换               【未完成】长循环中途切入 JIT，可选
 ```
 
-跨文档前置：F-P1-8 依赖 C-P1-6；F-P2-3 依赖 C-P1-8；F-P2-4 依赖 C-P1-5；F-P3-5 依赖 C-P1-7。
+跨文档前置：F-P1-8 依赖 C-P1-6；F-P2-3 依赖 C-P1-8；F-P2-5 依赖 C-P1-5；F-P3-5 依赖 C-P1-7。
 
 ---
 
@@ -268,7 +268,7 @@
 
 ## 5. P2 目标（增强项：优化与 AOT 编译）
 
-> 后端管线目标形态：**typed AST → 栈式操作码 → 三地址码 IR / CFG → IR 优化 → C 后端或 native 后端 → 可执行文件**。IR 必须基于现有操作码序列 lowering 得到，不从 AST 旁路生成。首个 AOT 闭环建议优先选择 `emit-c`，避免过早绑定手写机器码和平台 ABI。
+> 后端管线目标形态：**typed AST → 栈式操作码 → 三地址码 IR / CFG → IR 优化 → native 后端 → 机器码 / PE 可执行文件**。IR 必须基于现有操作码序列 lowering 得到，不从 AST 旁路生成。教学主线以自研 native 编译链路为核心目标，`emit-c` 只能作为可选参考后端或调试对照，不作为第一版 AOT 闭环。
 
 ### P2-1 中间表示（IR）与控制流图
 
@@ -308,47 +308,60 @@
   - 优化前后 IR 校验器均通过：基本块入口栈状态已被消解为显式值，跳转目标合法，临时变量先定义后使用
   - 有副作用表达式不被错误折叠或删除
 
-### 【依赖 C-P1-8】【依赖 F-P2-1】P2-3 AOT C 后端（第一版独立二进制路径）
+### 【依赖 C-P1-8】【依赖 F-P2-1】P2-3 Native 后端设计与目标 ABI
 
 - 目标能力：
-  - 【未完成】支持 `--emit-c`：将受限三地址码 IR 生成 C 源码；AOT C 后端不直接消费 AST 或栈式字节码
-  - 【未完成】支持 `--emit-exe` 或 `--target=native`：调用系统 C 编译器生成独立可执行文件
-  - 【未完成】MVP 支持 P2-1 已覆盖的整数、布尔、字符串常量、局部变量、函数调用、`if`、`while`、`for`、全局引用、基础数组/指针/结构体内存读写，以及最小内置输出调用；具体哪些 IR 指令可生成 C 由 P2-3 后端子集决定
-  - 【未完成】定义 IR 到 C 的映射规则：临时变量、局部变量槽位、基本块标签、条件跳转、返回值、函数调用和内置函数调用
-  - 【未完成】不支持的 IR 指令、类型或语言能力（如类、GC 对象、复杂指针、动态内置函数）在 AOT 模式下明确报错
+  - 【已完成】确立第一版 native 目标平台：Windows x64 MVP；后续再扩展 Linux/macOS 或其他架构
+  - 【已完成】定义面向机器码生成的后端 IR / 机器级 IR（Machine IR）：指令选择前后的表示、虚拟寄存器、栈槽、基本块标签、跳转边和调用边
+  - 【已完成】定义最小 ABI：整数/布尔值表示、函数参数与返回值传递、栈帧布局、调用者/被调用者保存寄存器、栈对齐、退出码传递
+  - 【已完成】定义 IR 到 Machine IR 的 lowering 规则：临时变量、局部变量槽位、基本块标签、条件跳转、返回值、函数调用、`SET_EXIT_CODE`
+  - 【已完成】明确第一版 native 子集：整数、布尔、局部变量、全局函数引用、函数调用、`if`、`while`、`for`、`int main()` 退出码闭环；`void main()` 的完整 native 返回语义后续随返回类型元数据完善
+  - 【已完成】不支持的 IR 指令、类型或语言能力（如类、GC 对象、复杂指针、动态内置函数、完整字符串运行时）在 native 模式下明确报错
+  - 【已完成】保留可选 `--emit-c` 的定位说明：只作为参考后端、调试输出或行为对照，不作为 AOT 主线和完成判定
 - 当前现状：
-  - 无 AOT 后端；`.vbc` 只能编译为内存字节码并由 Python VM 执行
+  - 已新增 `verbose_c/compiler/native/`：包含目标平台、Windows x64 ABI、Machine IR 数据结构、IR 到 Machine IR lowering、校验器、formatter 与 `NativeLoweringError`
+  - `CompilerOutput` 已新增 `machine_program` / `machine_error`；源码编译后可尝试生成 Machine IR，未显式请求时失败不影响 VM 执行
+  - CLI 已支持 `--dump machine`；显式请求 `machine` / `all` 时 native lowering 失败作为编译错误输出
+  - `.vbb` 格式未变更，Machine IR 不写入字节码产物
 - 验收标准：
-  - `hello world`、整数运算、条件分支、循环、函数调用样例可生成 C，并可编译为独立可执行文件
-  - 生成程序的 stdout、stderr 和退出码与 VM 解释执行一致
-  - AOT 模式遇到不支持 IR 指令或类型时失败信息包含 opcode / IR 指令名称、特性名称和源码位置
+  - 【已完成】文档化 Windows x64 MVP 的 ABI、栈帧、寄存器约定和受支持 IR 子集
+  - 【已完成】给定简单 IR 函数，可生成结构化 Machine IR dump，显示虚拟寄存器、栈槽、基本块和跳转关系
+  - 【已完成】native 模式遇到不支持 IR 指令或类型时，失败信息包含 opcode / IR 指令名称、特性名称和源码位置
 
-### 【依赖 C-P1-5】【依赖 F-P2-3】P2-4 AOT 运行时（libvbcrt MVP）
+### 【依赖 F-P2-3】P2-4 x64 机器码后端 MVP
 
 - 目标能力：
-  - 【未完成】定义 AOT 程序所需的最小运行时 ABI：启动入口、退出码、受支持内置函数、错误上报、基础堆分配和后续数组存储
-  - 【未完成】明确 IR 后端如何调用 libvbcrt：函数命名、参数/返回值表示、布尔与整数布局、字符串常量、最小 I/O 和运行时错误通路
-  - 【未完成】明确 Python VM 对象模型与 AOT 运行时对象模型的兼容边界；首版只保证 P2-3 受支持 IR 子集与 VM 行为一致
+  - 【未完成】实现 x64 指令编码器或极小汇编器：可从 Machine IR 生成机器码字节序列，而不是调用系统 C 编译器
+  - 【未完成】实现基础指令选择：整数常量、局部变量 load/store、整数加减乘除/取模、比较、条件跳转、无条件跳转、函数调用、返回
+  - 【未完成】实现最小寄存器分配：MVP 可先用保守栈槽分配或线性扫描；寄存器不足时 spill 到栈槽
+  - 【未完成】生成可 dump 的机器码清单：偏移、机器码字节、伪汇编、对应 IR 指令和源码行号
+  - 【未完成】提供 `--emit-asm` 或 `--dump machine` 作为教学观察入口；该输出用于阅读和测试，不依赖外部汇编器完成主线闭环
+  - 【未完成】可选提供 `--run-native-memory` 调试模式：在受控场景下将机器码放入可执行内存运行，用于在 PE 文件闭环前验证代码生成正确性
+- 当前现状：
+  - 未开始；当前项目无指令编码器、寄存器分配器、机器码缓冲区或 native dump
+- 验收标准：
+  - 纯整数/布尔函数子集可从同一 IR 生成 x64 机器码，并通过机器码 dump 验证控制流和返回值
+  - `int add(int a, int b) { return a + b; }`、条件分支、简单循环、函数调用样例在 native 调试执行路径中与 VM 结果一致
+  - 寄存器分配结果可 dump，便于教学验证
+  - 不支持的 IR 指令不会被静默跳过或错误生成机器码
+
+### 【依赖 C-P1-5】【依赖 F-P2-4】P2-5 PE/COFF 可执行文件与运行时 MVP
+
+- 目标能力：
+  - 【未完成】实现 Windows x64 PE/COFF 最小可执行文件写出：DOS 头、PE 头、section 表、`.text`、`.rdata`、导入表、入口点和重定位策略
+  - 【未完成】将 P2-4 生成的机器码写入 `.text`，生成可直接由操作系统加载的 `.exe`，不经由系统 C 编译器
+  - 【未完成】定义 native 运行时 ABI：程序启动入口、退出码、运行时错误上报、最小内置输出、基础堆分配和后续数组/结构体存储
+  - 【未完成】首版运行时可直接生成为机器码片段或作为项目自带对象片段嵌入；不要求通过 C 源码编译得到
+  - 【未完成】支持 `--emit-exe` 或 `--target=native`：从源码经 IR / native 后端生成独立可执行文件
   - 【未完成】后续支持字符串、结构体、指针、数组对象和可选 GC 安全点
 - 当前现状：
   - 运行时对象、内存管理、GC 和内置函数主要位于 Python `verbose_c/vm`、`verbose_c/object`
+  - 无 PE/COFF 写出器、native runtime ABI 或 native 可执行文件生成入口
 - 验收标准：
-  - 由三地址码 IR 生成的 AOT 程序可调用最小内置函数并正确返回退出码
-  - AOT 运行时和 VM 对同一受支持子集表现一致
-  - 文档说明 AOT 暂不支持的运行时能力，以及每个受支持 IR 调用到 libvbcrt 的 ABI 约定
-
-### 【依赖 F-P2-1】【依赖 F-P2-3】【依赖 F-P2-4】P2-5 Native 机器码后端（C 后端之后）
-
-- 目标能力：
-  - 【未完成】在 AOT C 后端稳定后，基于同一三地址码 IR 选择 native 后端路线：LLVM/llvmlite、汇编文本、对象文件或手写机器码
-  - 【未完成】支持目标平台描述、调用约定、指令选择、寄存器分配和与 libvbcrt 的调用 ABI
-  - 【未完成】生成 `.asm`、`.obj` / `.o` 或机器码 blob，并可链接为可执行文件；不从 AST 或栈式字节码另建 native 专用输入
-- 当前现状：
-  - 未开始；当前项目无目标后端目录，也无寄存器或 ABI 抽象
-- 验收标准：
-  - P2-3 已支持的纯整数/布尔函数子集可从同一 IR 生成 native 代码并正确运行
-  - 寄存器分配结果可 dump，便于教学验证
-  - native 后端与 `emit-c` 后端在受支持子集上结果一致
+  - `int main() { return 42; }` 可生成独立 `.exe`，运行后 shell 退出码为 `42`
+  - 整数运算、条件分支、循环、函数调用样例生成的 `.exe` 行为与 VM 解释执行一致
+  - 最小输出样例可通过 native 运行时输出到 stdout；stdout、stderr 和退出码与 VM 解释执行一致
+  - 文档说明 native 暂不支持的运行时能力，以及每个受支持 IR 调用到 native runtime 的 ABI 约定
 
 ### 【依赖 C-P0-7】P2-6 数组切片语法糖（Python 风格 `[start:end:step]`）
 
@@ -461,7 +474,8 @@
 - 完整 C++ 风格模板、异常 `try/catch`、协程
 - 多线程/memory model
 - 跨平台 AOT（ARM、macOS、Linux）在 x64 Windows MVP 之前
-- 手写 x86-64 机器码作为首个 AOT 后端（优先完成 `emit-c` 和 IR 闭环）
+- 将 `emit-c` 调用系统 C 编译器作为第一版 AOT 主线
+- 将 LLVM/llvmlite 作为主线 native 后端（可作为远期对照或替代实验，不作为教学主路径）
 - 嵌入式/WASM 目标
 - 数组切片 `[start:end:step]`（见 **P2-6**；依赖 C 兼容 P0-7，非 C17 本体）
 
@@ -471,8 +485,8 @@
 
 - 字节码主线：**P0-1 `.vbb` 格式**、**P0-2 `.vbb` 直接执行**、**P0-3 `O1` 字节码优化**共同构成解释器后端闭环
 - 优化主线：**P0-3 `O1`** 是解释器后端第一阶段的语义保持优化；**P2-2 `O2/O3`** 是三地址码 IR / CFG 层更系统的高级优化；两者验收时均必须保持 VM 行为一致
-- AOT 主线：**P2-1 三地址码 IR**、**P2-3 AOT C 后端**、**P2-4 AOT 运行时**共同构成第一版独立二进制能力
-- Native 主线：**P2-5 Native 机器码后端**在 AOT C 后端稳定后基于同一 IR 推进，可选择 LLVM/llvmlite、汇编文本或对象文件路线
+- AOT / Native 主线：**P2-1 三地址码 IR**、**P2-3 Native 后端设计与目标 ABI**、**P2-4 x64 机器码后端 MVP**、**P2-5 PE/COFF 可执行文件与运行时**共同构成第一版独立二进制能力
+- C 参考后端：`emit-c` 若后续实现，只用于调试、教学对照或交叉验证，不计入 native AOT 主线完成判定
 - JIT 主线：**P3-2 热点识别**、**P3-4 受限整数热循环 JIT MVP**、**P3-5 去优化与调试**共同构成第一版 JIT 能力
 - 扩展语法主线：**P1-1** 至 **P1-7** 与 C 兼容清单并行；**P2-6** 数组切片依赖 C 兼容数组闭环
 
@@ -493,9 +507,10 @@ flowchart LR
 
     subgraph PhaseC["阶段 C"]
         IR["三地址码 IR"]
-        EmitC["C 后端"]
-        Native[".exe 原生"]
-        VBB -->|操作码 lowering| IR --> EmitC --> Native
+        MIR["Machine IR / ABI"]
+        Codegen["x64 机器码"]
+        EXE["PE/COFF .exe"]
+        VBB -->|操作码 lowering| IR --> MIR --> Codegen --> EXE
     end
 
     subgraph PhaseD["阶段 D"]
@@ -553,5 +568,5 @@ flowchart LR
 | 增量编译 | 【已完成】 | `IncrementalCompiler`、`Preprocessor.dependencies`、`run_source_file()` |
 | 字节码优化 | 【已完成】 | `-O1` 已启用基础字节码优化、typed AST 常量折叠、常量传播、拷贝传播、简单分支优化、语句级 CSE 与简单内联 |
 | IR / CFG | 【已完成】 | `verbose_c/compiler/ir`、`CompilerOutput.ir_program`、`--dump ir` |
-| 机器码 / AOT | 【未实现】 | 无 AOT/native 后端目录 |
+| Native 机器码 / AOT | 【未实现】 | 无 native 后端、指令编码器、PE/COFF 写出器或运行时 ABI |
 | JIT | 【未实现】 | 无 |

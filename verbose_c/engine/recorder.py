@@ -155,6 +155,7 @@ class PipelineRecorder:
         self._dump_ast = dump_all or "ast" in dump_modules
         self._dump_opcode = dump_all or "opcode" in dump_modules
         self._dump_ir = dump_all or "ir" in dump_modules
+        self._dump_machine = dump_all or "machine" in dump_modules
         self._dump_optimize = dump_all or "optimize" in dump_modules
         self._dump_const = dump_all or "const" in dump_modules
         self._dump_label = dump_all or "label" in dump_modules
@@ -248,6 +249,10 @@ class PipelineRecorder:
             from verbose_c.compiler.ir import format_ir_program
 
             self._append_section("IR", format_ir_program(output.ir_program))
+        if self._dump_machine and output.machine_program:
+            from verbose_c.compiler.native import format_machine_program
+
+            self._append_section("Machine IR", format_machine_program(output.machine_program))
         if self._dump_opcode and output.function_compilation_results:
             self._append_section("函数编译结果", self._format_function_results_section(output.function_compilation_results))
 

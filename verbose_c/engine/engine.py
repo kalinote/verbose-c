@@ -45,6 +45,8 @@ class CompilerOutput:
     constant_pool: list[Any]
     ir_program: Any | None = None
     ir_error: Exception | None = None
+    machine_program: Any | None = None
+    machine_error: Exception | None = None
     function_compilation_results: dict[str, Any] = field(default_factory=dict)
     labels: dict[str, int] = field(default_factory=dict)
     tokens: list[Token] | None = None
@@ -173,6 +175,7 @@ def compile_module(
     recorder: PipelineRecorder | None = None,
     optimize_level: int = 0,
     require_ir: bool = False,
+    require_machine: bool = False,
 ) -> CompilerOutput:
     """
     编译单个模块文件，分阶段执行并在每阶段完成后通知 recorder。
@@ -248,9 +251,18 @@ def compile_module(
     try:
         output.ir_program = lower_compiler_output_to_ir(output)
     except Exception as error:
-        if require_ir:
+        if require_ir or require_machine:
             raise
         output.ir_error = error
+    if output.ir_program is not None:
+        from verbose_c.compiler.native import lower_ir_program_to_machine
+
+        try:
+            output.machine_program = lower_ir_program_to_machine(output.ir_program)
+        except Exception as error:
+            if require_machine:
+                raise
+            output.machine_error = error
     if recorder:
         recorder.on_compiled(output)
     return output
@@ -382,6 +394,7 @@ def run_source_file(
                 recorder=recorder,
                 optimize_level=optimize_level,
                 require_ir=("all" in dump_modules or "ir" in dump_modules),
+                require_machine=("all" in dump_modules or "machine" in dump_modules),
             )
             compile_warnings = compilation_result.warnings or []
             if show_warnings and compile_warnings:
