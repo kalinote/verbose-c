@@ -119,12 +119,12 @@ def test_ir_lowering_simulates_dup_pop_and_swap():
     assert ops[-1] == "binary sub"
 
 
-def test_ir_lowering_reports_unsupported_opcode_with_context():
+def test_ir_lowering_reports_invalid_constant_with_context():
     with pytest.raises(IRLoweringError) as exc_info:
-        _lower([(Opcode.LOAD_BY_POINTER,)])
+        _lower([(Opcode.LOAD_CONSTANT, 99)])
 
     message = str(exc_info.value)
-    assert "LOAD_BY_POINTER" in message
+    assert "LOAD_CONSTANT" in message
     assert "PC 0" in message
     assert "函数 test" in message
 
@@ -136,20 +136,61 @@ def test_ir_lowering_reports_stack_underflow():
     assert "模拟栈为空" in str(exc_info.value)
 
 
-def test_ir_lowering_reports_inconsistent_merge_stack():
-    with pytest.raises(IRLoweringError) as exc_info:
-        _lower([
-            (Opcode.LOAD_CONSTANT, 2),
-            (Opcode.JUMP_IF_FALSE, 4),
-            (Opcode.LOAD_CONSTANT, 0),
-            (Opcode.JUMP, 5),
-            (Opcode.LOAD_CONSTANT, 1),
-            (Opcode.POP,),
-            (Opcode.LOAD_CONSTANT, 0),
-            (Opcode.RETURN,),
-        ])
+def test_ir_lowering_uses_phi_for_merge_stack_values():
+    function = _lower([
+        (Opcode.LOAD_CONSTANT, 2),
+        (Opcode.JUMP_IF_FALSE, 4),
+        (Opcode.LOAD_CONSTANT, 0),
+        (Opcode.JUMP, 5),
+        (Opcode.LOAD_CONSTANT, 1),
+        (Opcode.LOAD_CONSTANT, 0),
+        (Opcode.ADD,),
+        (Opcode.RETURN,),
+    ])
 
-    assert "栈状态不一致" in str(exc_info.value)
+    assert any(
+        instruction.op == "phi"
+        for block in function.blocks
+        for instruction in block.instructions
+    )
+
+
+def test_ir_lowering_lowers_memory_and_pointer_opcodes():
+    function = _lower([
+        (Opcode.ALLOC_ARRAY, (3, "INT")),
+        (Opcode.LOAD_CONSTANT, 0),
+        (Opcode.LOAD_INDEX, (3, "INT")),
+        (Opcode.LOAD_ADDRESS, (0, "INT")),
+        (Opcode.STORE_BY_POINTER,),
+        (Opcode.LOAD_ADDRESS, (0, "INT")),
+        (Opcode.LOAD_BY_POINTER,),
+        (Opcode.RETURN,),
+    ])
+
+    ops = [instruction.op for block in function.blocks for instruction in block.instructions]
+    assert "alloc_array" in ops
+    assert "load_index" in ops
+    assert "address_of" in ops
+    assert "store_pointer" in ops
+    assert "load_pointer" in ops
+
+
+def test_ir_lowering_lowers_struct_field_opcodes():
+    function = _lower([
+        (Opcode.ALLOC_STRUCT, 0),
+        (Opcode.DUP,),
+        (Opcode.LOAD_FIELD, (2, 1)),
+        (Opcode.SWAP,),
+        (Opcode.STORE_FIELD, (2, 0)),
+        (Opcode.COPY_STRUCT, 2),
+        (Opcode.RETURN,),
+    ])
+
+    ops = [instruction.op for block in function.blocks for instruction in block.instructions]
+    assert "alloc_struct" in ops
+    assert "load_field" in ops
+    assert "store_field" in ops
+    assert "copy_struct" in ops
 
 
 def test_ir_lowering_attaches_program_to_compiler_output():
@@ -200,4 +241,22 @@ def test_dump_ir_from_source_file(tmp_path):
     dump_text = dump_path.read_text(encoding="utf-8")
     assert "## IR" in dump_text
     assert "bb_" in dump_text
+    assert "后继基本块" in dump_text
+
+
+def test_dump_ir_from_loop_source_file(tmp_path):
+    dump_path = tmp_path / "ir_loop_dump.md"
+    result = run_source_file(
+        "tests/grammar/ir_loop_phi_test.vbc",
+        log_modules=set(),
+        dump_modules={"ir"},
+        dump_path=str(dump_path),
+        output_path=str(tmp_path / "ir_loop_phi.vbb"),
+        execute=False,
+        optimize_level=0,
+    )
+
+    assert result.success
+    dump_text = dump_path.read_text(encoding="utf-8")
+    assert "phi" in dump_text
     assert "后继基本块" in dump_text

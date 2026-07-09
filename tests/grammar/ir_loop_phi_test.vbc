@@ -1,0 +1,20 @@
+// 测试点：IR lowering 正向样例；循环回边上的操作数栈合流应生成 phi。
+
+int main() {
+    int index = 0;
+    int total = 0;
+
+    while (index < 3) {
+        total = total + index;
+        index = index + 1;
+    }
+
+    write(STDOUT, "\n=== IR Loop Phi Test ===\n");
+    write(STDOUT, "total = ");
+    write(STDOUT, total);
+    write(STDOUT, "\n");
+
+    return total;
+}
+
+main();
