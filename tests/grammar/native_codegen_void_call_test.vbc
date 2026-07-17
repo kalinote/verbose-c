@@ -1,0 +1,10 @@
+void noop(int value) {
+    if (value > 0) {
+        return;
+    }
+}
+
+int main() {
+    noop(3);
+    return 42;
+}

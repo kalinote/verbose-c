@@ -1,0 +1,16 @@
+enum Mode {
+    OFF = 1,
+    ON = 2
+};
+
+int main() {
+    int value = ON;
+    switch (value) {
+        case OFF:
+            return 10;
+        case ON:
+            return 42;
+        default:
+            return 3;
+    }
+}

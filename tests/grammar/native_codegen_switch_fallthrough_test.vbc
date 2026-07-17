@@ -1,0 +1,14 @@
+int main() {
+    int value = 1;
+    int result = 0;
+    switch (value) {
+        case 1:
+            result = result + 3;
+        case 2:
+            result = result + 4;
+            break;
+        default:
+            result = result + 30;
+    }
+    return result;
+}

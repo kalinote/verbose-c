@@ -1,0 +1,8 @@
+int value = 2;
+int result = 0;
+if (value > 1) {
+    result = 40;
+} else {
+    result = 1;
+}
+_exit(result + 2);

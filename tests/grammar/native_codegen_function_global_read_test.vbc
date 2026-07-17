@@ -1,0 +1,9 @@
+int g = 40;
+
+int add_global(int x) {
+    return g + x;
+}
+
+int main() {
+    return add_global(2);
+}

@@ -1,0 +1,6 @@
+int main() {
+    int left = 9;
+    int right = 4;
+    bool bigger = left > right;
+    return bigger;
+}

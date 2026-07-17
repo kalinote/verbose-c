@@ -1,0 +1,9 @@
+int main() {
+    int value = 10;
+    value += 5;
+    value -= 3;
+    value *= 4;
+    value /= 6;
+    value %= 5;
+    return value;
+}

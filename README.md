@@ -78,7 +78,14 @@ python -m verbose_c.cli example.vbc --debug-vm --log all
 python -m verbose_c.cli example.vbc --dump ir --compile-only
 ```
 
-`--dump` 支持 `parser`、`tokens`、`preprocess`、`ast`、`opcode`、`ir`、`optimize`、`const`、`label`、`vm`、`memory`、`all`。
+`--dump` 支持 `parser`、`tokens`、`preprocess`、`ast`、`opcode`、`ir`、`machine`、`optimize`、`const`、`label`、`vm`、`memory`、`all`。
+
+### 统一导出 Native 产物
+```bash
+python -m verbose_c.cli example.vbc --compile-only --emit native-bin,native-map,native-pe --emit-dir build/native
+```
+
+`--emit` 支持 `native-listing`、`native-bin`、`native-text-bin`、`native-pe`、`native-map` 和一次导出全部类型的 `native-bundle`。统一导出会按输入文件名组织产物，并生成包含路径、大小和 SHA-256 的 `.native.manifest.json`。`--emit-dir` 可省略，此时输出到入口文件所在目录的 `<入口文件名>_emit_out_<时间戳>` 目录；未设置 `--emit` 时，单独提供 `--emit-dir` 不生效。
 
 ## 编译为可执行文件
 ```bash

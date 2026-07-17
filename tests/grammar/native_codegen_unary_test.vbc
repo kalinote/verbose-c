@@ -1,0 +1,4 @@
+int main() {
+    int value = -41;
+    return value + !0;
+}

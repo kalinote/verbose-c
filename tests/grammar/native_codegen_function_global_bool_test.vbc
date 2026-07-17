@@ -1,0 +1,17 @@
+bool flag = false;
+
+void enable() {
+    flag = true;
+}
+
+bool enabled() {
+    return flag;
+}
+
+int main() {
+    enable();
+    if (enabled()) {
+        return 42;
+    }
+    return 1;
+}

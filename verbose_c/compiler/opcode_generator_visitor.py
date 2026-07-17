@@ -14,6 +14,18 @@ from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
 from verbose_c.typing.types import *
 
+
+def _native_type_name(type_: Type) -> str:
+    """返回 native/IR 后端使用的标量类型名。"""
+    if isinstance(type_, VoidType):
+        return "void"
+    if isinstance(type_, BoolType):
+        return "bool64"
+    if isinstance(type_, IntegerType):
+        return "int64"
+    return repr(type_)
+
+
 class LoopContext:
     """
     循环上下文类，管理循环的控制标签
@@ -527,7 +539,7 @@ class OpcodeGenerator(VisitorBase):
             and main_symbol.is_defined
             and isinstance(main_type, FunctionType)
             and not main_type.param_types
-            and isinstance(main_type.return_type, (IntegerType, VoidType))
+            and isinstance(main_type.return_type, (IntegerType, BoolType, VoidType))
             and not has_explicit_main_call
         ):
             self._emit(Opcode.LOAD_GLOBAL_VAR, "main")
@@ -1154,6 +1166,11 @@ class OpcodeGenerator(VisitorBase):
         
         param_count = len(node.args)
         local_count = function_symbol_table._next_local_address
+        function_return_type = "int64"
+        function_param_types = ["int64"] * param_count
+        if isinstance(func_symbol.type_, FunctionType):
+            function_return_type = _native_type_name(func_symbol.type_.return_type)
+            function_param_types = [_native_type_name(param_type) for param_type in func_symbol.type_.param_types]
 
         # 收集函数编译结果
         self.function_compilation_results[node.name.name] = {
@@ -1162,7 +1179,9 @@ class OpcodeGenerator(VisitorBase):
             'labels': function_op_generator.labels,
             'lineno_table': function_op_generator.lineno_table,
             'param_count': param_count,
+            'param_types': function_param_types,
             'local_count': local_count,
+            'return_type': function_return_type,
             'optimization_result': function_op_generator.optimization_result,
             'ast_optimization_result': function_compiler.ast_optimization_result,
         }

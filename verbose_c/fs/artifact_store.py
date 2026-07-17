@@ -305,12 +305,22 @@ class _ArtifactGraph:
             if not isinstance(result, dict):
                 continue
             labels = result.get("labels", {})
-            self.collect_value(labels)
+            debug_labels = {
+                "__verbose_c_labels__": labels,
+                "__verbose_c_metadata__": {
+                    "param_count": result.get("param_count", 0),
+                    "param_types": result.get("param_types", []),
+                    "local_count": result.get("local_count", 0),
+                    "return_type": result.get("return_type", "int64"),
+                    "lineno_table": result.get("lineno_table", []),
+                },
+            }
+            self.collect_value(debug_labels)
             collected.append({
                 "name": self.add_string(name),
                 "bytecode": self.add_bytecode_block(result.get("bytecode", [])),
                 "constants": self.add_constant_pool(result.get("constants", [])),
-                "labels": labels,
+                "labels": debug_labels,
             })
         return collected
 
@@ -858,6 +868,10 @@ class ArtifactStore:
             bytecode_id = reader.read_varuint()
             constants_id = reader.read_varuint()
             result_labels = self._read_value(reader, strings, filepath)
+            metadata = {}
+            if isinstance(result_labels, dict) and "__verbose_c_metadata__" in result_labels:
+                metadata = result_labels.get("__verbose_c_metadata__", {})
+                result_labels = result_labels.get("__verbose_c_labels__", {})
             function_results[name] = {
                 "bytecode": self._item_at(bytecode_blocks, bytecode_id, "调试字节码块", filepath),
                 "constants": [
@@ -866,6 +880,8 @@ class ArtifactStore:
                 ],
                 "labels": result_labels,
             }
+            if isinstance(metadata, dict):
+                function_results[name].update(metadata)
         reader.ensure_done("DEBUG")
         return {"labels": labels, "function_compilation_results": function_results}
 

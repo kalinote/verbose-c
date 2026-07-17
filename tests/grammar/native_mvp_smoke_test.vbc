@@ -1,0 +1,69 @@
+int global_bias = 3;
+
+int add3(int a, int b, int c) {
+    return a + b + c;
+}
+
+int add_bias(int value) {
+    return value + global_bias;
+}
+
+void bump_bias() {
+    global_bias = global_bias + 2;
+}
+
+int fact(int n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * fact(n - 1);
+}
+
+int classify(int value) {
+    int result = 0;
+    switch (value) {
+        case 1:
+            result = result + 5;
+        case 2:
+            result = result + 7;
+            break;
+        default:
+            result = result + 20;
+    }
+    return result;
+}
+
+bool gate(int a, int b) {
+    return (a > 0 && b > 0) || a == b;
+}
+
+int loop_sum(int n) {
+    int total = 0;
+    for (int i = 0; i < n; i = i + 1) {
+        if (i == 3) {
+            continue;
+        }
+        if (i == 6) {
+            break;
+        }
+        total = total + i;
+    }
+    return total;
+}
+
+int main() {
+    int result = 0;
+    result = result + add3(10, 20, global_bias);
+    result = result + add_bias(4);
+    bump_bias();
+    result = result + add_bias(1);
+    result = result + fact(4);
+    result = result + classify(1);
+    if (gate(2, global_bias)) {
+        result = result + 5;
+    }
+    result = result + loop_sum(8);
+    return result;
+}
+
+_exit(main());

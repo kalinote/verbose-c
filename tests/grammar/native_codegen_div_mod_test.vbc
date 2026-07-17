@@ -1,0 +1,5 @@
+int main() {
+    int quotient = 80 / 2;
+    int remainder = 11 % 2;
+    return quotient + remainder;
+}

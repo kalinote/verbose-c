@@ -75,7 +75,9 @@ class IRFunction:
     blocks: list[IRBasicBlock]
     constants: list[Any] = field(default_factory=list)
     param_count: int = 0
+    param_types: list[str] = field(default_factory=list)
     local_count: int = 0
+    return_type: str = "int64"
     source_path: str | None = None
     lineno_table: list[tuple[int, int]] = field(default_factory=list)
 

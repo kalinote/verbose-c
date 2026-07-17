@@ -13,6 +13,7 @@ from verbose_c.typing.types import FunctionType, IntegerType, StringType, VoidTy
 # 将所有内置函数收集到一个字典中，方便注册
 BUILTIN_FUNCTIONS = {
     "_exit": native__exit,
+    "exit": native__exit,
     
     # I/O
     'open': native_open,
@@ -26,6 +27,7 @@ BUILTIN_FUNCTIONS = {
 # TODO: 所有 AnyType 后续可以完善为更精确的类型
 BUILTIN_FUNCTION_SIGNATURES = {
     "_exit": FunctionType(param_types=[IntegerType(VBCObjectType.INT)], return_type=VoidType()),
+    "exit": FunctionType(param_types=[IntegerType(VBCObjectType.INT)], return_type=VoidType()),
     
     # I/O
     'open': FunctionType(

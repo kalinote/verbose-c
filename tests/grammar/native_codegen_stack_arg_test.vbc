@@ -1,0 +1,7 @@
+int pick5(int a, int b, int c, int d, int e) {
+    return e + a;
+}
+
+int main() {
+    return pick5(1, 2, 3, 4, 41);
+}

@@ -1,0 +1,11 @@
+int countdown(int n) {
+    if (n == 0) {
+        _exit(9);
+        return 0;
+    }
+    return countdown(n - 1) + 1;
+}
+
+int main() {
+    return countdown(3);
+}

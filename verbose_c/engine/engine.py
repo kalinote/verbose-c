@@ -1,5 +1,7 @@
 import os
 import importlib.util
+import subprocess
+import tempfile
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -17,6 +19,11 @@ from verbose_c.error import VBCCompileError, VBCRuntimeError
 from verbose_c.fs.artifact_store import ArtifactStore
 from verbose_c.fs.incremental_compile import IncrementalCompiler
 from verbose_c.engine.recorder import PipelineRecorder, create_dump_path
+from verbose_c.engine.native_exporter import (
+    NativeArtifactExporter,
+    NativeExportReport,
+    NativeExportRequest,
+)
 
 default_parser_output = "parser.py"
 grammar_file = "Grammar/verbose_c.gram"
@@ -47,6 +54,8 @@ class CompilerOutput:
     ir_error: Exception | None = None
     machine_program: Any | None = None
     machine_error: Exception | None = None
+    native_code_program: Any | None = None
+    native_code_error: Exception | None = None
     function_compilation_results: dict[str, Any] = field(default_factory=dict)
     labels: dict[str, int] = field(default_factory=dict)
     tokens: list[Token] | None = None
@@ -80,6 +89,7 @@ class RunResult:
     compilation_output: CompilerOutput | None = None
     warnings: list[str] = field(default_factory=list)
     error: Exception | None = None
+    export_report: NativeExportReport | None = None
 
 
 def _build_parser_generation_report(
@@ -176,6 +186,7 @@ def compile_module(
     optimize_level: int = 0,
     require_ir: bool = False,
     require_machine: bool = False,
+    require_native_code: bool = False,
 ) -> CompilerOutput:
     """
     编译单个模块文件，分阶段执行并在每阶段完成后通知 recorder。
@@ -246,26 +257,49 @@ def compile_module(
         ast_optimization_result=compiler.ast_optimization_result,
         dependencies=sorted(preprocessor.dependencies),
     )
+    _populate_backend_outputs(
+        output,
+        require_ir=require_ir,
+        require_machine=require_machine,
+        require_native_code=require_native_code,
+    )
+    if recorder:
+        recorder.on_compiled(output)
+    return output
+
+
+def _populate_backend_outputs(
+    output: CompilerOutput,
+    *,
+    require_ir: bool = False,
+    require_machine: bool = False,
+    require_native_code: bool = False,
+) -> None:
+    """为编译输出补齐 IR、Machine IR 和 native 机器码产物。"""
     from verbose_c.compiler.ir import lower_compiler_output_to_ir
 
     try:
         output.ir_program = lower_compiler_output_to_ir(output)
     except Exception as error:
-        if require_ir or require_machine:
+        if require_ir or require_machine or require_native_code:
             raise
         output.ir_error = error
     if output.ir_program is not None:
-        from verbose_c.compiler.native import lower_ir_program_to_machine
+        from verbose_c.compiler.native import generate_native_code, lower_ir_program_to_machine
 
         try:
             output.machine_program = lower_ir_program_to_machine(output.ir_program)
         except Exception as error:
-            if require_machine:
+            if require_machine or require_native_code:
                 raise
             output.machine_error = error
-    if recorder:
-        recorder.on_compiled(output)
-    return output
+        if output.machine_program is not None:
+            try:
+                output.native_code_program = generate_native_code(output.machine_program)
+            except Exception as error:
+                if require_native_code:
+                    raise
+                output.native_code_error = error
 
 
 def _load_bytecode_compilation_output(filename: str) -> tuple[CompilerOutput, str]:
@@ -302,6 +336,91 @@ def _execute_compilation_output(
         source_code=_read_source_lines(source_path),
     )
     return exit_code, vm
+
+
+def _run_native_memory_output(
+    compilation_output: CompilerOutput,
+    filename: str,
+    native_result_path: str | None,
+) -> int:
+    """执行 native program 并按需写出返回值文件。"""
+    if compilation_output.native_code_program is None:
+        raise VBCCompileError("native 内存执行需要成功生成 x64 机器码", filepath=filename)
+    from verbose_c.compiler.native.errors import NativeCodegenError
+    from verbose_c.compiler.native.runner import run_native_program_in_memory
+
+    try:
+        exit_code = run_native_program_in_memory(compilation_output.native_code_program)
+    except NativeCodegenError as error:
+        raise VBCCompileError(str(error), filepath=filename) from error
+    if native_result_path is not None:
+        result_dir = os.path.dirname(os.path.abspath(native_result_path))
+        if result_dir:
+            os.makedirs(result_dir, exist_ok=True)
+        with open(native_result_path, "w", encoding="utf-8") as result_file:
+            result_file.write(f"{exit_code}\n")
+    return exit_code
+
+
+def _run_native_pe_output(
+    compilation_output: CompilerOutput,
+    filename: str,
+    native_result_path: str | None,
+) -> int:
+    """写出临时 PE image 并通过 Windows loader 执行。"""
+    if compilation_output.native_code_program is None:
+        raise VBCCompileError("native PE 执行需要成功生成 x64 机器码", filepath=filename)
+    from verbose_c.compiler.native import (
+        NativeCodegenError,
+        build_native_pe_image,
+        native_code_program_map,
+        validate_native_pe_image_bytes,
+    )
+    from verbose_c.compiler.native.runner import can_run_native_memory
+
+    if not can_run_native_memory():
+        raise VBCCompileError("native PE 执行仅支持 Windows x64", filepath=filename)
+    metadata = native_code_program_map(compilation_output.native_code_program)
+    try:
+        pe_image = build_native_pe_image(compilation_output.native_code_program.code, metadata)
+    except NativeCodegenError as error:
+        raise VBCCompileError(f"native PE 执行生成 image 失败: {error}", filepath=filename) from error
+    with tempfile.TemporaryDirectory(prefix="verbose_c_native_pe_") as temp_dir:
+        pe_path = os.path.join(temp_dir, "native_entry.exe")
+        with open(pe_path, "wb") as pe_file:
+            pe_file.write(pe_image)
+        try:
+            with open(pe_path, "rb") as pe_file:
+                validate_native_pe_image_bytes(pe_file.read(), metadata)
+        except NativeCodegenError as error:
+            raise VBCCompileError(f"native PE 执行 image 自检失败: {error}", filepath=filename) from error
+        completed = subprocess.run([pe_path], check=False)
+    exit_code = int(completed.returncode)
+    if native_result_path is not None:
+        result_dir = os.path.dirname(os.path.abspath(native_result_path))
+        if result_dir:
+            os.makedirs(result_dir, exist_ok=True)
+        with open(native_result_path, "w", encoding="utf-8") as result_file:
+            result_file.write(f"{exit_code}\n")
+    return exit_code
+
+
+def _emit_native_outputs(
+    compilation_output: CompilerOutput,
+    filename: str,
+    *,
+    export_request: NativeExportRequest,
+) -> NativeExportReport | None:
+    """通过统一导出器写出 native 产物。"""
+    if not export_request.enabled:
+        return None
+    if compilation_output.native_code_program is None:
+        raise VBCCompileError("导出 native 产物需要成功生成机器码", filepath=filename)
+    return NativeArtifactExporter(open_file=open).export(
+        compilation_output.native_code_program,
+        export_request,
+        filename,
+    )
 
 
 def run_parser_generation(
@@ -357,6 +476,10 @@ def run_source_file(
     refresh_parser: bool = False,
     show_warnings: bool = True,
     optimize_level: int = 0,
+    run_native_memory: bool = False,
+    run_native_pe: bool = False,
+    native_result_path: str | None = None,
+    native_export_request: NativeExportRequest | None = None,
 ) -> RunResult:
     """编译并可选执行单个源文件，由 recorder 负责 log 与 dump 输出。"""
     if dump_path is None and dump_modules:
@@ -374,18 +497,22 @@ def run_source_file(
     compile_warnings: list[str] = []
     exit_code = 0
     vm = None
+    export_report = None
     artifact_store = ArtifactStore()
     incremental_compiler = IncrementalCompiler(artifact_store)
     artifact_path = output_path or artifact_store.artifact_path_for_source(filename)
 
     recorder.log_compile_start()
     try:
+        export_request = native_export_request or NativeExportRequest()
         needs_recompile = incremental_compiler.needs_recompile(
             filename,
             artifact_path=artifact_path,
             optimize_level=optimize_level,
             refresh_parser=refresh_parser,
         )
+        if run_native_memory or run_native_pe or export_request.enabled or _dump_requires_fresh_compilation(dump_modules):
+            needs_recompile = True
         if needs_recompile:
             recorder.log_compile_engine()
             compilation_result = compile_module(
@@ -394,7 +521,8 @@ def run_source_file(
                 recorder=recorder,
                 optimize_level=optimize_level,
                 require_ir=("all" in dump_modules or "ir" in dump_modules),
-                require_machine=("all" in dump_modules or "machine" in dump_modules),
+                require_machine=False,
+                require_native_code=run_native_memory or run_native_pe or export_request.enabled,
             )
             compile_warnings = compilation_result.warnings or []
             if show_warnings and compile_warnings:
@@ -425,7 +553,17 @@ def run_source_file(
             compilation_result, source_path = _load_bytecode_compilation_output(artifact_path)
             recorder.on_compiled(compilation_result)
 
-        if execute:
+        if run_native_memory:
+            exit_code = _run_native_memory_output(compilation_result, filename, native_result_path)
+        if run_native_pe:
+            exit_code = _run_native_pe_output(compilation_result, filename, native_result_path)
+        export_report = _emit_native_outputs(
+            compilation_result,
+            filename,
+            export_request=export_request,
+        )
+        recorder.on_artifacts_exported(export_report)
+        if not run_native_memory and not run_native_pe and execute:
             recorder.log_vm_start()
             exit_code, vm = _execute_compilation_output(
                 compilation_result,
@@ -439,6 +577,8 @@ def run_source_file(
         exit_code = 1
         recorder.on_error(e)
     except VBCCompileError as e:
+        if e.filepath is None:
+            e.filepath = filename
         captured_error = e
         exit_code = 1
         print(f"编译错误: 文件 {e.filepath}")
@@ -468,7 +608,13 @@ def run_source_file(
         compilation_output=compilation_result,
         warnings=compile_warnings,
         error=captured_error,
+        export_report=export_report,
     )
+
+
+def _dump_requires_fresh_compilation(dump_modules: set[str]) -> bool:
+    """判断 dump 是否需要源码级重新编译产物。"""
+    return bool({"all", "ir", "machine"} & dump_modules)
 
 
 def run_bytecode_file(
@@ -477,8 +623,12 @@ def run_bytecode_file(
     log_modules: set[str],
     dump_modules: set[str],
     dump_path: str | None = None,
+    run_native_memory: bool = False,
+    run_native_pe: bool = False,
+    native_result_path: str | None = None,
+    native_export_request: NativeExportRequest | None = None,
 ) -> RunResult:
-    """加载并执行字节码产物。"""
+    """加载并执行字节码产物，可选生成或执行 native 产物。"""
     if dump_path is None and dump_modules:
         dump_path = create_dump_path(filename)
 
@@ -493,34 +643,44 @@ def run_bytecode_file(
     exit_code = 0
     vm = None
     compilation_output = None
-    artifact_store = ArtifactStore()
+    export_report = None
 
     try:
-        bytecode, metadata = artifact_store.load_bytecode(filename)
-        constant_pool = metadata.get("constant_pool", [])
-        lineno_table = metadata.get("lineno_table", [])
-        source_path = metadata.get("source_path") or filename
-        compilation_output = CompilerOutput(
-            bytecode=bytecode,
-            constant_pool=constant_pool,
-            function_compilation_results=metadata.get("function_compilation_results", {}),
-            labels=metadata.get("labels", {}),
-            lineno_table=lineno_table,
+        export_request = native_export_request or NativeExportRequest()
+        compilation_output, source_path = _load_bytecode_compilation_output(filename)
+        needs_backend = bool(
+            {"all", "ir", "machine"} & dump_modules
+            or run_native_memory
+            or run_native_pe
+            or export_request.enabled
         )
+        if needs_backend:
+            _populate_backend_outputs(
+                compilation_output,
+                require_ir=False,
+                require_machine=False,
+                require_native_code=run_native_memory or run_native_pe or export_request.enabled,
+            )
         recorder.on_compiled(compilation_output)
 
-        recorder.log_vm_start()
-        from verbose_c.vm.core import VBCVirtualMachine
-
-        vm = VBCVirtualMachine(debug_log_collector=recorder.create_vm_log_collector())
-        exit_code = vm.excute(
-            bytecode=bytecode,
-            constants=constant_pool,
-            source_path=source_path,
-            lineno_table=lineno_table,
-            source_code=_read_source_lines(source_path),
+        if run_native_memory:
+            exit_code = _run_native_memory_output(compilation_output, filename, native_result_path)
+        if run_native_pe:
+            exit_code = _run_native_pe_output(compilation_output, filename, native_result_path)
+        export_report = _emit_native_outputs(
+            compilation_output,
+            filename,
+            export_request=export_request,
         )
-        recorder.log_vm_done()
+        recorder.on_artifacts_exported(export_report)
+        if not run_native_memory and not run_native_pe:
+            recorder.log_vm_start()
+            exit_code, vm = _execute_compilation_output(
+                compilation_output,
+                source_path=source_path,
+                recorder=recorder,
+            )
+            recorder.log_vm_done()
 
     except VBCRuntimeError as e:
         captured_error = e
@@ -551,6 +711,7 @@ def run_bytecode_file(
         artifact_path=os.path.abspath(filename),
         compilation_output=compilation_output,
         error=captured_error,
+        export_report=export_report,
     )
 
 
@@ -559,7 +720,7 @@ def _read_source_lines(source_path: str | None) -> list[str]:
     if not source_path or not os.path.exists(source_path):
         return []
     try:
-        with open(source_path, "r", encoding="utf-8") as file:
+        with open(source_path, "r", encoding="utf-8-sig") as file:
             return file.read().split("\n")
     except OSError:
         return []

@@ -1,0 +1,7 @@
+bool main() {
+    bool ok = true;
+    if (ok) {
+        return true;
+    }
+    return false;
+}

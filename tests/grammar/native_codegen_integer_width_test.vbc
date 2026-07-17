@@ -1,0 +1,5 @@
+int main() {
+    char a = 40;
+    long b = 2;
+    return a + b;
+}

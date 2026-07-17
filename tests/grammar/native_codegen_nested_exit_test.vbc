@@ -1,0 +1,8 @@
+void stop() {
+    _exit(7);
+}
+
+int main() {
+    stop();
+    return 1;
+}

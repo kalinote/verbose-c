@@ -1,0 +1,6 @@
+int main() {
+    int narrowed = (char)40;
+    int widened = (long)2;
+    int truthy = (bool)42;
+    return narrowed + widened + truthy;
+}

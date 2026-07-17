@@ -1,0 +1,6 @@
+int main() {
+    int left = 40;
+    int right = 2;
+    int total = left + right;
+    return total;
+}

@@ -1,0 +1,7 @@
+int main() {
+    int value = 7;
+    if (value > 4) {
+        return 10;
+    }
+    return 3;
+}

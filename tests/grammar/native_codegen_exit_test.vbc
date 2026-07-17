@@ -1,0 +1,4 @@
+int main() {
+    _exit(7);
+    return 1;
+}

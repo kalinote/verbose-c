@@ -253,8 +253,39 @@ class PipelineRecorder:
             from verbose_c.compiler.native import format_machine_program
 
             self._append_section("Machine IR", format_machine_program(output.machine_program))
+        if self._dump_machine and output.machine_error:
+            self._append_section("Machine IR", self._format_backend_error_section("Machine IR", "Machine IR 生成跳过/失败原因", output.machine_error))
+        if self._dump_machine and output.native_code_program:
+            from verbose_c.compiler.native import format_native_code_program
+
+            self._append_section("x64 机器码", format_native_code_program(output.native_code_program))
+        if self._dump_machine and output.native_code_error:
+            self._append_section("x64 机器码", self._format_backend_error_section("x64 机器码", "机器码生成跳过/失败原因", output.native_code_error))
         if self._dump_opcode and output.function_compilation_results:
             self._append_section("函数编译结果", self._format_function_results_section(output.function_compilation_results))
+
+    def on_artifacts_exported(self, report) -> None:
+        """把结构化 native 导出结果追加到流水线 dump。"""
+        if report is None or not self.dump_path:
+            return
+        lines = [
+            "## Native 导出产物\n\n",
+            f"- 目标平台: `{_escape_markdown_table_cell(report.target)}`\n",
+            f"- 入口函数: `{_escape_markdown_table_cell(report.entry)}`\n",
+        ]
+        if report.manifest_path is not None:
+            lines.append(f"- Manifest: `{_escape_markdown_table_cell(report.manifest_path)}`\n")
+        lines.extend([
+            "\n| 类型 | 路径 | Media type | 大小 | SHA-256 |\n",
+            "| --- | --- | --- | --- | --- |\n",
+        ])
+        for artifact in report.artifacts:
+            lines.append(
+                f"| `{artifact.kind.value}` | `{_escape_markdown_table_cell(artifact.path)}` | "
+                f"`{_escape_markdown_table_cell(artifact.media_type)}` | `{artifact.size}` | `{artifact.sha256}` |\n"
+            )
+        lines.append("\n")
+        self._append_section("Native 导出产物", "".join(lines))
 
     def on_memory(self, memory) -> None:
         """dump 程序结束时刻的堆内存快照（--dump memory）。"""
@@ -461,6 +492,10 @@ class PipelineRecorder:
             lines.append(f"| `{lbl}` | {pos} |\n")
         lines.append("\n")
         return "".join(lines)
+
+    def _format_backend_error_section(self, title: str, label: str, error: Exception) -> str:
+        """生成后端失败原因 dump 小节。"""
+        return f"## {title}\n\n" + f"- {label}: `{_escape_markdown_table_cell(error)}`\n\n"
 
     def _format_function_results_section(self, function_results: dict[str, Any]) -> str:
         lines = ["## 函数编译结果\n\n"]

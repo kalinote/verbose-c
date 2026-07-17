@@ -37,6 +37,7 @@ def _format_function(function: MachineFunction) -> list[str]:
         f"- 返回类型: `{function.return_type}`\n",
         f"- 参数位置: `{params}`\n",
         f"- 栈帧大小: `{function.frame.frame_size}` bytes\n",
+        f"- 全局槽数量: `{len(function.frame.global_slots)}`\n",
         f"- 局部槽数量: `{len(function.frame.local_slots)}`\n",
         f"- 临时槽数量: `{len(function.frame.temp_slots)}`\n",
         f"- 虚拟寄存器数量: `{function.virtual_register_count}`\n",
@@ -44,8 +45,30 @@ def _format_function(function: MachineFunction) -> list[str]:
     if function.exit_code_value is not None:
         lines.append(f"- 入口退出码值: `{_format_operand(function.exit_code_value)}`\n")
     lines.append("\n")
+    lines.extend(_format_stack_slots(function))
     for block in function.blocks:
         lines.extend(_format_block(block))
+    return lines
+
+
+def _format_stack_slots(function: MachineFunction) -> list[str]:
+    """生成 Machine IR 栈槽表。"""
+    lines = [
+        "#### 栈槽\n\n",
+        "| 类型 | 索引 | 大小 |\n",
+        "| --- | --- | --- |\n",
+    ]
+    slots = [
+        *function.frame.global_slots,
+        *function.frame.local_slots,
+        *function.frame.temp_slots,
+        *function.frame.spill_slots,
+    ]
+    if not slots:
+        lines.append("| `-` | `-` | `0` |\n")
+    for slot in slots:
+        lines.append(f"| `{slot.kind}` | `{slot.index}` | `{slot.size}` |\n")
+    lines.append("\n")
     return lines
 
 
@@ -90,7 +113,7 @@ def _format_operand(operand: MachineOperand | None) -> str:
     if operand is None:
         return "-"
     if operand.kind == "vreg":
-        return f"%{operand.value.name}"
+        return f"%{operand.value.name}:{operand.type_hint}"
     if operand.kind == "slot":
         return f"{operand.value.kind}[{operand.value.index}]"
     if operand.kind == "imm":
@@ -117,4 +140,3 @@ def _append_source(text: str, line: int | None, pc: int | None) -> str:
     if suffix:
         return f"{text}  ; {', '.join(suffix)}"
     return text
-

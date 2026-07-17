@@ -18,6 +18,7 @@ from verbose_c.compiler.native.validator import validate_machine_function
 from verbose_c.object.function import VBCFunction
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_integer import VBCInteger
+from verbose_c.object.t_null import VBCNull
 from verbose_c.vm.builtins_functions import BUILTIN_FUNCTION_SIGNATURES
 
 
@@ -34,6 +35,22 @@ _BINARY_OPS = {
     "binary gt": "cmp_gt",
     "binary ge": "cmp_ge",
 }
+
+_COMPARE_MACHINE_OPS = {"cmp_eq", "cmp_ne", "cmp_lt", "cmp_le", "cmp_gt", "cmp_ge"}
+
+_NATIVE_INTEGER_CAST_TARGETS = {
+    "char",
+    "short",
+    "int",
+    "long",
+    "longlong",
+    "long long",
+    "nlint",
+    "unlimited int",
+    "int64",
+}
+
+_NATIVE_BOOL_CAST_TARGETS = {"bool", "bool64"}
 
 _UNSUPPORTED_FEATURES = {
     "alloc_array": "array",
@@ -64,11 +81,19 @@ _UNSUPPORTED_FEATURES = {
 def lower_ir_program_to_machine(program: IRProgram) -> MachineProgram:
     """将三地址码 IR lowering 为 Windows x64 Machine IR。"""
     function_names = set(program.functions.keys())
-    module = _MachineLoweringContext(program.module, function_names).lower()
+    function_return_types = {name: function.return_type for name, function in program.functions.items()}
+    function_return_types[program.module.name] = program.module.return_type
+    global_slots: dict[str, StackSlot] = {}
+    global_value_types: dict[str, str] = {}
+    module = _MachineLoweringContext(program.module, function_names, function_return_types, global_slots, global_value_types).lower()
     functions = {
-        name: _MachineLoweringContext(function, function_names).lower()
+        name: _MachineLoweringContext(function, function_names, function_return_types, global_slots, global_value_types).lower()
         for name, function in program.functions.items()
     }
+    shared_global_slots = list(global_slots.values())
+    module.frame.global_slots = shared_global_slots
+    for function in functions.values():
+        function.frame.global_slots = shared_global_slots
     return MachineProgram(
         target=NativeTarget.WINDOWS_X64,
         abi=WINDOWS_X64_ABI,
@@ -78,11 +103,26 @@ def lower_ir_program_to_machine(program: IRProgram) -> MachineProgram:
 
 
 class _MachineLoweringContext:
-    def __init__(self, function: IRFunction, function_names: set[str]):
+    def __init__(
+        self,
+        function: IRFunction,
+        function_names: set[str],
+        function_return_types: dict[str, str],
+        global_slots: dict[str, StackSlot] | None = None,
+        global_value_types: dict[str, str] | None = None,
+    ):
         self.function = function
         self.function_names = function_names
+        self.function_return_types = function_return_types
         self.value_operands: dict[IRValue, MachineOperand] = {}
+        self.global_slots = global_slots if global_slots is not None else {}
+        self.global_value_types = global_value_types if global_value_types is not None else {}
         self.local_slots: dict[int, StackSlot] = {}
+        self.local_value_types: dict[int, str] = {
+            index: value_type
+            for index, value_type in enumerate(function.param_types[:function.param_count])
+            if value_type in {"int64", "bool64"}
+        }
         self.temp_slots: list[StackSlot] = []
         self.vreg_id = 0
         self.exit_code_value: MachineOperand | None = None
@@ -104,16 +144,18 @@ class _MachineLoweringContext:
             if block.terminator is not None:
                 machine_block.terminator = self._lower_terminator(block.terminator)
             machine_blocks.append(machine_block)
+        frame.global_slots = list(self.global_slots.values())
         frame.temp_slots = list(self.temp_slots)
         machine_function = MachineFunction(
             name=self.function.name,
             params=[WINDOWS_X64_ABI.argument_location(index) for index in range(self.function.param_count)],
-            return_type="int64",
+            return_type=self.function.return_type,
             frame=frame,
             blocks=machine_blocks,
             source_path=self.function.source_path,
             virtual_register_count=self.vreg_id,
             exit_code_value=self.exit_code_value,
+            param_types=list(self.function.param_types),
         )
         validate_machine_function(machine_function)
         return machine_function
@@ -126,7 +168,8 @@ class _MachineLoweringContext:
             self._lower_const(block, instruction)
             return
         if op == "load_local":
-            result = self._define_result(instruction)
+            local_index = int(instruction.args[0].name)
+            result = self._define_result(instruction, type_hint=self.local_value_types.get(local_index))
             block.instructions.append(
                 MachineInstruction(
                     "load_stack",
@@ -138,10 +181,13 @@ class _MachineLoweringContext:
             )
             return
         if op == "store_local":
+            target = instruction.args[0]
+            value = self._operand(instruction.args[1], instruction)
+            self.local_value_types[int(target.name)] = value.type_hint
             block.instructions.append(
                 MachineInstruction(
                     "store_stack",
-                    args=[self._operand(instruction.args[0], instruction), self._operand(instruction.args[1], instruction)],
+                    args=[self._operand(target, instruction), value],
                     source_pc=instruction.source_pc,
                     source_line=instruction.source_line,
                 )
@@ -152,7 +198,17 @@ class _MachineLoweringContext:
             if symbol.kind != "global":
                 self._unsupported_feature(instruction, "non_global_symbol")
             if str(symbol.name) not in self.function_names and str(symbol.name) not in BUILTIN_FUNCTION_SIGNATURES:
-                self._unsupported_feature(instruction, f"global:{symbol.name}")
+                result = self._define_result(instruction, type_hint=self.global_value_types.get(str(symbol.name)))
+                block.instructions.append(
+                    MachineInstruction(
+                        "load_stack",
+                        result=result,
+                        args=[MachineOperand.slot(self._global_slot(str(symbol.name)))],
+                        source_pc=instruction.source_pc,
+                        source_line=instruction.source_line,
+                    )
+                )
+                return
             if instruction.result is not None:
                 self.value_operands[instruction.result] = MachineOperand.symbol(str(symbol.name))
             return
@@ -160,21 +216,44 @@ class _MachineLoweringContext:
             self._lower_store_global(block, instruction)
             return
         if op in _BINARY_OPS:
-            self._lower_value_instruction(block, instruction, _BINARY_OPS[op])
+            machine_op = _BINARY_OPS[op]
+            result_type = "bool64" if machine_op in _COMPARE_MACHINE_OPS else "int64"
+            self._lower_value_instruction(block, instruction, machine_op, type_hint=result_type)
             return
         if op == "unary neg":
             self._lower_value_instruction(block, instruction, "neg")
             return
         if op == "unary not":
-            self._lower_value_instruction(block, instruction, "not_bool")
+            self._lower_value_instruction(block, instruction, "not_bool", type_hint="bool64")
             return
         if op == "cast":
-            target_type = str(instruction.attrs.get("target_type", "")).lower()
-            cast_op = "cast_bool_int" if "int" in target_type else "cast_int_bool"
-            self._lower_value_instruction(block, instruction, cast_op)
+            raw_target_type = str(instruction.attrs.get("target_type", ""))
+            target_type = raw_target_type.lower()
+            if target_type in _NATIVE_BOOL_CAST_TARGETS:
+                cast_op = "cast_int_bool"
+                result_type = "bool64"
+            elif target_type in _NATIVE_INTEGER_CAST_TARGETS:
+                cast_op = "cast_bool_int"
+                result_type = "int64"
+            else:
+                self._unsupported_type(instruction, raw_target_type or "<missing>")
+            self._lower_value_instruction(block, instruction, cast_op, attrs={"target_type": target_type}, type_hint=result_type)
             return
         if op == "phi":
-            self._lower_value_instruction(block, instruction, "phi", attrs=dict(instruction.attrs))
+            args = [self._operand(value, instruction) for value in instruction.args]
+            incoming_types = {operand.type_hint for operand in args}
+            result_type = next(iter(incoming_types)) if len(incoming_types) == 1 and incoming_types <= {"int64", "bool64"} else "int64"
+            result = self._define_result(instruction, type_hint=result_type)
+            block.instructions.append(
+                MachineInstruction(
+                    "phi",
+                    result=result,
+                    args=args,
+                    attrs=dict(instruction.attrs),
+                    source_pc=instruction.source_pc,
+                    source_line=instruction.source_line,
+                )
+            )
             return
         if op == "call":
             self._lower_call(block, instruction)
@@ -226,6 +305,18 @@ class _MachineLoweringContext:
                 )
             )
             return
+        if isinstance(constant, VBCNull):
+            result = self._define_result(instruction)
+            block.instructions.append(
+                MachineInstruction(
+                    "load_imm",
+                    result=result,
+                    args=[MachineOperand.imm(0)],
+                    source_pc=instruction.source_pc,
+                    source_line=instruction.source_line,
+                )
+            )
+            return
         if isinstance(constant, VBCFunction):
             if instruction.result is not None:
                 self.value_operands[instruction.result] = MachineOperand.symbol(constant.name)
@@ -248,13 +339,35 @@ class _MachineLoweringContext:
                 )
             )
             return
-        self._unsupported_feature(instruction, f"global_store:{target.name}")
+        if self.function.name == "<module>":
+            self.global_value_types[str(target.name)] = value.type_hint
+            block.instructions.append(
+                MachineInstruction(
+                    "store_stack",
+                    args=[MachineOperand.slot(self._global_slot(str(target.name))), value],
+                    source_pc=instruction.source_pc,
+                    source_line=instruction.source_line,
+                )
+            )
+            return
+        self.global_value_types.setdefault(str(target.name), value.type_hint)
+        block.instructions.append(
+            MachineInstruction(
+                "store_stack",
+                args=[MachineOperand.slot(self._global_slot(str(target.name))), value],
+                source_pc=instruction.source_pc,
+                source_line=instruction.source_line,
+            )
+        )
 
     def _lower_call(self, block: MachineBlock, instruction: IRInstruction) -> None:
         callee = self._operand(instruction.args[0], instruction)
         if callee.kind != "symbol":
             self._unsupported_feature(instruction, "dynamic_call")
         callee_name = str(callee.value)
+        if callee_name in {"_exit", "exit"}:
+            self._lower_exit(block, instruction)
+            return
         if callee_name in BUILTIN_FUNCTION_SIGNATURES:
             self._unsupported_feature(instruction, f"builtin_function:{callee_name}")
         if callee_name not in self.function_names:
@@ -263,17 +376,43 @@ class _MachineLoweringContext:
         for arg in args:
             if arg.type_hint not in {"int64", "bool64"}:
                 self._unsupported_feature(instruction, f"call_arg_type:{arg.type_hint}")
-        result = self._define_result(instruction)
         arg_locations = [
             WINDOWS_X64_ABI.argument_location(index).__dict__
             for index in range(len(args))
         ]
+        callee_return_type = self.function_return_types[callee_name]
+        if callee_return_type == "void" and self.function.name == "<module>" and callee_name == "main" and instruction.result is not None:
+            self.value_operands[instruction.result] = MachineOperand.imm(0)
+        result = None if callee_return_type == "void" else self._define_result(instruction, type_hint=callee_return_type)
         block.instructions.append(
             MachineInstruction(
                 "call",
                 result=result,
                 args=[callee, *args],
-                attrs={"argc": len(args), "arg_locations": arg_locations, "return_register": WINDOWS_X64_ABI.registers.return_register},
+                attrs={
+                    "argc": len(args),
+                    "arg_locations": arg_locations,
+                    "return_register": WINDOWS_X64_ABI.registers.return_register,
+                    "callee_return_type": callee_return_type,
+                },
+                source_pc=instruction.source_pc,
+                source_line=instruction.source_line,
+            )
+        )
+
+    def _lower_exit(self, block: MachineBlock, instruction: IRInstruction) -> None:
+        """lowering 受限 native _exit 调用。"""
+        args = [self._operand(value, instruction) for value in instruction.args[1:]]
+        if len(args) != 1:
+            self._unsupported_feature(instruction, "builtin_function:_exit_argc")
+        if args[0].type_hint not in {"int64", "bool64"}:
+            self._unsupported_feature(instruction, f"builtin_function:_exit_arg_type:{args[0].type_hint}")
+        if instruction.result is not None:
+            self.value_operands[instruction.result] = args[0]
+        block.instructions.append(
+            MachineInstruction(
+                "exit",
+                args=[args[0]],
                 source_pc=instruction.source_pc,
                 source_line=instruction.source_line,
             )
@@ -285,8 +424,9 @@ class _MachineLoweringContext:
         instruction: IRInstruction,
         op: str,
         attrs: dict[str, Any] | None = None,
+        type_hint: str = "int64",
     ) -> None:
-        result = self._define_result(instruction)
+        result = self._define_result(instruction, type_hint=type_hint)
         block.instructions.append(
             MachineInstruction(
                 op,
@@ -310,15 +450,24 @@ class _MachineLoweringContext:
                 source_line=terminator.source_line,
             )
         if terminator.op == "return":
-            args = [self._operand(terminator.args[0], terminator)] if terminator.args else [MachineOperand.imm(0)]
+            if self.function.return_type == "void":
+                args = []
+            elif terminator.args:
+                args = [self._operand(terminator.args[0], terminator)]
+            else:
+                args = [MachineOperand.imm(0)]
             return MachineTerminator("ret", args=args, source_pc=terminator.source_pc, source_line=terminator.source_line)
         if terminator.op == "halt":
-            return MachineTerminator("ret", args=[self.exit_code_value or MachineOperand.imm(0)], source_pc=terminator.source_pc, source_line=terminator.source_line)
+            args = [] if self.function.return_type == "void" else [self.exit_code_value or MachineOperand.imm(0)]
+            return MachineTerminator("ret", args=args, source_pc=terminator.source_pc, source_line=terminator.source_line)
         self._unsupported_feature(terminator, f"terminator:{terminator.op}")
 
-    def _define_result(self, instruction: IRInstruction, type_hint: str = "int64") -> MachineOperand:
+    def _define_result(self, instruction: IRInstruction, type_hint: str | None = None) -> MachineOperand:
         if instruction.result is None:
             self._unsupported_feature(instruction, "missing_result")
+        if type_hint is None:
+            result_type = str(instruction.result.type_hint or "").lower()
+            type_hint = "bool64" if result_type in _NATIVE_BOOL_CAST_TARGETS else "int64"
         result = MachineOperand.vreg(VirtualRegister(f"v{self.vreg_id}", type_hint))
         self.vreg_id += 1
         self.temp_slots.append(StackSlot("temp", len(self.temp_slots), WINDOWS_X64_ABI.word_size))
@@ -340,7 +489,9 @@ class _MachineLoweringContext:
             if isinstance(constant, VBCInteger):
                 return MachineOperand.imm(constant.value)
             if isinstance(constant, VBCBool):
-                return MachineOperand.imm(1 if constant.value else 0)
+                return MachineOperand("imm", 1 if constant.value else 0, "bool64")
+            if isinstance(constant, VBCNull):
+                return MachineOperand.imm(0)
             self._unsupported_type(node, str(getattr(getattr(constant, "_object_type", None), "name", type(constant).__name__)))
         self._unsupported_feature(node, f"operand:{value.kind}")
 
@@ -349,6 +500,14 @@ class _MachineLoweringContext:
         if slot is None:
             slot = StackSlot("local", index, WINDOWS_X64_ABI.word_size)
             self.local_slots[index] = slot
+        return slot
+
+    def _global_slot(self, name: str) -> StackSlot:
+        """取得模块入口内的受限全局标量栈槽。"""
+        slot = self.global_slots.get(name)
+        if slot is None:
+            slot = StackSlot("global", name, WINDOWS_X64_ABI.word_size)
+            self.global_slots[name] = slot
         return slot
 
     def _unsupported_type(self, node: IRInstruction | IRTerminator, type_name: str) -> None:
@@ -365,4 +524,3 @@ class _MachineLoweringContext:
         if node.source_pc is not None:
             parts.append(f"PC {node.source_pc}")
         return ", ".join(parts)
-

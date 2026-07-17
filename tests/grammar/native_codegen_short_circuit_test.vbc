@@ -1,0 +1,15 @@
+int fail() {
+    return 99;
+}
+
+int main() {
+    int left = 0;
+    int value = 0;
+    if (left && fail()) {
+        value = 40;
+    }
+    if (!left || fail()) {
+        value = value + 2;
+    }
+    return value;
+}

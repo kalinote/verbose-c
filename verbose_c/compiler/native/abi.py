@@ -37,6 +37,7 @@ class StackFrameLayout:
     """Machine IR 阶段的保守栈帧布局。"""
 
     word_size: int = 8
+    global_slots: list[object] = field(default_factory=list)
     local_slots: list[object] = field(default_factory=list)
     temp_slots: list[object] = field(default_factory=list)
     spill_slots: list[object] = field(default_factory=list)
@@ -44,8 +45,7 @@ class StackFrameLayout:
     @property
     def frame_size(self) -> int:
         """返回栈帧大小。"""
-        return (len(self.local_slots) + len(self.temp_slots) + len(self.spill_slots)) * self.word_size
+        return (len(self.global_slots) + len(self.local_slots) + len(self.temp_slots) + len(self.spill_slots)) * self.word_size
 
 
 WINDOWS_X64_ABI = WindowsX64ABI()
-

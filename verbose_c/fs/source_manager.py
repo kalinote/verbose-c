@@ -17,7 +17,7 @@ class SourceManager:
         if abs_path in self._lines:
             return "\n".join(self._lines[abs_path])
 
-        with open(abs_path, "r", encoding="utf-8") as f:
+        with open(abs_path, "r", encoding="utf-8-sig") as f:
             content = f.read()
         self._lines[abs_path] = content.splitlines()
         return content

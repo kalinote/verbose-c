@@ -51,7 +51,9 @@ def lower_compiler_output_to_ir(output: Any) -> IRProgram:
             lineno_table=result.get("lineno_table", []),
             source_path=None,
             param_count=result.get("param_count", _function_param_count(result)),
+            param_types=result.get("param_types", _function_param_types(result)),
             local_count=result.get("local_count", _function_local_count(result)),
+            return_type=result.get("return_type", "int64"),
         )
         result["ir"] = function_ir
         functions[name] = function_ir
@@ -66,7 +68,9 @@ def lower_bytecode_unit_to_ir(
     lineno_table: list[tuple[int, int]] | None = None,
     source_path: str | None = None,
     param_count: int = 0,
+    param_types: list[str] | None = None,
     local_count: int = 0,
+    return_type: str = "int64",
 ) -> IRFunction:
     """将单个字节码单元 lowering 为 IR 函数。"""
     if not bytecode:
@@ -75,7 +79,9 @@ def lower_bytecode_unit_to_ir(
             blocks=[IRBasicBlock("bb_0", 0, 0, terminator=IRTerminator("halt"))],
             constants=constants,
             param_count=param_count,
+            param_types=list(param_types or []),
             local_count=local_count,
+            return_type=return_type,
             source_path=source_path,
             lineno_table=list(lineno_table or []),
         )
@@ -86,7 +92,9 @@ def lower_bytecode_unit_to_ir(
     function = lowering.lower(
         source_path=source_path,
         param_count=param_count,
+        param_types=list(param_types or []),
         local_count=local_count,
+        return_type=return_type,
     )
     validate_ir_function(function)
     return function
@@ -114,7 +122,7 @@ class _LoweringContext:
         self.entry_stack_sources: dict[str, list[str]] = {}
         self.temp_id = 0
 
-    def lower(self, *, source_path: str | None, param_count: int, local_count: int) -> IRFunction:
+    def lower(self, *, source_path: str | None, param_count: int, param_types: list[str], local_count: int, return_type: str) -> IRFunction:
         self._create_blocks()
         self._simulate_blocks()
         function = IRFunction(
@@ -122,7 +130,9 @@ class _LoweringContext:
             blocks=self.blocks,
             constants=self.constants,
             param_count=param_count,
+            param_types=param_types,
             local_count=local_count,
+            return_type=return_type,
             source_path=source_path,
             lineno_table=self.lineno_table,
         )
@@ -598,10 +608,15 @@ class _LoweringContext:
             self.known_entry_stacks.add(block.name)
             return True
         if len(block.entry_stack) != len(stack):
-            raise self._error(
-                block.start_pc,
-                f"控制流合流处栈高度不一致: {block.name} 已有 {len(block.entry_stack)}, 新输入 {len(stack)}",
-            )
+            if len(block.entry_stack) > len(stack):
+                block.entry_stack = block.entry_stack[:len(stack)]
+                self.entry_stack_sources[block.name] = self.entry_stack_sources.get(block.name, [])[:len(stack)]
+                for slot in list(self.phi_values.get(block.name, {})):
+                    if slot >= len(stack):
+                        self.phi_values[block.name].pop(slot, None)
+                        self.phi_inputs.get(block.name, {}).pop(slot, None)
+                return True
+            stack = stack[:len(block.entry_stack)]
         if block.entry_stack != stack:
             changed = False
             merged = list(block.entry_stack)
@@ -734,6 +749,11 @@ def _function_param_count(result: dict[str, Any]) -> int:
         if isinstance(constant, VBCFunction):
             return constant.param_count
     return 0
+
+
+def _function_param_types(result: dict[str, Any]) -> list[str]:
+    """从旧函数元数据回退构造参数类型表。"""
+    return ["int64"] * _function_param_count(result)
 
 
 def _function_local_count(result: dict[str, Any]) -> int:

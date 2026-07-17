@@ -18,7 +18,7 @@ class StackSlot:
     """Machine IR 栈槽。"""
 
     kind: str
-    index: int
+    index: int | str
     size: int = 8
 
 
@@ -94,6 +94,7 @@ class MachineFunction:
     source_path: str | None = None
     virtual_register_count: int = 0
     exit_code_value: MachineOperand | None = None
+    param_types: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -102,4 +103,3 @@ class MachineProgram:
     abi: WindowsX64ABI
     module: MachineFunction
     functions: dict[str, MachineFunction] = field(default_factory=dict)
-

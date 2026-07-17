@@ -1,0 +1,9 @@
+int main() {
+    int base = 37;
+    int extra = 5;
+    int result = base + extra;
+    if (result == 42) {
+        return result;
+    }
+    return 1;
+}
