@@ -465,9 +465,15 @@ def run_parser_generation(
     )
 
 
-def run_source_file(
+def _dump_requires_fresh_compilation(dump_modules: set[str]) -> bool:
+    """判断 dump 是否需要源码级重新编译产物。"""
+    return bool({"all", "ir", "machine"} & dump_modules)
+
+
+def _run_file_pipeline(
     filename: str,
     *,
+    input_kind: str,
     log_modules: set[str],
     dump_modules: set[str],
     dump_path: str | None = None,
@@ -481,7 +487,30 @@ def run_source_file(
     native_result_path: str | None = None,
     native_export_request: NativeExportRequest | None = None,
 ) -> RunResult:
-    """编译并可选执行单个源文件，由 recorder 负责 log 与 dump 输出。"""
+    """
+    统一执行源码或字节码文件的编译输出流水线。
+
+    Args:
+        filename: 源码或字节码输入路径。
+        input_kind: 输入类型，仅支持 ``source`` 或 ``bytecode``。
+        log_modules: 需要输出到终端的日志模块。
+        dump_modules: 需要写入 dump 的流水线模块。
+        dump_path: 可选的 dump 输出路径。
+        output_path: 源码模式下的字节码产物路径。
+        execute: 未选择 native 模式时是否执行 VM 字节码。
+        refresh_parser: 源码模式下是否重新生成解析器。
+        show_warnings: 是否输出编译警告。
+        optimize_level: 源码模式下的优化等级。
+        run_native_memory: 是否在可执行内存中运行 native 入口。
+        run_native_pe: 是否生成临时 PE 并运行 native 入口。
+        native_result_path: 可选的 native 返回值输出路径。
+        native_export_request: 可选的 native 产物导出请求。
+
+    Returns:
+        包含编译、执行、导出和错误信息的统一运行结果。
+    """
+    if input_kind not in {"source", "bytecode"}:
+        raise ValueError(f"不支持的 engine 输入类型: {input_kind}")
     if dump_path is None and dump_modules:
         dump_path = create_dump_path(filename)
 
@@ -492,73 +521,98 @@ def run_source_file(
         dump_path=dump_path,
     )
 
-    compilation_result = None
+    compilation_output = None
     captured_error = None
     compile_warnings: list[str] = []
     exit_code = 0
     vm = None
     export_report = None
+    source_path = filename if input_kind == "source" else None
     artifact_store = ArtifactStore()
-    incremental_compiler = IncrementalCompiler(artifact_store)
-    artifact_path = output_path or artifact_store.artifact_path_for_source(filename)
+    if input_kind == "source":
+        artifact_path = output_path or artifact_store.artifact_path_for_source(filename)
+    else:
+        artifact_path = os.path.abspath(filename)
 
-    recorder.log_compile_start()
+    if input_kind == "source":
+        recorder.log_compile_start()
     try:
         export_request = native_export_request or NativeExportRequest()
-        needs_recompile = incremental_compiler.needs_recompile(
-            filename,
-            artifact_path=artifact_path,
-            optimize_level=optimize_level,
-            refresh_parser=refresh_parser,
-        )
-        if run_native_memory or run_native_pe or export_request.enabled or _dump_requires_fresh_compilation(dump_modules):
-            needs_recompile = True
-        if needs_recompile:
-            recorder.log_compile_engine()
-            compilation_result = compile_module(
-                file_path=filename,
-                refresh_parser=refresh_parser,
-                recorder=recorder,
-                optimize_level=optimize_level,
-                require_ir=("all" in dump_modules or "ir" in dump_modules),
-                require_machine=False,
-                require_native_code=run_native_memory or run_native_pe or export_request.enabled,
-            )
-            compile_warnings = compilation_result.warnings or []
-            if show_warnings and compile_warnings:
-                for warning_line in compile_warnings:
-                    print(f"警告: {warning_line}")
+        require_ir = bool({"all", "ir"} & dump_modules)
+        require_native_code = run_native_memory or run_native_pe or export_request.enabled
+        recorder_notified = False
 
-            artifact_store.save_bytecode(
-                artifact_path,
-                compilation_result.bytecode,
-                metadata={
-                    "constant_pool": compilation_result.constant_pool,
-                    "lineno_table": compilation_result.lineno_table,
-                    "source_path": os.path.abspath(filename),
-                    "labels": compilation_result.labels,
-                    "function_compilation_results": compilation_result.function_compilation_results,
-                },
-            )
-            incremental_compiler.write_manifest(
+        if input_kind == "source":
+            incremental_compiler = IncrementalCompiler(artifact_store)
+            needs_recompile = incremental_compiler.needs_recompile(
                 filename,
-                compilation_result.dependencies,
                 artifact_path=artifact_path,
                 optimize_level=optimize_level,
                 refresh_parser=refresh_parser,
             )
-            recorder.log_compile_done()
-            source_path = filename
+            if require_native_code or _dump_requires_fresh_compilation(dump_modules):
+                needs_recompile = True
+            if needs_recompile:
+                recorder.log_compile_engine()
+                compilation_output = compile_module(
+                    file_path=filename,
+                    refresh_parser=refresh_parser,
+                    recorder=recorder,
+                    optimize_level=optimize_level,
+                    require_ir=require_ir,
+                    require_machine=False,
+                    require_native_code=require_native_code,
+                )
+                recorder_notified = True
+                compile_warnings = compilation_output.warnings or []
+                if show_warnings and compile_warnings:
+                    for warning_line in compile_warnings:
+                        print(f"警告: {warning_line}")
+
+                artifact_store.save_bytecode(
+                    artifact_path,
+                    compilation_output.bytecode,
+                    metadata={
+                        "constant_pool": compilation_output.constant_pool,
+                        "lineno_table": compilation_output.lineno_table,
+                        "source_path": os.path.abspath(filename),
+                        "labels": compilation_output.labels,
+                        "function_compilation_results": compilation_output.function_compilation_results,
+                    },
+                )
+                incremental_compiler.write_manifest(
+                    filename,
+                    compilation_output.dependencies,
+                    artifact_path=artifact_path,
+                    optimize_level=optimize_level,
+                    refresh_parser=refresh_parser,
+                )
+                recorder.log_compile_done()
+            else:
+                compilation_output, source_path = _load_bytecode_compilation_output(artifact_path)
         else:
-            compilation_result, source_path = _load_bytecode_compilation_output(artifact_path)
-            recorder.on_compiled(compilation_result)
+            compilation_output, source_path = _load_bytecode_compilation_output(filename)
+            needs_backend = bool(
+                _dump_requires_fresh_compilation(dump_modules)
+                or require_native_code
+            )
+            if needs_backend:
+                _populate_backend_outputs(
+                    compilation_output,
+                    require_ir=require_ir,
+                    require_machine=False,
+                    require_native_code=require_native_code,
+                )
+
+        if not recorder_notified:
+            recorder.on_compiled(compilation_output)
 
         if run_native_memory:
-            exit_code = _run_native_memory_output(compilation_result, filename, native_result_path)
+            exit_code = _run_native_memory_output(compilation_output, filename, native_result_path)
         if run_native_pe:
-            exit_code = _run_native_pe_output(compilation_result, filename, native_result_path)
+            exit_code = _run_native_pe_output(compilation_output, filename, native_result_path)
         export_report = _emit_native_outputs(
-            compilation_result,
+            compilation_output,
             filename,
             export_request=export_request,
         )
@@ -566,7 +620,7 @@ def run_source_file(
         if not run_native_memory and not run_native_pe and execute:
             recorder.log_vm_start()
             exit_code, vm = _execute_compilation_output(
-                compilation_result,
+                compilation_output,
                 source_path=source_path,
                 recorder=recorder,
             )
@@ -578,7 +632,7 @@ def run_source_file(
         recorder.on_error(e)
     except VBCCompileError as e:
         if e.filepath is None:
-            e.filepath = filename
+            e.filepath = source_path or filename
         captured_error = e
         exit_code = 1
         print(f"编译错误: 文件 {e.filepath}")
@@ -605,16 +659,46 @@ def run_source_file(
         exit_code=exit_code,
         dump_path=final_path,
         artifact_path=artifact_path,
-        compilation_output=compilation_result,
+        compilation_output=compilation_output,
         warnings=compile_warnings,
         error=captured_error,
         export_report=export_report,
     )
 
 
-def _dump_requires_fresh_compilation(dump_modules: set[str]) -> bool:
-    """判断 dump 是否需要源码级重新编译产物。"""
-    return bool({"all", "ir", "machine"} & dump_modules)
+def run_source_file(
+    filename: str,
+    *,
+    log_modules: set[str],
+    dump_modules: set[str],
+    dump_path: str | None = None,
+    output_path: str | None = None,
+    execute: bool = True,
+    refresh_parser: bool = False,
+    show_warnings: bool = True,
+    optimize_level: int = 0,
+    run_native_memory: bool = False,
+    run_native_pe: bool = False,
+    native_result_path: str | None = None,
+    native_export_request: NativeExportRequest | None = None,
+) -> RunResult:
+    """编译并可选执行单个源文件，由 recorder 负责 log 与 dump 输出。"""
+    return _run_file_pipeline(
+        filename,
+        input_kind="source",
+        log_modules=log_modules,
+        dump_modules=dump_modules,
+        dump_path=dump_path,
+        output_path=output_path,
+        execute=execute,
+        refresh_parser=refresh_parser,
+        show_warnings=show_warnings,
+        optimize_level=optimize_level,
+        run_native_memory=run_native_memory,
+        run_native_pe=run_native_pe,
+        native_result_path=native_result_path,
+        native_export_request=native_export_request,
+    )
 
 
 def run_bytecode_file(
@@ -629,89 +713,16 @@ def run_bytecode_file(
     native_export_request: NativeExportRequest | None = None,
 ) -> RunResult:
     """加载并执行字节码产物，可选生成或执行 native 产物。"""
-    if dump_path is None and dump_modules:
-        dump_path = create_dump_path(filename)
-
-    recorder = PipelineRecorder(
-        source_filename=filename,
+    return _run_file_pipeline(
+        filename,
+        input_kind="bytecode",
         log_modules=log_modules,
         dump_modules=dump_modules,
         dump_path=dump_path,
-    )
-
-    captured_error = None
-    exit_code = 0
-    vm = None
-    compilation_output = None
-    export_report = None
-
-    try:
-        export_request = native_export_request or NativeExportRequest()
-        compilation_output, source_path = _load_bytecode_compilation_output(filename)
-        needs_backend = bool(
-            {"all", "ir", "machine"} & dump_modules
-            or run_native_memory
-            or run_native_pe
-            or export_request.enabled
-        )
-        if needs_backend:
-            _populate_backend_outputs(
-                compilation_output,
-                require_ir=False,
-                require_machine=False,
-                require_native_code=run_native_memory or run_native_pe or export_request.enabled,
-            )
-        recorder.on_compiled(compilation_output)
-
-        if run_native_memory:
-            exit_code = _run_native_memory_output(compilation_output, filename, native_result_path)
-        if run_native_pe:
-            exit_code = _run_native_pe_output(compilation_output, filename, native_result_path)
-        export_report = _emit_native_outputs(
-            compilation_output,
-            filename,
-            export_request=export_request,
-        )
-        recorder.on_artifacts_exported(export_report)
-        if not run_native_memory and not run_native_pe:
-            recorder.log_vm_start()
-            exit_code, vm = _execute_compilation_output(
-                compilation_output,
-                source_path=source_path,
-                recorder=recorder,
-            )
-            recorder.log_vm_done()
-
-    except VBCRuntimeError as e:
-        captured_error = e
-        exit_code = 1
-        recorder.on_error(e)
-    except VBCCompileError as e:
-        captured_error = e
-        exit_code = 1
-        print(f"编译错误: 文件 {e.filepath}")
-        for error_line in e.message.split('\n'):
-            print(f"    {error_line}")
-        recorder.on_error(e)
-    except Exception as e:
-        captured_error = e
-        exit_code = 1
-        print(f"发生了一个意外的内部错误: {e}")
-        traceback.print_exc()
-        recorder.on_error(e)
-    finally:
-        if vm is not None:
-            recorder.on_memory(vm.memory)
-        final_path = recorder.finalize(success=captured_error is None)
-
-    return RunResult(
-        success=captured_error is None,
-        exit_code=exit_code,
-        dump_path=final_path,
-        artifact_path=os.path.abspath(filename),
-        compilation_output=compilation_output,
-        error=captured_error,
-        export_report=export_report,
+        run_native_memory=run_native_memory,
+        run_native_pe=run_native_pe,
+        native_result_path=native_result_path,
+        native_export_request=native_export_request,
     )
 
 

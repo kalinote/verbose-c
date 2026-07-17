@@ -71,7 +71,7 @@
 | FIXME-003 | 中 | 待处理 | `codegen.py` 职责过载，文件和函数体量过大 |
 | FIXME-004 | 中 | 待处理 | native 模块跨文件依赖私有符号并重复定义常量 |
 | FIXME-005 | 中 | 待处理 | CLI 模式分发、冲突检测和结果处理重复 |
-| FIXME-006 | 中 | 待处理 | 源码与 `.vbb` engine 执行流程重复且行为已分叉 |
+| FIXME-006 | 中 | 已处理 | 源码与 `.vbb` engine 执行流程已统一，错误路径分叉已修复 |
 | FIXME-007 | 低 | 待处理 | native exporter 对 `.text` 和 PE 做重复校验 |
 | FIXME-008 | 低 | 待处理 | native codegen 测试文件过度集中 |
 | FIXME-009 | 低 | 待处理 | P2-4 状态文档过长且包含大量实现级细节 |
@@ -308,13 +308,15 @@ mode = {
 
 **优先级：中**
 
+**状态：已处理（2026-07-17）**
+
 **涉及文件：**
 
 - `verbose_c/engine/engine.py`
 - `run_source_file()`
 - `run_bytecode_file()`
 
-**当前情况：**
+**原有情况：**
 
 两个入口在获得 `CompilerOutput` 后重复完成：
 
@@ -329,6 +331,14 @@ mode = {
 - `RunResult` 组装。
 
 重复代码已经出现行为分叉：源码路径会在 `VBCCompileError.filepath` 为空时补上入口文件名，`.vbb` 路径直接打印 `e.filepath`，可能输出“编译错误: 文件 None”。
+
+**实施结果：**
+
+- `run_source_file()` 与 `run_bytecode_file()` 保持公开签名不变，统一委托 `_run_file_pipeline()`。
+- 源码编译、增量缓存和 `.vbb` 加载仍保留各自入口逻辑；获得 `CompilerOutput` 后共用 backend 要求计算、native/VM 执行、导出、异常转换、recorder 收尾和 `RunResult` 组装。
+- `.vbb` 后端错误缺少路径时优先使用内嵌源码路径，加载阶段失败则回退到 `.vbb` 输入路径；两条路径共用警告处理。
+- 显式 IR dump 在源码与 `.vbb` 路径上均要求 IR lowering 成功，Machine IR dump 继续保持宽容策略。
+- `tests/test_engine_execution.py` 覆盖错误路径、警告、IR required 标志和 recorder 单次收尾。
 
 **建议方案：**
 
