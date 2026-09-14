@@ -373,6 +373,8 @@ class _ASTConstantOptimizer:
         return node
 
     def _optimize_SwitchLabelNode(self, node: SwitchLabelNode, env: _OptimizationEnv):
+        # 标签既可直接分派进入，也可由上一分支贯穿进入。
+        env.clear_all()
         if node.value is not None:
             node.value = self._optimize_expr(node.value, env)
         return node
@@ -494,6 +496,9 @@ class _ASTConstantOptimizer:
 
         node.right = self._optimize_expr(node.right, env)
         right = self._constant_value(node.right)
+        if left is None:
+            # 右侧可能被短路，不能将该路径的赋值传播到合流之后。
+            env.clear_all()
         if left is None or right is None:
             return node
 
@@ -526,10 +531,8 @@ class _ASTConstantOptimizer:
             self.stats.inlined_functions += 1
             return self._optimize_expr(inlined, env)
 
-        if self._contains_address_of(node):
-            env.clear_all()
-        else:
-            env.clear_globals()
+        # 未内联的调用可能经由指针参数或已逃逸地址修改局部变量。
+        env.clear_all()
         self.stats.skip("函数调用")
         return node
 
@@ -752,20 +755,6 @@ class _ASTConstantOptimizer:
             return None
         self._nested_scope_indices[table] = current_index + 1
         return table.get_nested_scope(current_index)
-
-    def _contains_address_of(self, node: ASTNode) -> bool:
-        if isinstance(node, UnaryOpNode) and node.op == Operator.ADDRESS_OF:
-            return True
-        for value in node.__dict__.values():
-            if isinstance(value, ASTNode) and self._contains_address_of(value):
-                return True
-            if isinstance(value, list):
-                if any(isinstance(item, ASTNode) and self._contains_address_of(item) for item in value):
-                    return True
-            if isinstance(value, dict):
-                if any(isinstance(item, ASTNode) and self._contains_address_of(item) for item in value.values()):
-                    return True
-        return False
 
     def _is_side_effect_free_expr(self, node: ASTNode) -> bool:
         """判断表达式能否在分支合并时安全删除。"""

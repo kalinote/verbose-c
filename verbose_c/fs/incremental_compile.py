@@ -10,6 +10,7 @@ class IncrementalCompiler:
     """依赖感知的入口翻译单元缓存复用。"""
 
     SCHEMA_VERSION = 1
+    COMPILER_REVISION = 1  # 编译语义变化时递增，避免复用旧编译器生成的字节码。
 
     def __init__(self, artifact_store: ArtifactStore | None = None) -> None:
         self.artifact_store = artifact_store or ArtifactStore()
@@ -33,6 +34,8 @@ class IncrementalCompiler:
             return True
 
         if manifest.get("schema_version") != self.SCHEMA_VERSION:
+            return True
+        if manifest.get("compiler_revision") != self.COMPILER_REVISION:
             return True
         if manifest.get("entry_path") != entry_path:
             return True
@@ -86,6 +89,7 @@ class IncrementalCompiler:
 
         manifest = {
             "schema_version": self.SCHEMA_VERSION,
+            "compiler_revision": self.COMPILER_REVISION,
             "entry_path": entry_path,
             "artifact_path": artifact_path,
             "format_version": ArtifactStore.FORMAT_VERSION,

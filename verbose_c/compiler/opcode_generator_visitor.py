@@ -82,6 +82,12 @@ class OpcodeGenerator(VisitorBase):
             self.current_line = node.start_line
         return super().visit(node)
 
+    def _visit_statement(self, node: ASTNode) -> None:
+        """生成语句并丢弃未包装为表达式语句的赋值结果。"""
+        self.visit(node)
+        if isinstance(node, (AssignmentNode, CompoundAssignmentNode, UpdateExprNode)):
+            self._emit(Opcode.POP)
+
     # 工具方法
     def _emit(self, opcode: Opcode, operand=None):
         """
@@ -413,7 +419,6 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.STORE_BY_POINTER)
         elif isinstance(target, GetPropertyNode):
             struct_type = getattr(target, "_struct_type", None)
-            self._emit(Opcode.DUP)
             if struct_type is not None:
                 slot_count, offset = self._struct_field_operand(target, struct_type)
                 self._emit_struct_base(target.obj, target.via_pointer)
@@ -425,7 +430,6 @@ class OpcodeGenerator(VisitorBase):
                 self._emit(Opcode.SET_PROPERTY)
         elif isinstance(target, SubscriptNode):
             operand = self._subscript_operand(target)
-            self._emit(Opcode.DUP)
             if operand is not None:
                 size, elem_enum = operand
                 self._emit_subscript_base(target.base)
@@ -520,7 +524,7 @@ class OpcodeGenerator(VisitorBase):
         
         # TODO 暂时遍历执行所有语句，后续进一步完善
         for statement in node.body:
-            self.visit(statement)
+            self._visit_statement(statement)
 
         main_symbol = self.symbol_table.lookup_value("main")
         main_type = main_symbol.type_ if main_symbol else None
@@ -676,7 +680,7 @@ class OpcodeGenerator(VisitorBase):
             if emit_runtime_scope:
                 self._emit(Opcode.ENTER_SCOPE)
             for statement in node.statements:
-                self.visit(statement)
+                self._visit_statement(statement)
             if emit_runtime_scope:
                 self._emit(Opcode.EXIT_SCOPE)
             self.symbol_table = original_symbol_table
@@ -693,7 +697,7 @@ class OpcodeGenerator(VisitorBase):
         self._nested_scope_indices[original_symbol_table] = current_index + 1
 
         for statement in node.statements:
-            self.visit(statement)
+            self._visit_statement(statement)
 
         self.symbol_table = original_symbol_table
 
@@ -750,6 +754,7 @@ class OpcodeGenerator(VisitorBase):
                     idx_const = self._add_constant(VBCInteger(i, VBCObjectType.INT))
                     self._emit(Opcode.LOAD_CONSTANT, idx_const)
                     self._emit(Opcode.STORE_INDEX, (symbol.type_.size, elem_enum))
+                    self._emit(Opcode.POP)
             return
 
         if node.init_exp:
@@ -958,7 +963,7 @@ class OpcodeGenerator(VisitorBase):
             if isinstance(item, SwitchLabelNode):
                 self._mark_label(label_map[id(item)])
             else:
-                self.visit(item)
+                self._visit_statement(item)
 
         self._mark_label(switch_end_label)
         self.switch_stack.pop()

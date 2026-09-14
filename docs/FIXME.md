@@ -67,14 +67,14 @@
 | 编号 | 优先级 | 状态 | 问题 |
 | --- | --- | --- | --- |
 | FIXME-001 | 高 | 待处理 | 后端阶段捕获所有 `Exception`，可能掩盖内部缺陷 |
-| FIXME-002 | 中 | 待处理 | P2-5 文档状态与现有最小 PE 实现冲突 |
+| FIXME-002 | 中 | 已处理 | P2-5 已标记为部分完成，并区分调试用最小 PE 与正式 runtime/AOT |
 | FIXME-003 | 中 | 待处理 | `codegen.py` 职责过载，文件和函数体量过大 |
 | FIXME-004 | 中 | 待处理 | native 模块跨文件依赖私有符号并重复定义常量 |
 | FIXME-005 | 中 | 待处理 | CLI 模式分发、冲突检测和结果处理重复 |
 | FIXME-006 | 中 | 已处理 | 源码与 `.vbb` engine 执行流程已统一，错误路径分叉已修复 |
 | FIXME-007 | 低 | 待处理 | native exporter 对 `.text` 和 PE 做重复校验 |
 | FIXME-008 | 低 | 待处理 | native codegen 测试文件过度集中 |
-| FIXME-009 | 低 | 待处理 | P2-4 状态文档过长且包含大量实现级细节 |
+| FIXME-009 | 低 | 部分处理 | P2-4 状态正文已精简，独立 native 设计文档仍待补充 |
 
 ## 3. 详细问题
 
@@ -117,13 +117,15 @@ IR lowering、Machine IR lowering 和 native codegen 三个阶段均使用 `exce
 
 **优先级：中**
 
+**状态：已处理（2026-07-17）**
+
 **涉及文件：**
 
 - `docs/FEATURE_IMPLEMENTATION_TARGETS.md`
 - `verbose_c/compiler/native/pe_writer.py`
 - `verbose_c/engine/engine.py`
 
-**当前情况：**
+**原有情况：**
 
 P2-4 已经具备：
 
@@ -151,6 +153,14 @@ P2-4 已经具备：
 已完成：调试用最小 PE32+，单 .text、无导入、无 runtime
 未完成：.rdata、导入表、正式重定位、runtime ABI、堆、字符串、I/O、完整独立 AOT
 ```
+
+**实施结果：**
+
+- `FEATURE_IMPLEMENTATION_TARGETS.md` 的主线路线图已将 P2-5 从“未完成”改为“部分完成”。
+- P2-5 已明确记录固定 DOS header、PE/COFF header、PE32+ Optional Header、单 `.text`、入口写出、map 校验和 Windows loader 执行为已完成能力。
+- `.rdata`、导入表、基址重定位、native runtime ABI、堆、字符串、I/O 和正式 AOT 入口继续保留为未完成项。
+- P2-4 只把最小 PE 作为跨阶段调试验证入口引用，不再与 P2-5 对同一 PE 写出能力给出相反状态。
+- 顶部主线路线图和文末能力现状表已同步为同一状态口径。
 
 **验收标准：**
 
@@ -444,11 +454,13 @@ tests/native/
 
 **优先级：低**
 
+**状态：部分处理（2026-07-17）**
+
 **涉及文件：**
 
 - `docs/FEATURE_IMPLEMENTATION_TARGETS.md`
 
-**当前情况：**
+**原有情况：**
 
 P2-4 状态中混入大量字段级 schema、地址计算、SHA-256、负向测试和 runner 前置校验细节。部分单行超过 1000 字符，最长接近 4000 字符。
 
@@ -477,6 +489,13 @@ docs/NATIVE_MAP_FORMAT.md
 docs/NATIVE_PE_MVP.md
 ```
 
+**实施结果：**
+
+- `FEATURE_IMPLEMENTATION_TARGETS.md` 的 P2-4 正文已收敛为完成状态、目标能力、支持边界和验收入口四类信息。
+- P2-4 从实现日志式长段落精简为 20 行，最长单行降至 213 个字符，不再枚举 map schema、PE 字段、地址推导、SHA-256 和负向测试 case。
+- 调试用最小 PE 的完成状态统一归入 P2-5，P2-4 仅保留跨阶段引用，两个目标不再重复维护同一实现清单。
+- 本次按任务范围只修改状态目标文档，尚未新增 `NATIVE_BACKEND.md`、`NATIVE_MAP_FORMAT.md` 或 `NATIVE_PE_MVP.md`；独立设计文档仍作为 FIXME-009 的剩余工作。
+
 **验收标准：**
 
 - P2-4 状态可以在一屏内快速判断完成度和边界。
@@ -488,7 +507,7 @@ docs/NATIVE_PE_MVP.md
 ### 第一阶段：修正可靠性和状态偏差
 
 1. 处理 FIXME-001，收紧后端异常捕获。
-2. 处理 FIXME-002，修正 P2-5 当前状态。
+2. 【已处理】FIXME-002：P2-5 已改为“部分完成”，最小 PE 与正式 runtime/AOT 边界已明确。
 3. 为 `.vbb` 缺失错误路径补测试，作为 FIXME-006 的最小前置修复。
 
 这一阶段应保持机器码、map 和 CLI 接口不变。
@@ -513,8 +532,8 @@ docs/NATIVE_PE_MVP.md
 ### 第四阶段：降低维护成本
 
 1. 拆分 `tests/test_native_codegen.py`。
-2. 精简 P2-4 状态正文。
-3. 新增 native backend、map 和 PE 设计文档。
+2. 【部分处理】FIXME-009：P2-4 状态正文已精简。
+3. 补充 FIXME-009 剩余工作：新增 native backend、map 和 PE 设计文档。
 
 ## 5. 重构约束
 

@@ -1,9 +1,13 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
-from verbose_c.engine.engine import CompilerOutput, run_bytecode_file, run_source_file
+import pytest
+
+from verbose_c.engine.engine import CompilerOutput, compile_module, run_bytecode_file, run_source_file
 from verbose_c.engine.recorder import PipelineRecorder
 from verbose_c.error import VBCCompileError, VBCRuntimeError
+from verbose_c.fs.incremental_compile import IncrementalCompiler
 
 
 def test_source_and_bytecode_native_errors_use_embedded_source_path(tmp_path, capsys):
@@ -214,3 +218,43 @@ def test_recorder_receives_compiled_output_once_for_each_input(tmp_path, monkeyp
     )
     assert bytecode_result.success
     assert on_compiled.call_count == 1
+
+
+@pytest.mark.parametrize("stored_revision", [None, 0])
+def test_source_recompiles_old_compiler_cache(tmp_path, monkeypatch, stored_revision):
+    """
+    验证旧编译器缓存会被重建，而更新后的缓存仍可复用。
+
+    Args:
+        tmp_path: 隔离的缓存目录。
+        monkeypatch: 用于记录实际编译次数的测试工具。
+        stored_revision: 模拟缺少修订号或修订号过期的清单。
+    """
+    source_path = tmp_path / "cache_revision.vbc"
+    bytecode_path = tmp_path / "cache_revision.vbb"
+    source_path.write_text("int main() { return 10; }", encoding="utf-8")
+    result = run_source_file(
+        str(source_path), log_modules=set(), dump_modules=set(), output_path=str(bytecode_path),
+    )
+    assert result.success
+
+    manifest_path = bytecode_path.with_suffix(".vbb.deps.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if stored_revision is None:
+        manifest.pop("compiler_revision", None)
+    else:
+        manifest["compiler_revision"] = stored_revision
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    bytecode_path.write_bytes(b"invalid legacy bytecode")
+
+    compile_spy = Mock(wraps=compile_module)
+    monkeypatch.setattr("verbose_c.engine.engine.compile_module", compile_spy)
+    for _ in range(2):
+        result = run_source_file(
+            str(source_path), log_modules=set(), dump_modules=set(), output_path=str(bytecode_path),
+        )
+        assert result.success, result.error
+        assert result.exit_code == 10
+        assert compile_spy.call_count == 1
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["compiler_revision"] == IncrementalCompiler.COMPILER_REVISION
