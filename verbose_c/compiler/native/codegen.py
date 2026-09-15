@@ -1,9 +1,12 @@
 import hashlib
 import json
 from dataclasses import dataclass, field
+from verbose_c.object.numeric import INTEGER_KIND_NAMES, INTEGER_LIMITS, integer_divmod, float_bits
+from verbose_c.object.enum import VBCObjectType
 
-from verbose_c.compiler.native.abi import WINDOWS_X64_ABI, WindowsX64ABI
+from verbose_c.compiler.native.abi import WINDOWS_X64_ABI, WindowsX64ABI, FLOAT_VALUE_TYPES, SCALAR_VALUE_TYPES
 from verbose_c.compiler.native.encoder import (
+    encode_sse_transfer,
     ConditionCode,
     encode_add_rax_r10,
     encode_add_rdx_r10,
@@ -45,6 +48,7 @@ from verbose_c.compiler.native.encoder import (
 from verbose_c.compiler.native.errors import NativeCodegenError
 from verbose_c.compiler.native.machine_ir import MachineBlock, MachineFunction, MachineInstruction, MachineOperand, MachineProgram, MachineTerminator
 from verbose_c.compiler.native.target import NativeTarget
+from verbose_c.compiler.native.runtime import RUNTIME_SIGNATURES, append_runtime
 
 
 @dataclass(frozen=True)
@@ -177,6 +181,7 @@ class NativeCodeProgram:
     entry_offset: int = 0
     abi: WindowsX64ABI = WINDOWS_X64_ABI
     symbols: list[NativeSymbol] = field(default_factory=list)
+    runtime: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -206,8 +211,8 @@ _COMPARE_OPS = {
     "cmp_ge": ConditionCode.GE,
 }
 
-_SUPPORTED_RETURN_TYPES = {"int64", "bool64", "void"}
-_SUPPORTED_VALUE_TYPES = {"int64", "bool64"}
+_SUPPORTED_RETURN_TYPES = SCALAR_VALUE_TYPES | {"void"}
+_SUPPORTED_VALUE_TYPES = SCALAR_VALUE_TYPES
 _VALUE_OPERAND_KINDS = {"imm", "slot", "vreg"}
 _RESULT_OPERAND_KINDS = {"vreg"}
 _BOOL64_RESULT_OPS = {"not_bool", "cast_int_bool", *_COMPARE_OPS}
@@ -218,14 +223,11 @@ _INTEGER_CAST_TARGET_TYPES = {
     "long",
     "longlong",
     "long long",
-    "nlint",
-    "unlimited int",
     "int64",
 }
 _BOOL_CAST_TARGET_TYPES = {"bool", "bool64"}
 _NARROW_INTEGER_CAST_RANGES = {
-    "char": (-128, 127),
-    "short": (-32768, 32767),
+    name: INTEGER_LIMITS[kind] for name, kind in INTEGER_KIND_NAMES.items() if kind in INTEGER_LIMITS
 }
 _PE_DOS_HEADER_SIZE = 64
 _PE_LFANEW = 0x80
@@ -564,7 +566,7 @@ _INT64_MIN = -(2**63)
 _INT64_MAX = 2**63 - 1
 _INT32_MAX = 2**31 - 1
 _SUPPORTED_ARGUMENT_REGISTERS = {"RCX", "RDX", "R8", "R9"}
-_SUPPORTED_VREG_TYPES = {"int64", "bool64"}
+_SUPPORTED_VREG_TYPES = SCALAR_VALUE_TYPES
 
 
 def _function_param_types(function: MachineFunction) -> list[str]:
@@ -674,7 +676,7 @@ def generate_native_code(program: MachineProgram) -> NativeCodeProgram:
                 raise NativeCodegenError(f"native 机器码 MVP 函数 {function.name} 第 {index} 个参数暂不支持类型 {param_type}")
     for function in ordered_functions:
         for index, param in enumerate(function.params):
-            expected = program.abi.argument_location(index)
+            expected = program.abi.argument_location(index, _function_param_types(function)[index])
             if param != expected:
                 raise NativeCodegenError(
                     f"native 机器码 MVP 函数 {function.name} 第 {index} 个参数位置不符合 ABI: "
@@ -718,6 +720,20 @@ def generate_native_code(program: MachineProgram) -> NativeCodeProgram:
         for name, function in program.functions.items()
     }
     function_param_types[entry_function.name] = _function_param_types(entry_function)
+    needs_runtime = any(
+        instruction.op == "load_string" or (
+            instruction.op == "call" and instruction.args
+            and instruction.args[0].value in RUNTIME_SIGNATURES
+        )
+        for function in ordered_functions for block in function.blocks
+        for instruction in block.instructions
+    )
+    if needs_runtime:
+        function_names.update(RUNTIME_SIGNATURES)
+        for name, (return_type, param_types) in RUNTIME_SIGNATURES.items():
+            function_return_types[name] = return_type
+            function_param_counts[name] = len(param_types)
+            function_param_types[name] = list(param_types)
     for function in ordered_functions:
         _validate_block_structure(function)
         _validate_operand_storage_shapes(function)
@@ -744,6 +760,11 @@ def generate_native_code(program: MachineProgram) -> NativeCodeProgram:
             function.name == global_frame_owner_name,
         ).generate()
         functions[function.name] = generated
+    runtime = {}
+    if needs_runtime:
+        runtime = append_runtime(code, functions, entry_name)
+        function_offsets.update({name: function.offset for name, function in functions.items()})
+        entry_name = "<native:start>"
     _patch_pending_calls(code, pending_calls, function_offsets, functions)
     program_code = bytes(code)
     for name, function in list(functions.items()):
@@ -772,6 +793,7 @@ def generate_native_code(program: MachineProgram) -> NativeCodeProgram:
         code=program_code,
         entry_offset=functions[entry_name].offset,
         abi=program.abi,
+        runtime=runtime,
         symbols=[
             NativeSymbol(
                 name=function.name,
@@ -1017,6 +1039,13 @@ def _validate_instruction_shapes(function: MachineFunction) -> None:
     for block in function.blocks:
         for instruction in block.instructions:
             op = instruction.op
+            if op == "load_string":
+                _require_result_kind(function, instruction, _RESULT_OPERAND_KINDS)
+                _require_result_type(function, instruction, "string")
+                _require_arg_count(function, instruction, 0)
+                if not isinstance(instruction.attrs.get("value"), str):
+                    raise _machine_node_error(function, instruction, "字符串常量必须包含文本 value")
+                continue
             if op == "load_imm":
                 _require_result_kind(function, instruction, _RESULT_OPERAND_KINDS)
                 _require_arg_count(function, instruction, 1)
@@ -1050,18 +1079,42 @@ def _validate_instruction_shapes(function: MachineFunction) -> None:
                 _require_operand_kinds(function, instruction, 0, {"symbol"})
                 _require_operand_kinds(function, instruction, 1, {"symbol"})
                 continue
+            if op in {"fadd", "fsub", "fimul", "fidiv", "fcmp_eq", "fcmp_ne", "fcmp_lt", "fcmp_le", "fcmp_gt", "fcmp_ge", "fneg", "cast_float"}:
+                _require_result_kind(function, instruction, _RESULT_OPERAND_KINDS)
+                _require_arg_count(function, instruction, 1 if op in {"fneg", "cast_float"} else 2)
+                for index, operand in enumerate(instruction.args):
+                    _require_operand_kinds(function, instruction, index, _VALUE_OPERAND_KINDS)
+                    if op != "cast_float" and operand.type_hint not in FLOAT_VALUE_TYPES:
+                        raise _machine_node_error(function, instruction, "浮点运算需要浮点操作数")
+                if op.startswith("fcmp_"):
+                    _require_result_type(function, instruction, "bool64")
+                elif op == "cast_float":
+                    target = instruction.attrs.get("target_type")
+                    expected = {"float": "float32", "double": "float64"}.get(target, "int64")
+                    if target not in {"float", "double", *_INTEGER_CAST_TARGET_TYPES}:
+                        raise _machine_node_error(function, instruction, "不支持的浮点转换目标")
+                    _require_result_type(function, instruction, expected)
+                else:
+                    _require_result_type(function, instruction, instruction.args[0].type_hint)
+                if len(instruction.args) == 2 and instruction.args[0].type_hint != instruction.args[1].type_hint:
+                    raise _machine_node_error(function, instruction, "浮点运算的两侧类型必须相同")
+                continue
             if op in _BINARY_OP_ASM or op in _COMPARE_OPS:
                 _require_result_kind(function, instruction, _RESULT_OPERAND_KINDS)
                 _require_result_type(function, instruction, "bool64" if op in _COMPARE_OPS else "int64")
                 _require_arg_count(function, instruction, 2)
                 _require_operand_kinds(function, instruction, 0, _VALUE_OPERAND_KINDS)
                 _require_operand_kinds(function, instruction, 1, _VALUE_OPERAND_KINDS)
+                if any(arg.type_hint not in {"int64", "bool64"} for arg in instruction.args):
+                    raise _machine_node_error(function, instruction, "整数运算不能使用浮点或字符串操作数")
                 continue
             if op in {"neg", "not_bool", "cast_bool_int", "cast_int_bool"}:
                 _require_result_kind(function, instruction, _RESULT_OPERAND_KINDS)
                 _require_result_type(function, instruction, "bool64" if op in _BOOL64_RESULT_OPS else "int64")
                 _require_arg_count(function, instruction, 1)
                 _require_operand_kinds(function, instruction, 0, _VALUE_OPERAND_KINDS)
+                if op in {"neg", "cast_bool_int"} and instruction.args[0].type_hint in FLOAT_VALUE_TYPES:
+                    raise _machine_node_error(function, instruction, "整数运算不能使用浮点操作数")
                 if op == "cast_bool_int":
                     target_type = instruction.attrs.get("target_type")
                     if not isinstance(target_type, str) or not target_type:
@@ -1106,7 +1159,7 @@ def _validate_terminator_shapes(function: MachineFunction) -> None:
                 raise _machine_node_error(function, terminator, "native 机器码 MVP ret 不应携带跳转目标")
             if function.return_type == "void" and terminator.args:
                 raise _machine_node_error(function, terminator, "native 机器码 MVP void 函数 ret 不应携带返回值")
-            if function.return_type in {"int64", "bool64"} and len(terminator.args) != 1:
+            if function.return_type in SCALAR_VALUE_TYPES and len(terminator.args) != 1:
                 raise _machine_node_error(function, terminator, f"native 机器码 MVP {function.return_type} 函数 ret 必须携带 1 个返回值")
             if terminator.args:
                 _require_operand_kinds(function, terminator, 0, _VALUE_OPERAND_KINDS)
@@ -1383,25 +1436,26 @@ def _walk_static_known_block(
     known_values = dict(in_values)
     known_slots = dict(in_slots)
     for instruction in block.instructions:
+        reject_static_error = raise_idiv_errors and "numeric_kind" not in instruction.attrs
         if instruction.op in {"idiv", "imod"}:
             dividend = instruction.args[0]
             divisor = instruction.args[1]
             known_dividend = _static_known_value(dividend, known_values, known_slots)
             known_divisor = _static_known_value(divisor, known_values, known_slots)
-            if raise_idiv_errors and known_divisor == 0:
+            if reject_static_error and known_divisor == 0:
                 raise _machine_node_error(
                     function,
                     instruction,
                     "native 机器码 MVP 暂不生成除数为 0 的 idiv/imod 机器码",
                 )
-            if raise_idiv_errors and known_dividend == _INT64_MIN and known_divisor == -1:
+            if reject_static_error and known_dividend == _INT64_MIN and known_divisor == -1:
                 raise _machine_node_error(
                     function,
                     instruction,
                     "native 机器码 MVP 暂不生成会触发 signed int64 溢出的 idiv/imod 机器码",
                 )
         _, overflows = _static_wrapping_arithmetic_result(instruction, known_values, known_slots)
-        if raise_idiv_errors and overflows:
+        if reject_static_error and overflows:
             raise _machine_node_error(
                 function,
                 instruction,
@@ -1444,9 +1498,8 @@ def _static_instruction_result_value(
         if instruction.op in {"idiv", "imod"}:
             if right == 0 or (left == _INT64_MIN and right == -1):
                 return None
-            quotient = abs(left) // abs(right)
-            quotient = quotient if left * right >= 0 else -quotient
-            return _static_int64_value(quotient if instruction.op == "idiv" else left % right)
+            quotient, remainder = integer_divmod(left, right)
+            return _static_int64_value(quotient if instruction.op == "idiv" else remainder)
         if instruction.op == "cmp_eq":
             return 1 if left == right else 0
         if instruction.op == "cmp_ne":
@@ -1466,8 +1519,12 @@ def _static_instruction_result_value(
         if instruction.op == "neg":
             return _static_int64_value(-value)
         if instruction.op == "not_bool":
+            if instruction.args[0].type_hint in FLOAT_VALUE_TYPES:
+                value &= 0x7FFFFFFF if instruction.args[0].type_hint == "float32" else 0x7FFFFFFFFFFFFFFF
             return 0 if value else 1
         if instruction.op == "cast_int_bool":
+            if instruction.args[0].type_hint in FLOAT_VALUE_TYPES:
+                value &= 0x7FFFFFFF if instruction.args[0].type_hint == "float32" else 0x7FFFFFFFFFFFFFFF
             return 1 if value else 0
         return _static_int64_value(value)
     return None
@@ -1652,6 +1709,27 @@ def _machine_node_error(function: MachineFunction, node: MachineInstruction | Ma
 
 def format_native_code_program(program: NativeCodeProgram) -> str:
     """生成 x64 机器码 dump 文本。"""
+    if program.runtime:
+        metadata = native_code_program_map(program)
+        lines = ["## x64 机器码\n\n", f"- 目标平台: `{program.target.value}`\n",
+                 f"- 内存入口: `{program.entry.name}`\n",
+                 f"- PE 入口 RVA: `0x{metadata['pe_address_of_entry_point']:08X}`\n",
+                 "- 内置运行时: Windows 标准流、UTF-8 字符串、私有堆\n",
+                 "- 系统导入: KERNEL32.dll\n\n",
+                 "### PE 文件布局\n\n",
+                 "| 节 | RVA | 文件偏移 | 文件大小 | 权限 |\n",
+                 "| --- | --- | --- | --- | --- |\n"]
+        for section in metadata["sections"]:
+            header = section["pe_section_header"]
+            lines.append(f"| {section['name']} | 0x{section['rva']:08X} | {header['PointerToRawData']} | "
+                         f"{header['SizeOfRawData']} | {', '.join(section['permissions'])} |\n")
+        lines.append("\n### KERNEL32 导入\n\n" + ", ".join(program.runtime["iat_offsets"]) + "\n\n")
+        for function in program.functions.values():
+            if function.name.startswith("<native:"):
+                lines.append(f"- 内置函数 `{function.name}`: 偏移 {function.offset}，大小 {len(function.code)} 字节\n")
+            else:
+                lines.extend(_format_function(function, program.functions))
+        return "".join(lines)
     text_rva = _PE_TEXT_RVA
     image_base = _PE_IMAGE_BASE
     code_size = len(program.code)
@@ -1755,6 +1833,15 @@ def format_native_code_program(program: NativeCodeProgram) -> str:
 
 
 def native_code_program_map(program: NativeCodeProgram) -> dict[str, object]:
+    """生成代码 map，并按需补上 Windows I/O 运行时节。"""
+    metadata = _native_code_program_map(program)
+    if program.runtime:
+        from verbose_c.compiler.native.runtime_image import runtime_image_map
+        metadata = runtime_image_map(metadata, program.runtime)
+    return metadata
+
+
+def _native_code_program_map(program: NativeCodeProgram) -> dict[str, object]:
     """生成 native 机器码结构化 map。"""
     code_size = len(program.code)
     code_sha256 = hashlib.sha256(program.code).hexdigest()
@@ -2267,6 +2354,10 @@ def _native_value_location(function_name: str, slot: NativeStackSlotAllocation) 
 
 def validate_native_code_map_bytes(code: bytes, metadata: dict[str, object]) -> None:
     """校验 raw native 机器码字节与 map 摘要一致。"""
+    if isinstance(metadata, dict) and metadata.get("schema_version") == 2 and "runtime" in metadata:
+        from verbose_c.compiler.native.runtime_image import validate_runtime_map
+        validate_runtime_map(code, metadata)
+        return
     if not isinstance(code, bytes):
         raise NativeCodegenError(f"native 机器码 raw bytes 必须是 bytes，实际 {type(code).__name__}")
     if not isinstance(metadata, dict):
@@ -2328,7 +2419,7 @@ def validate_native_code_map_bytes(code: bytes, metadata: dict[str, object]) -> 
     supported_value_types = abi.get("supported_value_types")
     if not isinstance(supported_value_types, list) or any(not isinstance(item, str) for item in supported_value_types):
         raise NativeCodegenError("native 机器码 map abi.supported_value_types 必须是字符串列表")
-    if set(supported_value_types) != _SUPPORTED_RETURN_TYPES:
+    if set(supported_value_types) not in (_SUPPORTED_RETURN_TYPES, _SUPPORTED_RETURN_TYPES - {"string"}):
         raise NativeCodegenError(
             f"native 机器码 map abi.supported_value_types 必须为 {_SUPPORTED_RETURN_TYPES}，实际 {supported_value_types!r}"
         )
@@ -3149,13 +3240,15 @@ def validate_native_code_map_bytes(code: bytes, metadata: dict[str, object]) -> 
             raise NativeCodegenError(f"native 机器码 map 函数 {name} register_allocation.argument_registers 必须是字符串列表")
         if len(set(allocation_argument_registers)) != len(allocation_argument_registers):
             raise NativeCodegenError(f"native 机器码 map 函数 {name} register_allocation.argument_registers 不能重复")
-        expected_argument_prefix = list(abi["argument_registers"][:len(allocation_argument_registers)])
+        return_type, param_types = function_signatures[name]
+        expected_argument_prefix = [f"XMM{index}" if index < len(param_types) and param_types[index] in FLOAT_VALUE_TYPES else register
+                                    for index, register in enumerate(abi["argument_registers"][:len(allocation_argument_registers)])]
         if allocation_argument_registers != expected_argument_prefix:
             raise NativeCodegenError(
                 f"native 机器码 map 函数 {name} register_allocation.argument_registers 与 ABI 前缀不一致: "
                 f"记录 {allocation_argument_registers}, 期望 {expected_argument_prefix}"
             )
-        if register_allocation["return_register"] != abi["return_register"]:
+        if register_allocation["return_register"] != ("XMM0" if return_type in FLOAT_VALUE_TYPES else abi["return_register"]):
             raise NativeCodegenError(f"native 机器码 map 函数 {name} register_allocation.return_register 与 ABI 不一致")
         if register_allocation["frame_pointer"] != abi["frame_pointer"]:
             raise NativeCodegenError(f"native 机器码 map 函数 {name} register_allocation.frame_pointer 与 ABI 不一致")
@@ -4563,10 +4656,10 @@ class _NativeCodegenContext:
             relocations=self.relocations,
             exit_probes=self.exit_probes,
             register_allocation=NativeRegisterAllocation(
-                argument_registers=tuple(self.abi.registers.argument_registers[:self.function_param_counts.get(self.function.name, len(self.function.params))]),
+                argument_registers=tuple(param.name for param in self.function.params if param.kind == "register"),
                 frame_pointer=self.abi.registers.frame_pointer,
                 stack_pointer=self.abi.registers.stack_pointer,
-                return_register=self.abi.registers.return_register,
+                return_register="XMM0" if self.function.return_type in FLOAT_VALUE_TYPES else self.abi.registers.return_register,
                 global_frame_register="R11" if has_global_frame_slots else None,
                 global_frame_role="owner" if self.global_frame_owner and has_global_frame_slots else (
                     "borrowed" if has_global_frame_slots else "none"
@@ -4578,6 +4671,13 @@ class _NativeCodegenContext:
 
     def _lower_instruction(self, instruction: MachineInstruction) -> None:
         op = instruction.op
+        if op == "load_string":
+            result = self._result_slot_offset(instruction)
+            self._emit(bytes.fromhex("48 8D 05 00 00 00 00"), "lea rax, [rip+字符串常量]", op,
+                       instruction.source_pc, instruction.source_line, dict(instruction.attrs))
+            self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", op,
+                       instruction.source_pc, instruction.source_line)
+            return
         if op == "load_imm":
             result = self._result_slot_offset(instruction)
             if instruction.args[0].kind != "imm":
@@ -4627,6 +4727,20 @@ class _NativeCodegenContext:
             return
         if op == "mov" and instruction.attrs.get("kind") == "register_function":
             return
+        if op in {"fadd", "fsub", "fimul", "fidiv", "fcmp_eq", "fcmp_ne", "fcmp_lt", "fcmp_le", "fcmp_gt", "fcmp_ge"}:
+            self._lower_float_binary(instruction)
+            return
+        if op == "cast_float":
+            self._lower_float_cast(instruction)
+            return
+        if op == "fneg":
+            self._load_operand_to_rax(instruction.args[0], instruction)
+            mask = 1 << 31 if instruction.result.type_hint == "float32" else _INT64_MIN
+            self._emit(encode_mov_r10_imm64(mask), f"mov r10, {mask}", op, instruction.source_pc, instruction.source_line)
+            self._emit(encode_xor_rax_r10(), "xor rax, r10", op, instruction.source_pc, instruction.source_line)
+            result = self._result_slot_offset(instruction)
+            self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", op, instruction.source_pc, instruction.source_line)
+            return
         if op in _BINARY_OP_ASM:
             self._lower_binary(instruction)
             return
@@ -4646,13 +4760,8 @@ class _NativeCodegenContext:
             cast_constant = _static_known_value(source, self.constant_vregs, self.constant_slots)
             if target_type in _NARROW_INTEGER_CAST_RANGES:
                 minimum, maximum = _NARROW_INTEGER_CAST_RANGES[target_type]
-                if cast_constant is None:
-                    raise self._node_error(instruction, f"native 机器码 MVP 暂不支持动态窄化整数 cast 到 {target_type}")
-                if cast_constant < minimum or cast_constant > maximum:
-                    raise self._node_error(
-                        instruction,
-                        f"native 机器码 MVP cast 到 {target_type} 的立即数超出范围: {cast_constant}，允许 {minimum}..{maximum}",
-                    )
+                if cast_constant is not None and (cast_constant < minimum or cast_constant > maximum):
+                    cast_constant = None
             if instruction.result is not None and instruction.result.kind == "vreg":
                 if cast_constant is None:
                     self.constant_vregs.pop(str(instruction.result.value.name), None)
@@ -4660,6 +4769,9 @@ class _NativeCodegenContext:
                     self.constant_vregs[str(instruction.result.value.name)] = cast_constant
             cast_note = f" ; cast to {target_type}" if target_type else ""
             self._load_operand_to_rax(instruction.args[0], instruction)
+            if cast_constant is None:
+                error_code = {"char": 3, "short": 4, "int": 5}.get(target_type, 6)
+                self._emit_integer_range_check(target_type, instruction, error_code)
             self._emit(
                 encode_mov_rbp_offset_from_rax(result),
                 f"mov [rbp-{result}], rax{cast_note}",
@@ -4673,6 +4785,7 @@ class _NativeCodegenContext:
             result = self._result_slot_offset(instruction)
             self._remember_static_result(instruction)
             self._load_operand_to_rax(instruction.args[0], instruction)
+            self._mask_float_sign(instruction.args[0].type_hint, instruction)
             self._emit(encode_mov_r10_imm64(0), "mov r10, 0", op, instruction.source_pc, instruction.source_line)
             self._emit(encode_cmp_rax_r10(), "cmp rax, r10", op, instruction.source_pc, instruction.source_line)
             self._emit(encode_setcc_al(ConditionCode.NE), "setne al", op, instruction.source_pc, instruction.source_line)
@@ -4698,6 +4811,95 @@ class _NativeCodegenContext:
             return
         self._unsupported(instruction, op)
 
+    def _mask_float_sign(self, type_hint: str, node) -> None:
+        """标量真值转换忽略浮点符号位，使正负零都为假。"""
+        if type_hint == "string":
+            self._emit(b"\x48\x8B\x00", "mov rax, [rax] ; 字符串字节长度", node.op,
+                       node.source_pc, node.source_line)
+            return
+        if type_hint not in FLOAT_VALUE_TYPES:
+            return
+        mask = 0x7FFFFFFF if type_hint == "float32" else 0x7FFFFFFFFFFFFFFF
+        self._emit(encode_mov_r10_imm64(mask), f"mov r10, {mask}", "numeric_guard", node.source_pc, node.source_line)
+        self._emit(b"\x4C\x21\xD0", "and rax, r10", "numeric_guard", node.source_pc, node.source_line)
+
+    def _emit_float_range_check(self, type_hint: str, node) -> None:
+        """检查 XMM0 中的结果有限，并将位模式恢复到 RAX。"""
+        single = type_hint == "float32"
+        transfer = encode_sse_transfer(0, to_rax=True, single=single)
+        transfer_asm = "movd eax, xmm0" if single else "movq rax, xmm0"
+        self._emit(transfer, transfer_asm, node.op, node.source_pc, node.source_line)
+        mask = 0x7F800000 if single else 0x7FF0000000000000
+        self._emit(encode_mov_r10_imm64(mask), f"mov r10, {mask}", "numeric_guard", node.source_pc, node.source_line)
+        self._emit(b"\x4C\x21\xD0", "and rax, r10", "numeric_guard", node.source_pc, node.source_line)
+        self._emit(encode_cmp_rax_r10(), "cmp rax, r10", "numeric_guard", node.source_pc, node.source_line)
+        self._emit_numeric_guard(0x75, 7, node)
+        self._emit(transfer, transfer_asm, node.op, node.source_pc, node.source_line)
+
+    def _lower_float_binary(self, instruction: MachineInstruction) -> None:
+        """
+        使用 SSE 执行同类型浮点运算和比较。
+
+        Args:
+            instruction: 已完成共同类型转换的浮点指令。
+        """
+        single = instruction.args[0].type_hint == "float32"
+        for index, operand in enumerate(instruction.args):
+            self._load_operand_to_rax(operand, instruction)
+            self._emit(encode_sse_transfer(index), f"movq xmm{index}, rax", instruction.op, instruction.source_pc, instruction.source_line)
+        if instruction.op == "fidiv":
+            self._mask_float_sign(instruction.args[1].type_hint, instruction)
+            self._emit(b"\x48\x85\xC0", "test rax, rax", instruction.op, instruction.source_pc, instruction.source_line)
+            self._emit_numeric_guard(0x75, 8, instruction)
+        if instruction.op.startswith("fcmp_"):
+            comparison = (b"" if single else b"\x66") + b"\x0F\x2E\xC1"
+            self._emit(comparison, "ucomiss xmm0, xmm1" if single else "ucomisd xmm0, xmm1", instruction.op, instruction.source_pc, instruction.source_line)
+            self._emit_numeric_guard(0x7B, 7, instruction)
+            opcode = {"fcmp_eq": 0x94, "fcmp_ne": 0x95, "fcmp_lt": 0x92, "fcmp_le": 0x96, "fcmp_gt": 0x97, "fcmp_ge": 0x93}[instruction.op]
+            self._emit(bytes([0x0F, opcode, 0xC0]), f"{instruction.op} al", instruction.op, instruction.source_pc, instruction.source_line)
+            self._emit(encode_movzx_rax_al(), "movzx rax, al", instruction.op, instruction.source_pc, instruction.source_line)
+        else:
+            opcode = {"fadd": 0x58, "fsub": 0x5C, "fimul": 0x59, "fidiv": 0x5E}[instruction.op]
+            code = bytes([0xF3 if single else 0xF2, 0x0F, opcode, 0xC1])
+            self._emit(code, f"{instruction.op} xmm0, xmm1", instruction.op, instruction.source_pc, instruction.source_line)
+            self._emit_float_range_check(instruction.result.type_hint, instruction)
+        result = self._result_slot_offset(instruction)
+        self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", instruction.op, instruction.source_pc, instruction.source_line)
+
+    def _lower_float_cast(self, instruction: MachineInstruction) -> None:
+        """
+        生成整数与浮点数转换，浮点转整数先检查 64 位转换的有效范围。
+
+        Args:
+            instruction: 带目标类型和源操作数类型的转换指令。
+        """
+        source_type = instruction.args[0].type_hint
+        target_type = instruction.result.type_hint
+        self._load_operand_to_rax(instruction.args[0], instruction)
+        if source_type in FLOAT_VALUE_TYPES:
+            self._emit(encode_sse_transfer(0), "movq xmm0, rax", instruction.op, instruction.source_pc, instruction.source_line)
+        if target_type in FLOAT_VALUE_TYPES:
+            if source_type not in FLOAT_VALUE_TYPES:
+                prefix = b"\xF3" if target_type == "float32" else b"\xF2"
+                self._emit(prefix + b"\x48\x0F\x2A\xC0", "cvtsi2ss xmm0, rax" if target_type == "float32" else "cvtsi2sd xmm0, rax", instruction.op, instruction.source_pc, instruction.source_line)
+            elif source_type != target_type:
+                prefix = b"\xF2" if target_type == "float32" else b"\xF3"
+                self._emit(prefix + b"\x0F\x5A\xC0", "cvtsd2ss xmm0, xmm0" if target_type == "float32" else "cvtss2sd xmm0, xmm0", instruction.op, instruction.source_pc, instruction.source_line)
+            self._emit_float_range_check(target_type, instruction)
+        else:
+            single = source_type == "float32"
+            kind = VBCObjectType.FLOAT if single else VBCObjectType.DOUBLE
+            for bound, safe_condition in ((-(2**63), 0x73), (2**63, 0x72)):
+                self._emit(encode_mov_rax_imm64(float_bits(float(bound), kind)), f"mov rax, {bound} 的浮点位模式", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit(encode_sse_transfer(1), "movq xmm1, rax", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit((b"" if single else b"\x66") + b"\x0F\x2E\xC1", "ucomiss xmm0, xmm1" if single else "ucomisd xmm0, xmm1", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit_numeric_guard(safe_condition, 9, instruction)
+            self._emit(bytes([0xF3 if single else 0xF2, 0x48, 0x0F, 0x2C, 0xC0]), "cvttss2si rax, xmm0" if single else "cvttsd2si rax, xmm0", instruction.op, instruction.source_pc, instruction.source_line)
+            target_kind = instruction.attrs["target_type"]
+            self._emit_integer_range_check(target_kind, instruction, {"char": 3, "short": 4, "int": 5}.get(target_kind, 6))
+        result = self._result_slot_offset(instruction)
+        self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", instruction.op, instruction.source_pc, instruction.source_line)
+
     def _lower_binary(self, instruction: MachineInstruction) -> None:
         result = self._result_slot_offset(instruction)
         self._load_operand_to_rax(instruction.args[0], instruction)
@@ -4709,16 +4911,37 @@ class _NativeCodegenContext:
         elif instruction.op == "imul":
             code = encode_imul_rax_r10()
         else:
-            if instruction.args[1].kind == "imm" and int(instruction.args[1].value) == 0:
+            if "numeric_kind" not in instruction.attrs and instruction.args[1].kind == "imm" and int(instruction.args[1].value) == 0:
                 raise self._node_error(instruction, "native 机器码 MVP 暂不生成除数为 0 的 idiv/imod 机器码")
+            known_left = _static_known_value(instruction.args[0], self.constant_vregs, self.constant_slots)
+            known_right = _static_known_value(instruction.args[1], self.constant_vregs, self.constant_slots)
+            if known_right is None or known_right == 0:
+                self._emit(b"\x4D\x85\xD2", "test r10, r10", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit_numeric_guard(0x75, 8, instruction)
+            numeric_kind = instruction.attrs.get("numeric_kind", "long")
+            minimum = _NARROW_INTEGER_CAST_RANGES.get(numeric_kind, (_INT64_MIN, _INT64_MAX))[0]
+            if known_left is None or known_right is None or (known_left == minimum and known_right == -1):
+                # 临时保存除数，检查 MIN/-1 后恢复，避免 CPU 整数除法异常。
+                self._emit(b"\x4C\x89\xD2", "mov rdx, r10", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit(encode_mov_r10_imm64(minimum), f"mov r10, {minimum}", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit(encode_cmp_rax_r10(), "cmp rax, r10", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit(b"\x41\x0F\x94\xC2", "sete r10b", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit(b"\x48\x83\xFA\xFF", "cmp rdx, -1", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit(b"\x0F\x94\xC1\x44\x20\xD1", "sete cl; and cl, r10b", instruction.op, instruction.source_pc, instruction.source_line)
+                self._emit_numeric_guard(0x74, 2, instruction)
+                self._emit(b"\x49\x89\xD2", "mov r10, rdx", instruction.op, instruction.source_pc, instruction.source_line)
             self._emit(encode_cqo(), "cqo", instruction.op, instruction.source_pc, instruction.source_line)
             self._emit(encode_idiv_r10(), "idiv r10", instruction.op, instruction.source_pc, instruction.source_line)
             if instruction.op == "imod":
-                self._emit_python_modulo_adjustment(instruction)
+                self._emit(encode_mov_rax_rdx(), "mov rax, rdx", instruction.op, instruction.source_pc, instruction.source_line)
+            self._emit_integer_range_check(instruction.attrs.get("numeric_kind", "long"), instruction)
             self._remember_static_result(instruction)
             self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", instruction.op, instruction.source_pc, instruction.source_line)
             return
         self._emit(code, _BINARY_OP_ASM[instruction.op], instruction.op, instruction.source_pc, instruction.source_line)
+        if _static_instruction_result_value(instruction, self.constant_vregs, self.constant_slots) is None:
+            self._emit_numeric_guard(0x71, 2, instruction)
+        self._emit_integer_range_check(instruction.attrs.get("numeric_kind", "long"), instruction)
         self._remember_static_result(instruction)
         self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", instruction.op, instruction.source_pc, instruction.source_line)
 
@@ -4727,6 +4950,9 @@ class _NativeCodegenContext:
         result = self._result_slot_offset(instruction)
         self._load_operand_to_rax(instruction.args[0], instruction)
         self._emit(encode_neg_rax(), "neg rax", "neg", instruction.source_pc, instruction.source_line)
+        if _static_instruction_result_value(instruction, self.constant_vregs, self.constant_slots) is None:
+            self._emit_numeric_guard(0x71, 2, instruction)
+        self._emit_integer_range_check(instruction.attrs.get("numeric_kind", "long"), instruction)
         self._remember_static_result(instruction)
         self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", "neg", instruction.source_pc, instruction.source_line)
 
@@ -4734,6 +4960,7 @@ class _NativeCodegenContext:
         """生成 C 风格逻辑非。"""
         result = self._result_slot_offset(instruction)
         self._load_operand_to_rax(instruction.args[0], instruction)
+        self._mask_float_sign(instruction.args[0].type_hint, instruction)
         self._emit(encode_mov_r10_imm64(0), "mov r10, 0", "not_bool", instruction.source_pc, instruction.source_line)
         self._emit(encode_cmp_rax_r10(), "cmp rax, r10", "not_bool", instruction.source_pc, instruction.source_line)
         self._emit(encode_setcc_al(ConditionCode.EQ), "seteq al", "not_bool", instruction.source_pc, instruction.source_line)
@@ -4762,18 +4989,21 @@ class _NativeCodegenContext:
         else:
             self.constant_vregs[result_name] = value
 
-    def _emit_python_modulo_adjustment(self, instruction: MachineInstruction) -> None:
-        """生成与 VM/Python 余数语义一致的 imod 调整。"""
-        done_label = self._synthetic_label("imod_done")
-        self._emit(encode_test_rdx_rdx(), "test rdx, rdx ; imod remainder", "imod", instruction.source_pc, instruction.source_line)
-        self._emit_pending_jump("je", done_label, instruction.source_pc, instruction.source_line, source_op="imod")
-        self._emit(encode_mov_rax_rdx(), "mov rax, rdx", "imod", instruction.source_pc, instruction.source_line)
-        self._emit(encode_xor_rax_r10(), "xor rax, r10 ; imod sign check", "imod", instruction.source_pc, instruction.source_line)
-        self._emit_pending_jump("jns", done_label, instruction.source_pc, instruction.source_line, source_op="imod")
-        self._emit(encode_add_rdx_r10(), "add rdx, r10 ; imod VM remainder", "imod", instruction.source_pc, instruction.source_line)
-        self.block_offsets[done_label] = len(self.code)
-        self._emit(b"", f"{done_label}:", "label", instruction.source_pc, instruction.source_line)
-        self._emit(encode_mov_rax_rdx(), "mov rax, rdx", "imod", instruction.source_pc, instruction.source_line)
+    def _emit_numeric_guard(self, safe_condition: int, error_code: int, node) -> None:
+        """检查失败时通过已有的 RDX 状态通道返回数值错误。"""
+        failure = encode_mov_rdx_imm64(error_code) + encode_mov_rax_imm64(node.source_line or -1) + encode_epilogue()
+        self._emit(bytes([safe_condition, len(failure)]), f"jcc +{len(failure)} ; 数值检查通过", "numeric_guard", node.source_pc, node.source_line)
+        self._emit(failure, f"数值错误 {error_code}; 返回调用者", "numeric_error", node.source_pc, node.source_line, source_attrs={"error_code": error_code})
+
+    def _emit_integer_range_check(self, kind: str, node, error_code: int = 2) -> None:
+        """校验保存在 RAX 中的整数符合目标类型的位宽。"""
+        limits = _NARROW_INTEGER_CAST_RANGES.get(kind)
+        if limits is None or limits == (_INT64_MIN, _INT64_MAX):
+            return
+        for bound, safe_condition in ((limits[0], 0x7D), (limits[1], 0x7E)):
+            self._emit(encode_mov_r10_imm64(bound), f"mov r10, {bound}", "numeric_guard", node.source_pc, node.source_line)
+            self._emit(encode_cmp_rax_r10(), "cmp rax, r10", "numeric_guard", node.source_pc, node.source_line)
+            self._emit_numeric_guard(safe_condition, error_code, node)
 
     def _lower_call(self, instruction: MachineInstruction) -> None:
         """生成用户函数调用。"""
@@ -4785,9 +5015,9 @@ class _NativeCodegenContext:
         callee_return_type = self.function_return_types.get(callee)
         if callee_return_type == "void" and instruction.result is not None:
             raise self._node_error(instruction, f"native 机器码 MVP void 调用 {callee} 不应携带结果")
-        if callee_return_type in {"int64", "bool64"} and instruction.result is None:
+        if callee_return_type in SCALAR_VALUE_TYPES and instruction.result is None:
             raise self._node_error(instruction, f"native 机器码 MVP {callee_return_type} 调用 {callee} 必须携带结果")
-        if callee_return_type in {"int64", "bool64"} and instruction.result is not None and instruction.result.type_hint != callee_return_type:
+        if callee_return_type in SCALAR_VALUE_TYPES and instruction.result is not None and instruction.result.type_hint != callee_return_type:
             raise self._node_error(
                 instruction,
                 f"native 机器码 MVP {callee_return_type} 调用 {callee} 结果类型必须是 {callee_return_type}，实际 {instruction.result.type_hint}",
@@ -4798,7 +5028,8 @@ class _NativeCodegenContext:
                 f"native 机器码 MVP call callee_return_type 元数据不匹配: 标注 {instruction.attrs['callee_return_type']}, 实际 {callee_return_type}",
             )
         return_register = instruction.attrs.get("return_register")
-        if return_register is not None and self.abi is not None and return_register != self.abi.registers.return_register:
+        expected_return_register = "XMM0" if callee_return_type in FLOAT_VALUE_TYPES else self.abi.registers.return_register
+        if return_register is not None and return_register != expected_return_register:
             raise self._node_error(
                 instruction,
                 f"native 机器码 MVP call return_register 元数据不匹配: 标注 {return_register}, 实际 {self.abi.registers.return_register}",
@@ -4811,7 +5042,7 @@ class _NativeCodegenContext:
             raise self._node_error(instruction, f"native 机器码 MVP call arg_locations 数量不匹配: 标注 {len(arg_locations)}, 实际 {len(call_args)}")
         if arg_locations is not None and self.abi is not None:
             for index, location in enumerate(arg_locations):
-                expected_location = self.abi.argument_location(index).__dict__
+                expected_location = self.abi.argument_location(index, call_args[index].type_hint).__dict__
                 if location != expected_location:
                     raise self._node_error(
                         instruction,
@@ -4832,7 +5063,10 @@ class _NativeCodegenContext:
         for index, operand in enumerate(register_args):
             register = argument_registers[index]
             self._load_operand_to_rax(operand, instruction)
-            self._emit(encode_mov_reg_from_rax(register), f"mov {register.lower()}, rax", "call", instruction.source_pc, instruction.source_line)
+            if operand.type_hint in FLOAT_VALUE_TYPES:
+                self._emit(encode_sse_transfer(index), f"movq xmm{index}, rax", "call", instruction.source_pc, instruction.source_line)
+            else:
+                self._emit(encode_mov_reg_from_rax(register), f"mov {register.lower()}, rax", "call", instruction.source_pc, instruction.source_line)
         stack_arg_bytes = len(stack_args) * 8
         call_stack_size = shadow_space_size + stack_arg_bytes
         remainder = call_stack_size % stack_alignment
@@ -4895,6 +5129,8 @@ class _NativeCodegenContext:
         )
         if instruction.result is not None:
             result = self._result_slot_offset(instruction)
+            if callee_return_type in FLOAT_VALUE_TYPES:
+                self._emit(encode_sse_transfer(0, to_rax=True, single=callee_return_type == "float32"), "movq rax, xmm0", "call", instruction.source_pc, instruction.source_line)
             self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", "call", instruction.source_pc, instruction.source_line)
 
     def _lower_exit(self, instruction: MachineInstruction) -> None:
@@ -4907,7 +5143,7 @@ class _NativeCodegenContext:
         if terminator.op == "ret":
             if self.function.return_type == "void" and terminator.args:
                 raise self._node_error(terminator, "native 机器码 MVP void 函数 ret 不应携带返回值")
-            if self.function.return_type in {"int64", "bool64"} and len(terminator.args) != 1:
+            if self.function.return_type in SCALAR_VALUE_TYPES and len(terminator.args) != 1:
                 raise self._node_error(terminator, f"native 机器码 MVP {self.function.return_type} 函数 ret 必须携带 1 个返回值")
             if terminator.args:
                 if not _is_return_type_compatible(self.function.return_type, terminator.args[0].type_hint):
@@ -4916,6 +5152,8 @@ class _NativeCodegenContext:
                         f"native 机器码 MVP {self.function.return_type} 函数 ret 返回值类型不能是 {terminator.args[0].type_hint}",
                     )
                 self._load_operand_to_rax(terminator.args[0], terminator)
+                if self.function.return_type in FLOAT_VALUE_TYPES:
+                    self._emit(encode_sse_transfer(0), "movq xmm0, rax", "ret", terminator.source_pc, terminator.source_line)
             else:
                 self._emit(encode_mov_rax_imm64(0), "mov rax, 0", "ret", terminator.source_pc, terminator.source_line)
             self._emit(encode_mov_rdx_imm64(0), "mov rdx, 0 ; native normal return", "ret", terminator.source_pc, terminator.source_line)
@@ -4931,6 +5169,7 @@ class _NativeCodegenContext:
             if len(terminator.args) != 1 or len(terminator.targets) != 2:
                 raise self._node_error(terminator, "native 机器码 MVP 需要 br 包含 1 个条件和 2 个目标")
             self._load_operand_to_rax(terminator.args[0], terminator)
+            self._mask_float_sign(terminator.args[0].type_hint, terminator)
             self._emit(encode_mov_r10_imm64(0), "mov r10, 0", "br", terminator.source_pc, terminator.source_line)
             self._emit(encode_cmp_rax_r10(), "cmp rax, r10", "br", terminator.source_pc, terminator.source_line)
             current_block = self._current_block_name()
@@ -5089,6 +5328,10 @@ class _NativeCodegenContext:
                 raise self._function_error(f"native 机器码 MVP 找不到参数 local[{param.index}] 栈槽")
             if param.kind == "register":
                 register = param.name.upper()
+                if register.startswith("XMM"):
+                    self._emit(encode_sse_transfer(param.index, to_rax=True, single=_function_param_types(self.function)[param.index] == "float32"), f"movq rax, xmm{param.index}", "param", None, None)
+                    self._emit(encode_mov_rbp_offset_from_rax(offset), f"mov [rbp-{offset}], rax", "param", None, None)
+                    continue
                 self._emit(
                     encode_mov_rbp_offset_from_reg(offset, register),
                     f"mov [rbp-{offset}], {register.lower()}",

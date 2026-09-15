@@ -10,6 +10,7 @@ from verbose_c.object.t_null import VBCNull
 from verbose_c.object.t_string import VBCString
 from verbose_c.object.struct import VBCStruct
 from verbose_c.object.enum import VBCObjectType
+from verbose_c.object.numeric import numeric_literal, float_bits
 from verbose_c.utils.visitor import VisitorBase
 from verbose_c.parser.parser.ast.node import *
 from verbose_c.typing.types import *
@@ -21,8 +22,12 @@ def _native_type_name(type_: Type) -> str:
         return "void"
     if isinstance(type_, BoolType):
         return "bool64"
-    if isinstance(type_, IntegerType):
+    if isinstance(type_, StringType):
+        return "string"
+    if isinstance(type_, IntegerType) and type_.kind != VBCObjectType.NLINT:
         return "int64"
+    if isinstance(type_, FloatType) and type_.kind != VBCObjectType.NLFLOAT:
+        return "float32" if type_.kind == VBCObjectType.FLOAT else "float64"
     return repr(type_)
 
 
@@ -117,7 +122,11 @@ class OpcodeGenerator(VisitorBase):
             value (any): 要添加的常量对象
         """
         for i, constant in enumerate(self.constant_pool):
-            if type(constant) is type(value) and constant == value:
+            if isinstance(constant, VBCFloat) and isinstance(value, VBCFloat):
+                if constant._object_type == value._object_type and float_bits(constant.value, constant._object_type) == float_bits(value.value, value._object_type):
+                    return i
+                continue
+            if type(constant) is type(value) and constant._object_type == value._object_type and constant == value:
                 return i
         
         self.constant_pool.append(value)
@@ -467,27 +476,8 @@ class OpcodeGenerator(VisitorBase):
             self._emit(Opcode.LOAD_GLOBAL_VAR, node.name)
     
     def visit_NumberNode(self, node: NumberNode):
-        target_type = getattr(node, "inferred_type", None)
-        if target_type is None:
-            # 如果没有推断类型，使用默认类型
-            if isinstance(node.value, int):
-                target_type = VBCObjectType.INT
-            elif isinstance(node.value, float):
-                target_type = VBCObjectType.FLOAT
-            else:
-                raise TypeError(f"未知的 NumberNode 值类型: {type(node.value).__name__}")
-
-        # 生成对应的VBC对象
-        if target_type in VBCInteger.bit_width.keys():
-            vbc_int = VBCInteger(node.value, target_type)
-            const_index = self._add_constant(vbc_int)
-            self._emit(Opcode.LOAD_CONSTANT, const_index)
-        elif target_type in VBCFloat.bit_width.keys():
-            vbc_float = VBCFloat(node.value, target_type)
-            const_index = self._add_constant(vbc_float)
-            self._emit(Opcode.LOAD_CONSTANT, const_index)
-        else:
-            raise ValueError(f"不支持的目标数据类型: {target_type}")
+        const_index = self._add_constant(numeric_literal(node.value, node.inferred_type))
+        self._emit(Opcode.LOAD_CONSTANT, const_index)
 
     def visit_BoolNode(self, node: BoolNode):
         vbc_bool = VBCBool(node.value)
@@ -563,15 +553,19 @@ class OpcodeGenerator(VisitorBase):
         
     # 表达式
     def visit_UnaryOpNode(self, node: UnaryOpNode):
+        if getattr(node, "resolved_node", None) is not None:
+            self.visit(node.resolved_node)
+            return
         if node.op == Operator.ADDRESS_OF:
             self._emit_lvalue_address(node.expr)
             return
         
         self._emit_expr_with_array_decay(node.expr)
+        self._emit_implicit_cast_if_needed(node.expr)
         if node.op == Operator.DEREFERENCE:
             self._emit(Opcode.LOAD_BY_POINTER)
         elif node.op == Operator.SUBTRACT:
-            self._emit(Opcode.UNARY_MINUS)
+            self._emit(Opcode.UNARY_MINUS, getattr(node, "_numeric_kind", None))
         elif node.op == Operator.ADD:
             # TODO 检查这条分支是否有必要？ (+a 就是 a)
             pass
@@ -585,6 +579,7 @@ class OpcodeGenerator(VisitorBase):
         # 优先判断短路操作
         if node.op == Operator.LOGICAL_AND:
             self.visit(node.left)
+            self._emit(Opcode.CAST, VBCObjectType.BOOL)
             
             end_label = self._generate_label("binary_end")
             self._emit(Opcode.DUP)
@@ -592,11 +587,12 @@ class OpcodeGenerator(VisitorBase):
             
             self._emit(Opcode.POP)
             self.visit(node.right)
+            self._emit(Opcode.CAST, VBCObjectType.BOOL)
             
             self._mark_label(end_label)
-            
         elif node.op == Operator.LOGICAL_OR:
             self.visit(node.left)
+            self._emit(Opcode.CAST, VBCObjectType.BOOL)
             
             next_instr_label = self._generate_label("logical_or_next")
             end_label = self._generate_label("logical_or_end")
@@ -612,11 +608,14 @@ class OpcodeGenerator(VisitorBase):
             # 弹出为假的左操作数，并计算右操作数
             self._emit(Opcode.POP)
             self.visit(node.right)
+            self._emit(Opcode.CAST, VBCObjectType.BOOL)
             
             self._mark_label(end_label)
         else:
             self._emit_expr_with_array_decay(node.left)
+            self._emit_implicit_cast_if_needed(node.left)
             self._emit_expr_with_array_decay(node.right)
+            self._emit_implicit_cast_if_needed(node.right)
 
             pointer_arithmetic = getattr(node, "_pointer_arithmetic", None)
             if pointer_arithmetic == "add":
@@ -635,13 +634,13 @@ class OpcodeGenerator(VisitorBase):
 
             match node.op:
                 case Operator.ADD:
-                    self._emit(Opcode.ADD)
+                    self._emit(Opcode.ADD, getattr(node, "_numeric_kind", None))
                 case Operator.SUBTRACT:
-                    self._emit(Opcode.SUBTRACT)
+                    self._emit(Opcode.SUBTRACT, getattr(node, "_numeric_kind", None))
                 case Operator.MULTIPLY:
-                    self._emit(Opcode.MULTIPLY)
+                    self._emit(Opcode.MULTIPLY, getattr(node, "_numeric_kind", None))
                 case Operator.DIVIDE:
-                    self._emit(Opcode.DIVIDE)
+                    self._emit(Opcode.DIVIDE, getattr(node, "_numeric_kind", None))
                 case Operator.EQUAL:
                     self._emit(Opcode.EQUAL)
                 case Operator.NOT_EQUAL:
@@ -655,7 +654,7 @@ class OpcodeGenerator(VisitorBase):
                 case Operator.GREATER_EQUAL:
                     self._emit(Opcode.GREATER_EQUAL)
                 case Operator.MODULO:
-                    self._emit(Opcode.MODULO)
+                    self._emit(Opcode.MODULO, getattr(node, "_numeric_kind", None))
                 case _:
                     raise ValueError(f"未知的二元运算符: {node.op}")
 
@@ -746,8 +745,6 @@ class OpcodeGenerator(VisitorBase):
                 self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
             if isinstance(node.init_exp, InitListNode):
                 for i, elem in enumerate(node.init_exp.elements):
-                    if isinstance(symbol.type_.element_type, (IntegerType, FloatType)):
-                        setattr(elem, "inferred_type", symbol.type_.element_type.kind)
                     self.visit(elem)
                     self._emit_implicit_cast_if_needed(elem)
                     self._emit_load_array_base(symbol)
@@ -758,9 +755,6 @@ class OpcodeGenerator(VisitorBase):
             return
 
         if node.init_exp:
-            # 仍然需要向初始化表达式传递类型信息，以处理数字字面量
-            if isinstance(symbol.type_, (IntegerType, FloatType)):
-                setattr(node.init_exp, "inferred_type", symbol.type_.kind)
             self.visit(node.init_exp)
             self._emit_implicit_cast_if_needed(node.init_exp)
             self._emit_array_decay_if_needed(node.init_exp)
@@ -819,6 +813,7 @@ class OpcodeGenerator(VisitorBase):
             raise RuntimeError(f"不支持的复合赋值运算符: {node.op}")
 
         self._emit_load_lvalue(node.left)
+        self._emit_implicit_cast_if_needed(node.left)
         self.visit(node.right)
         self._emit_implicit_cast_if_needed(node.right)
         pointer_arithmetic = getattr(node, "_pointer_arithmetic", None)
@@ -827,35 +822,37 @@ class OpcodeGenerator(VisitorBase):
         elif pointer_arithmetic == "sub":
             self._emit(Opcode.POINTER_SUB)
         else:
-            self._emit(op_to_opcode[node.op])
-        self._emit_implicit_cast_if_needed(node)
+            self._emit(op_to_opcode[node.op], getattr(node, "_numeric_kind", None))
+        store_kind = self._runtime_type_enum_from_type(getattr(node, "_compound_cast_target", None))
+        if store_kind is not None:
+            self._emit(Opcode.CAST, store_kind)
         self._emit_store_lvalue_keep(node.left)
 
     def visit_UpdateExprNode(self, node: UpdateExprNode):
         base = node.base
-        step_index = self._add_constant(VBCInteger(1, VBCObjectType.INT))
-        base_type = getattr(base, "_subscript_base_type", None)
-        if isinstance(base, NameNode):
-            symbol = self.symbol_table.lookup_value(base.name)
-            base_type = symbol.type_ if symbol is not None else None
+        numeric_kind = getattr(node, "_numeric_kind", None)
+        base_type = getattr(node, "_update_type", None)
+        step = VBCFloat(1, numeric_kind) if numeric_kind in VBCFloat.bit_width else VBCInteger(1, numeric_kind or VBCObjectType.INT)
+        step_index = self._add_constant(step)
         arith_op = Opcode.POINTER_ADD if isinstance(base_type, PointerType) and node.op == Operator.INCREMENT else (
             Opcode.POINTER_SUB if isinstance(base_type, PointerType) else (
                 Opcode.ADD if node.op == Operator.INCREMENT else Opcode.SUBTRACT
             )
         )
 
-        if node.is_prefix:
-            self._emit_load_lvalue(base)
-            self._emit(Opcode.LOAD_CONSTANT, step_index)
-            self._emit(arith_op)
-            self._emit_store_lvalue_keep(base)
-            return
-
         self._emit_load_lvalue(base)
-        self._emit(Opcode.DUP)
+        if not node.is_prefix:
+            self._emit(Opcode.DUP)
+        if numeric_kind is not None:
+            self._emit(Opcode.CAST, numeric_kind)
         self._emit(Opcode.LOAD_CONSTANT, step_index)
-        self._emit(arith_op)
-        self._emit_store_lvalue(base)
+        self._emit(arith_op, numeric_kind)
+        if numeric_kind is not None:
+            self._emit(Opcode.CAST, base_type.kind)
+        if node.is_prefix:
+            self._emit_store_lvalue_keep(base)
+        else:
+            self._emit_store_lvalue(base)
 
     def visit_ExprStmtNode(self, node: ExprStmtNode):
         self.visit(node.expr)
@@ -897,6 +894,8 @@ class OpcodeGenerator(VisitorBase):
 
     def _eval_case_constant_value(self, expr: ASTNode) -> int:
         """从已类型检查的 case 标签提取整型常量值，支持整数字面量与 enum 成员等编译期常量标识符"""
+        if hasattr(expr, "_constant_int_value"):
+            return expr._constant_int_value
         if isinstance(expr, NumberNode) and isinstance(expr.value, int) and not isinstance(expr.value, bool):
             return expr.value
         if isinstance(expr, NameNode):
@@ -1526,8 +1525,21 @@ class OpcodeGenerator(VisitorBase):
 
     def visit_CastNode(self, node: CastNode):
         """生成显式类型转换字节码（含指针目标类型）。"""
+        if getattr(node, "resolved_node", None) is not None:
+            self.visit(node.resolved_node)
+            return
         self.visit(node.expression)
-        
+        resolved_target = getattr(node, "_cast_target_type", None)
+        if isinstance(resolved_target, VoidType):
+            self._emit(Opcode.POP)
+            self._emit(Opcode.LOAD_CONSTANT, self._add_constant(VBCNull()))
+            return
+        if resolved_target is not None:
+            target_enum = self._runtime_type_enum_from_type(resolved_target)
+            if target_enum is not None:
+                self._emit(Opcode.CAST, target_enum)
+                return
+
         if node.target_type.pointer_level > 0:
             target_enum = VBCObjectType.POINTER
         else:
@@ -1536,6 +1548,7 @@ class OpcodeGenerator(VisitorBase):
             RUNTIME_TYPE_MAP = {
                 "void": VBCObjectType.VOID,
                 "char": VBCObjectType.CHAR,
+                "short": VBCObjectType.SHORT,
                 "int": VBCObjectType.INT,
                 "long": VBCObjectType.LONG,
                 "long long": VBCObjectType.LONGLONG,

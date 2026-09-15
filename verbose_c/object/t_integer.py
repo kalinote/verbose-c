@@ -1,3 +1,4 @@
+from verbose_c.object.numeric import INTEGER_LAYOUT, check_integer, numeric_binary, numeric_compare, numeric_unary
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.object import VBCObject
 from verbose_c.utils.algorithm import hash_
@@ -8,32 +9,16 @@ class VBCInteger(VBCObject):
     整数对象类
     """
     # 各数据类型位宽, 值为(位宽, 类型提升优先级), 不同数据类型的运算结果采用更高的优先级
-    bit_width = {
-        VBCObjectType.CHAR: (8, 1),
-        VBCObjectType.SHORT: (16, 1.5),
-        VBCObjectType.INT: (32, 2),
-        VBCObjectType.LONG: (64, 3),
-        VBCObjectType.LONGLONG: (64, 4),
-        VBCObjectType.NLINT: (float('inf'), 5)
-    }
+    bit_width = INTEGER_LAYOUT
     
     def __init__(self, value: int, type_: VBCObjectType = VBCObjectType.INT):
-        if not type_ in VBCInteger.bit_width.keys():
-            raise ValueError(f"类型必须是 <{', '.join(str(key) for key in VBCInteger.bit_width.keys())}> 之一")
-        
-        super().__init__(type_)
+        if type_ not in self.bit_width:
+            raise ValueError(f"不支持的数值类型: {type_}")
         if not isinstance(value, int):
-            raise TypeError("VBCInteger 值必须是整数")
-
-        bits, type_priority = VBCInteger.bit_width[type_]
-        MIN_BIT = -2 ** (bits - 1)
-        MAX_BIT = 2 ** (bits - 1) - 1
-        
-        if value < MIN_BIT or value > MAX_BIT:
-            raise ValueError(f"VBCInteger 值超出 {type_} 类型整数范围")
-
-        self.value: int = value
-        self.type_priority = type_priority
+            raise TypeError("数值必须是整数")
+        super().__init__(type_)
+        self.value = check_integer(value, type_)
+        self.type_priority = self.bit_width[type_][1]
 
     def __repr__(self):
         return super().__repr__() + f"(value={self.value})"
@@ -42,45 +27,22 @@ class VBCInteger(VBCObject):
         return str(self.value)
 
     def __eq__(self, other):
-        from verbose_c.object.t_float import VBCFloat
-        from verbose_c.object.t_bool import VBCBool
-        if isinstance(other, VBCInteger) or isinstance(other, VBCFloat):
-            return VBCBool(self.value == other.value)
-        
-        return VBCBool(False)
+        return numeric_compare("==", self, other)
 
     def __ne__(self, other):
-        from verbose_c.object.t_bool import VBCBool
-        eq_result = self.__eq__(other)
-        return VBCBool(not eq_result.value)
+        return numeric_compare("!=", self, other)
 
     def __lt__(self, other):
-        from verbose_c.object.t_float import VBCFloat
-        from verbose_c.object.t_bool import VBCBool
-        if isinstance(other, (VBCInteger, VBCFloat)):
-            return VBCBool(self.value < other.value)
-        raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '<' 运算符")
+        return numeric_compare("<", self, other)
 
     def __le__(self, other):
-        from verbose_c.object.t_float import VBCFloat
-        from verbose_c.object.t_bool import VBCBool
-        if isinstance(other, (VBCInteger, VBCFloat)):
-            return VBCBool(self.value <= other.value)
-        raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '<=' 运算符")
+        return numeric_compare("<=", self, other)
 
     def __gt__(self, other):
-        from verbose_c.object.t_float import VBCFloat
-        from verbose_c.object.t_bool import VBCBool
-        if isinstance(other, (VBCInteger, VBCFloat)):
-            return VBCBool(self.value > other.value)
-        raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '>' 运算符")
+        return numeric_compare(">", self, other)
 
     def __ge__(self, other):
-        from verbose_c.object.t_float import VBCFloat
-        from verbose_c.object.t_bool import VBCBool
-        if isinstance(other, (VBCInteger, VBCFloat)):
-            return VBCBool(self.value >= other.value)
-        raise TypeError(f"无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 '>=' 运算符")
+        return numeric_compare(">=", self, other)
 
     def __bool__(self):
         return self.value != 0
@@ -89,101 +51,24 @@ class VBCInteger(VBCObject):
         return hash_(str(self._object_type.value) + str(self.value))
 
     def __neg__(self):
-        return VBCInteger(-self.value, self._object_type)
+        return numeric_unary("-", self)
 
     def __pos__(self):
-        return self
+        return numeric_unary("+", self)
 
-    @staticmethod
-    def _create_with_promotion(value: int, initial_type: VBCObjectType):
-        sorted_types = sorted(
-            VBCInteger.bit_width.items(), 
-            key=lambda item: item[1][1]
-        )
-        
-        start_index = 0
-        for i, (t, _) in enumerate(sorted_types):
-            if t == initial_type:
-                start_index = i
-                break
-            
-        for type_, (bits, _) in sorted_types[start_index:]:
-            if type_ == VBCObjectType.NLINT:
-                return VBCInteger(value, VBCObjectType.NLINT)
-            
-            min_val = -2**(bits - 1)
-            max_val = 2**(bits - 1) - 1
-            
-            if min_val <= value <= max_val:
-                return VBCInteger(value, type_)
-            
-        return VBCInteger(value, VBCObjectType.NLINT)
 
     def __add__(self, other: VBCObject):
-        from verbose_c.object.t_float import VBCFloat
-        if isinstance(other, VBCInteger):
-            new_value = self.value + other.value
-            base_type = other._object_type if self.type_priority < other.type_priority else self._object_type
-            return VBCInteger._create_with_promotion(new_value, base_type)
-
-        if isinstance(other, VBCFloat):
-            new_value = float(self.value) + other.value
-            return VBCFloat._create_with_promotion(new_value, other._object_type)
-        
-        raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "+" 运算符')
+        return numeric_binary("+", self, other)
 
     def __sub__(self, other: VBCObject):
-        from verbose_c.object.t_float import VBCFloat
-        if isinstance(other, VBCInteger):
-            new_value = self.value - other.value
-            base_type = other._object_type if self.type_priority < other.type_priority else self._object_type
-            return VBCInteger._create_with_promotion(new_value, base_type)
-
-        if isinstance(other, VBCFloat):
-            new_value = float(self.value) - other.value
-            return VBCFloat._create_with_promotion(new_value, other._object_type)
-
-        raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "-" 运算符')
+        return numeric_binary("-", self, other)
 
     def __mul__(self, other: VBCObject):
-        from verbose_c.object.t_float import VBCFloat
-        if isinstance(other, VBCInteger):
-            new_value = self.value * other.value
-            base_type = other._object_type if self.type_priority < other.type_priority else self._object_type
-            return VBCInteger._create_with_promotion(new_value, base_type)
-
-        if isinstance(other, VBCFloat):
-            new_value = float(self.value) * other.value
-            return VBCFloat._create_with_promotion(new_value, other._object_type)
-
-        raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "*" 运算符')
+        return numeric_binary("*", self, other)
 
     def __truediv__(self, other: VBCObject):
-        from verbose_c.object.t_float import VBCFloat
-        if isinstance(other, VBCInteger):
-            if other.value == 0:
-                raise ZeroDivisionError("除零错误")
-            q, _ = divmod(abs(self.value), abs(other.value))
-            new_value = q if self.value * other.value >= 0 else -q
-            int_priority = VBCInteger.bit_width[VBCObjectType.INT][1]
-            left_p = VBCObjectType.INT if VBCInteger.bit_width[self._object_type][1] < int_priority else self._object_type
-            right_p = VBCObjectType.INT if VBCInteger.bit_width[other._object_type][1] < int_priority else other._object_type
-            result_type = left_p if VBCInteger.bit_width[left_p][1] >= VBCInteger.bit_width[right_p][1] else right_p
-            return VBCInteger._create_with_promotion(new_value, result_type)
-
-        if isinstance(other, VBCFloat):
-            if other.value == 0:
-                raise ZeroDivisionError("除零错误")
-            new_value = self.value / other.value
-            return VBCFloat._create_with_promotion(new_value, VBCObjectType.DOUBLE)
-
-        raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "/" 运算符')
+        return numeric_binary("/", self, other)
 
     def __mod__(self, other: VBCObject):
-        if isinstance(other, VBCInteger):
-            new_value = self.value % other.value
-            base_type = other._object_type if self.type_priority < other.type_priority else self._object_type
-            return VBCInteger._create_with_promotion(new_value, base_type)
-        
-        raise TypeError(f'无法对 {self.__class__.__name__} 和 {other.__class__.__name__} 使用 "%" 运算符')
+        return numeric_binary("%", self, other)
     

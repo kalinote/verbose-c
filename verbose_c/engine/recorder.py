@@ -102,6 +102,11 @@ def format_parser_generation_markdown(report, heading_level: int = 2, include_de
 
 
 def format_runtime_error(error: VBCRuntimeError) -> None:
+    from verbose_c.error.exceptions import VBCIOError
+    if isinstance(error, VBCIOError):
+        import sys
+        print(error.message, file=sys.stderr)
+        return
     print("错误跟踪:")
     for frame in error.traceback:
         print(f'  在文件 "{frame.filepath}" 中, 第 {frame.line} 行, {frame.scope_name} 中:')

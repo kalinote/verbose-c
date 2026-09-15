@@ -238,7 +238,13 @@ class _LoweringContext:
                         break
                     self._lower_instruction(block, pc, instruction, stack)
                 else:
-                    block.terminator = IRTerminator("halt", source_pc=block.end_pc, source_line=self._line_for_pc(block.end_pc))
+                    next_block = self._next_block(block)
+                    block.terminator = IRTerminator(
+                        "jump" if next_block is not None else "halt",
+                        targets=[next_block.name] if next_block is not None else [],
+                        source_pc=block.end_pc, source_line=self._line_for_pc(block.end_pc),
+                    )
+                    block.successors = list(block.terminator.targets)
 
     def _lower_instruction(
         self,
@@ -294,16 +300,18 @@ class _LoweringContext:
         if opcode in _BINARY_OPS:
             right = self._pop(stack, pc, opcode.name)
             left = self._pop(stack, pc, opcode.name)
-            result = self._temp()
+            result = self._temp(getattr(operand, "name", None))
+            attrs = {"numeric_kind": operand.name.lower()} if operand is not None else {}
             block.instructions.append(
-                IRInstruction(_BINARY_OPS[opcode], result=result, args=[left, right], source_pc=pc, source_line=line)
+                IRInstruction(_BINARY_OPS[opcode], result=result, args=[left, right], attrs=attrs, source_pc=pc, source_line=line)
             )
             stack.append(result)
             return
         if opcode == Opcode.UNARY_MINUS:
             value = self._pop(stack, pc, opcode.name)
-            result = self._temp()
-            block.instructions.append(IRInstruction("unary neg", result=result, args=[value], source_pc=pc, source_line=line))
+            result = self._temp(getattr(operand, "name", None))
+            attrs = {"numeric_kind": operand.name.lower()} if operand is not None else {}
+            block.instructions.append(IRInstruction("unary neg", result=result, args=[value], attrs=attrs, source_pc=pc, source_line=line))
             stack.append(result)
             return
         if opcode == Opcode.LOGICAL_NOT:

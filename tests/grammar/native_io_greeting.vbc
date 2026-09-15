@@ -1,0 +1,8 @@
+int main() {
+    write(STDOUT, "请输入你的名字：");
+    string name = read(STDIN, 1024);
+
+    write(STDOUT, "你好，");
+    write(STDOUT, name);
+    return 0;
+}

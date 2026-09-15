@@ -1,4 +1,5 @@
 from verbose_c.compiler.enum import ScopeType
+from verbose_c.compiler.constant_evaluation import evaluate_numeric_constant
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
@@ -9,15 +10,18 @@ from verbose_c.parser.parser.ast.node import *
 from verbose_c.compiler.symbol import SymbolTable, SymbolKind, Symbol
 from verbose_c.typing.types import (
     Type, VoidType, NullType, IntegerType, FloatType, StringType, BoolType,
-    PointerType, ArrayType, FunctionType, ClassType, StructType, AnyType, ErrorType
+    PointerType, ArrayType, FunctionType, ClassType, StructType, AnyType, ErrorType,
+    common_arithmetic_type,
 )
 from verbose_c.object.enum import VBCObjectType
+from verbose_c.object.numeric import NUMERIC_RANKS, cast_numeric, check_integer, numeric_literal
 
 
 # 将字符串类型名映射到编译时Type对象
 BUILTIN_TYPE_MAP: dict[str, Type] = {
     "void": VoidType(),
     "char": IntegerType(VBCObjectType.CHAR),
+    "short": IntegerType(VBCObjectType.SHORT),
     "int": IntegerType(VBCObjectType.INT),
     "long": IntegerType(VBCObjectType.LONG), 
     "long long": IntegerType(VBCObjectType.LONGLONG),
@@ -29,18 +33,16 @@ BUILTIN_TYPE_MAP: dict[str, Type] = {
     "bool": BoolType(),
 }
 
-def _build_type_promotion_priority() -> dict[VBCObjectType, int]:
-    """
-    动态构建类型提升优先级字典，确保与运行时行为一致。
-    """
-    priority_map = {}
-    for type_enum, (_, priority) in VBCInteger.bit_width.items():
-        priority_map[type_enum] = priority
-    for type_enum, (_, priority) in VBCFloat.bit_width.items():
-        priority_map[type_enum] = priority
-    return priority_map
+TYPE_PROMOTION_PRIORITY = NUMERIC_RANKS
 
-TYPE_PROMOTION_PRIORITY = _build_type_promotion_priority()
+_BINARY_PRECEDENCE = {
+    Operator.LOGICAL_OR: 1, Operator.LOGICAL_AND: 2,
+    Operator.EQUAL: 3, Operator.NOT_EQUAL: 3,
+    Operator.LESS_THAN: 4, Operator.LESS_EQUAL: 4,
+    Operator.GREATER_THAN: 4, Operator.GREATER_EQUAL: 4,
+    Operator.ADD: 5, Operator.SUBTRACT: 5,
+    Operator.MULTIPLY: 6, Operator.DIVIDE: 6, Operator.MODULO: 6,
+}
 
 
 class TypeChecker(VisitorBase):
@@ -140,18 +142,16 @@ class TypeChecker(VisitorBase):
         return None
 
     def _eval_const_int_expr(self, expr: ASTNode) -> int | None:
-        """
-        求值编译期整型常量表达式。
-        支持：整数字面量、已知的编译期常量标识符（如 enum 成员，见 Symbol.const_value）。
-        """
-        if isinstance(expr, NumberNode):
-            value = expr.value
-            if isinstance(value, int) and not isinstance(value, bool):
-                return value
-        if isinstance(expr, NameNode):
-            symbol = self.symbol_table.lookup_value(expr.name)
-            if symbol is not None and symbol.const_value is not None:
-                return symbol.const_value
+        """按公共数值规则计算 enum 和 case 的整型常量表达式。"""
+        if isinstance(self.visit(expr), ErrorType):
+            return None
+        try:
+            value = evaluate_numeric_constant(expr, self.symbol_table)
+            if isinstance(value, (VBCInteger, VBCBool)):
+                expr._constant_int_value = int(value.value)
+                return int(value.value)
+        except (TypeError, ValueError, ArithmeticError) as exc:
+            self.errors.append(f"常量表达式错误: {exc}, 在 {expr.start_line} 行")
         return None
 
     def _eval_case_constant(self, expr: ASTNode) -> int | None:
@@ -212,6 +212,8 @@ class TypeChecker(VisitorBase):
                     return None
                 if not self._is_assignable(element_type, elem_type):
                     self.errors.append(f"类型错误: 不能将类型 '{elem_type}' 的值用于类型为 '{element_type}' 的数组元素, 在 {elem.start_line} 行")
+                else:
+                    self._mark_implicit_cast_if_needed(elem, element_type, elem_type)
             return inferred
         if count > declared_size:
             self.errors.append(f"类型错误: 初始化列表包含 {count} 个元素, 超过数组长度 {declared_size}, 在 {line} 行")
@@ -222,6 +224,8 @@ class TypeChecker(VisitorBase):
                 return None
             if not self._is_assignable(element_type, elem_type):
                 self.errors.append(f"类型错误: 不能将类型 '{elem_type}' 的值用于类型为 '{element_type}' 的数组元素, 在 {elem.start_line} 行")
+            else:
+                self._mark_implicit_cast_if_needed(elem, element_type, elem_type)
         return declared_size
 
     def _is_scalar_truthy_type(self, type_: Type) -> bool:
@@ -236,14 +240,14 @@ class TypeChecker(VisitorBase):
                 f"类型错误: '{stmt}' 语句的条件必须是标量类型（整数、浮点、指针或布尔）, 而不是 '{condition_type}', 在 {line} 行"
             )
 
-    def _numeric_rank(self, type_: Type) -> int:
+    def _numeric_rank(self, type_: Type) -> float:
         """返回数值类型的隐式转换优先级，用于判断是否窄化。"""
         if isinstance(type_, BoolType):
             return 0
         if isinstance(type_, IntegerType):
-            return int(TYPE_PROMOTION_PRIORITY.get(type_.kind, 0))
+            return TYPE_PROMOTION_PRIORITY.get(type_.kind, 0)
         if isinstance(type_, FloatType):
-            return int(TYPE_PROMOTION_PRIORITY.get(type_.kind, 0))
+            return TYPE_PROMOTION_PRIORITY.get(type_.kind, 0)
         return -1
 
     def _warn_implicit_conversion_if_needed(self, target_type: Type, source_type: Type, line: int | None, context: str):
@@ -270,7 +274,22 @@ class TypeChecker(VisitorBase):
         if target_type == source_type:
             return
         if isinstance(target_type, (IntegerType, FloatType, BoolType)) and isinstance(source_type, (IntegerType, FloatType, BoolType)):
+            self._check_constant_conversion(expr_node, target_type)
             setattr(expr_node, "_implicit_cast_target", target_type)
+
+    def _check_constant_conversion(self, expr_node: ASTNode, target_type: Type) -> None:
+        """提前诊断已知数值的非法转换，未知值留给 VM/native 的运行时检查。"""
+        if not isinstance(target_type, (IntegerType, FloatType, BoolType)):
+            return
+        try:
+            value = evaluate_numeric_constant(expr_node, self.symbol_table)
+        except (TypeError, ValueError, ArithmeticError):
+            return
+        if value is not None:
+            try:
+                cast_numeric(value, VBCObjectType.BOOL if isinstance(target_type, BoolType) else target_type.kind)
+            except (TypeError, ValueError, ArithmeticError) as exc:
+                self.errors.append(f"类型错误: {exc}, 在 {expr_node.start_line} 行")
 
     def _is_castable(self, target_type: Type, source_type: Type) -> bool:
         """
@@ -281,15 +300,17 @@ class TypeChecker(VisitorBase):
         if target_type == source_type:
             return True
 
-        # 规则 2: 任何类型可以转换成 void 类型，同时 void 类型可以转换成任何类型。
-        if isinstance(target_type, VoidType) or isinstance(source_type, VoidType):
+        # 转换到 void 仅丢弃值；void 本身不能生成数值。
+        if isinstance(target_type, VoidType):
             return True
+        if isinstance(source_type, VoidType):
+            return False
 
         # 规则 3: 任何数字类型之间都可以互相转换。
         # 这包括了安全的拓宽转换 (int -> float) 和可能不安全的收窄转换 (float -> int, long -> int)。
         # 程序员使用显式转换，就表示他们接受了可能的信息丢失风险。
-        is_target_numeric = isinstance(target_type, (IntegerType, FloatType))
-        is_source_numeric = isinstance(source_type, (IntegerType, FloatType))
+        is_target_numeric = isinstance(target_type, (IntegerType, FloatType, BoolType))
+        is_source_numeric = isinstance(source_type, (IntegerType, FloatType, BoolType))
         if is_target_numeric and is_source_numeric:
             return True
 
@@ -300,11 +321,6 @@ class TypeChecker(VisitorBase):
             # 在运行时，这会调用类似 str(value) 的逻辑。
             return True
 
-        # 规则 5: 允许字符串转换为数字类型。
-        # 这需要运行时支持，例如尝试解析字符串。如果解析失败，可能会在运行时抛出错误。
-        if is_target_numeric and isinstance(source_type, StringType):
-            return True
-            
         # 规则 6: 字符串和数字转换布尔值
         if isinstance(target_type, BoolType) and (isinstance(source_type, StringType) or is_source_numeric):
             return True
@@ -337,10 +353,15 @@ class TypeChecker(VisitorBase):
 
     # 表达式类型推断
     def visit_NumberNode(self, node: NumberNode) -> Type:
+        try:
+            node.inferred_type = numeric_literal(node.value, node.inferred_type)._object_type
+        except (ValueError, ArithmeticError) as exc:
+            self.errors.append(f"数值字面量错误: {exc}, 在 {node.start_line} 行")
+            return ErrorType()
         if isinstance(node.value, int):
-            return IntegerType(VBCObjectType.INT)
+            return IntegerType(node.inferred_type)
         elif isinstance(node.value, float):
-            return FloatType(VBCObjectType.FLOAT)
+            return FloatType(node.inferred_type)
         else:
             self.errors.append(f"内部错误：意外的数字值类型 {type(node.value)}, 在 {node.start_line} 行")
             return ErrorType()
@@ -381,6 +402,10 @@ class TypeChecker(VisitorBase):
         return symbol.type_
 
     def visit_UnaryOpNode(self, node: UnaryOpNode) -> Type:
+        resolved = self._resolve_expression_precedence(node)
+        if resolved is not node:
+            node.resolved_node = resolved
+            return self.visit(resolved)
         if node.op == Operator.DEREFERENCE:
             operand_type = self._decay_array_expression(node.expr, self.visit(node.expr))
             if isinstance(operand_type, ErrorType):
@@ -413,10 +438,13 @@ class TypeChecker(VisitorBase):
             return ErrorType()
 
         if node.op in (Operator.SUBTRACT, Operator.ADD):
-            if not isinstance(operand_type, (IntegerType, FloatType)):
+            if not isinstance(operand_type, (IntegerType, FloatType, BoolType)):
                 self.errors.append(f"类型错误: 操作符 '{node.op.value}' 不能用于类型 '{operand_type}', 在 {node.start_line} 行")
                 return ErrorType()
-            return operand_type
+            result_type = common_arithmetic_type(operand_type)
+            node._numeric_kind = result_type.kind
+            self._mark_implicit_cast_if_needed(node.expr, result_type, operand_type)
+            return result_type
 
         if node.op == Operator.NOT:
             if not self._is_scalar_truthy_type(operand_type):
@@ -429,6 +457,7 @@ class TypeChecker(VisitorBase):
 
     def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
         """检查二元表达式类型并推导结果类型。"""
+        self._resolve_expression_precedence(node)
         left_type = self._decay_array_expression(node.left, self.visit(node.left))
         right_type = self._decay_array_expression(node.right, self.visit(node.right))
 
@@ -439,10 +468,14 @@ class TypeChecker(VisitorBase):
 
         # 取模运算
         if op == Operator.MODULO:
-            if not isinstance(left_type, IntegerType) or not isinstance(right_type, IntegerType):
+            if not isinstance(left_type, (IntegerType, BoolType)) or not isinstance(right_type, (IntegerType, BoolType)):
                 self.errors.append(f"类型错误: 取模运算的操作数必须是整数类型, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
                 return ErrorType()
-            return IntegerType(VBCObjectType.INT)
+            result_type = common_arithmetic_type(left_type, right_type)
+            node._numeric_kind = result_type.kind
+            self._mark_implicit_cast_if_needed(node.left, result_type, left_type)
+            self._mark_implicit_cast_if_needed(node.right, result_type, right_type)
+            return result_type
 
         # 算术运算
         if op in (Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE):
@@ -489,20 +522,11 @@ class TypeChecker(VisitorBase):
                 return StringType()
 
             # 规则 2: 数字运算 (整数/浮点数)
-            if isinstance(left_type, (IntegerType, FloatType)) and isinstance(right_type, (IntegerType, FloatType)):
-                if op == Operator.DIVIDE:
-                    if isinstance(left_type, FloatType) or isinstance(right_type, FloatType):
-                        left_priority = TYPE_PROMOTION_PRIORITY[left_type.kind]
-                        right_priority = TYPE_PROMOTION_PRIORITY[right_type.kind]
-                        return left_type if left_priority >= right_priority else right_type
-                    int_priority = TYPE_PROMOTION_PRIORITY[VBCObjectType.INT]
-                    left_p = IntegerType(VBCObjectType.INT) if TYPE_PROMOTION_PRIORITY[left_type.kind] < int_priority else left_type
-                    right_p = IntegerType(VBCObjectType.INT) if TYPE_PROMOTION_PRIORITY[right_type.kind] < int_priority else right_type
-                    return left_p if TYPE_PROMOTION_PRIORITY[left_p.kind] >= TYPE_PROMOTION_PRIORITY[right_p.kind] else right_p
-
-                left_priority = TYPE_PROMOTION_PRIORITY[left_type.kind]
-                right_priority = TYPE_PROMOTION_PRIORITY[right_type.kind]
-                result_type = left_type if left_priority >= right_priority else right_type
+            if isinstance(left_type, (IntegerType, FloatType, BoolType)) and isinstance(right_type, (IntegerType, FloatType, BoolType)):
+                result_type = common_arithmetic_type(left_type, right_type)
+                node._numeric_kind = result_type.kind
+                self._mark_implicit_cast_if_needed(node.left, result_type, left_type)
+                self._mark_implicit_cast_if_needed(node.right, result_type, right_type)
                 return result_type
 
             # 如果以上规则都不匹配，则是类型错误
@@ -531,12 +555,16 @@ class TypeChecker(VisitorBase):
                 return ErrorType()
 
             # 允许数字之间，或相同类型之间比较
-            is_numeric = isinstance(left_type, (IntegerType, FloatType)) and isinstance(right_type, (IntegerType, FloatType))
+            is_numeric = isinstance(left_type, (IntegerType, FloatType, BoolType)) and isinstance(right_type, (IntegerType, FloatType, BoolType))
             is_same_type = type(left_type) is type(right_type) and left_type == right_type
 
             if not (is_numeric or is_same_type):
                 self.errors.append(f"类型错误: 无法比较不兼容的类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
                 return ErrorType()
+            if is_numeric:
+                common_type = common_arithmetic_type(left_type, right_type)
+                self._mark_implicit_cast_if_needed(node.left, common_type, left_type)
+                self._mark_implicit_cast_if_needed(node.right, common_type, right_type)
             return BoolType()
 
         # 逻辑运算
@@ -660,6 +688,10 @@ class TypeChecker(VisitorBase):
                     value = next_value
             else:
                 value = next_value
+            try:
+                check_integer(value, VBCObjectType.INT)
+            except OverflowError as exc:
+                self.errors.append(f"枚举常量错误: {exc}, 在 {enumerator.start_line} 行")
             next_value = value + 1
 
             try:
@@ -762,9 +794,10 @@ class TypeChecker(VisitorBase):
             return ErrorType()
 
         final_result = self.visit_AssignmentNode(AssignmentNode(target=node.left, value=bin_expr))
+        node._numeric_kind = getattr(bin_expr, "_numeric_kind", None)
         cast_target = getattr(bin_expr, "_implicit_cast_target", None)
         if cast_target is not None:
-            setattr(node, "_implicit_cast_target", cast_target)
+            setattr(node, "_compound_cast_target", cast_target)
         pointer_arithmetic = getattr(bin_expr, "_pointer_arithmetic", None)
         if pointer_arithmetic is not None:
             setattr(node, "_pointer_arithmetic", pointer_arithmetic)
@@ -785,6 +818,7 @@ class TypeChecker(VisitorBase):
             return ErrorType()
 
         base_type = self.visit(base)
+        node._update_type = base_type
         if isinstance(base_type, ErrorType):
             return ErrorType()
         if isinstance(base_type, PointerType):
@@ -795,6 +829,7 @@ class TypeChecker(VisitorBase):
         if not isinstance(base_type, (IntegerType, FloatType)):
             self.errors.append(f"类型错误: 自增/自减操作数必须是整数、浮点或指针类型, 而不是 '{base_type}', 在 {node.start_line} 行")
             return ErrorType()
+        node._numeric_kind = common_arithmetic_type(base_type, IntegerType(VBCObjectType.INT)).kind
         return base_type
 
     def visit_BlockNode(self, node: BlockNode) -> Type:
@@ -1275,62 +1310,87 @@ class TypeChecker(VisitorBase):
 
         return class_type
 
+    def _resolve_expression_precedence(self, node: ASTNode) -> ASTNode:
+        """
+        按当前类型命名空间消除括号歧义，并恢复被歧义节点遮住的中缀优先级。
+
+        Args:
+            node: 尚未类型检查的表达式；真正的括号由语法标记保留。
+
+        Returns:
+            强转只绑定一个因子、普通表达式保持 C 优先级的节点。
+        """
+        if getattr(node, "resolved_node", None) is not None:
+            return node.resolved_node
+        if isinstance(node, ParenOrCastNode):
+            location = dict(start_line=node.start_line, start_column=node.start_column,
+                            end_line=node.end_line, end_column=node.end_column)
+            target_type = self.resolve_type_node(node.target_type, report_error=False)
+            if not isinstance(target_type, ErrorType):
+                resolved = CastNode(node.target_type, node.expression, **location)
+            else:
+                left_name = node.target_type.type_name.name
+                op = {Operator.ADD: Operator.ADD, Operator.SUBTRACT: Operator.SUBTRACT,
+                      Operator.DEREFERENCE: Operator.MULTIPLY}.get(getattr(node.expression, "op", None))
+                right = getattr(node.expression, "expr", None)
+                if isinstance(node.expression, NumberNode) and node.expression._leading_minus:
+                    op = Operator.SUBTRACT
+                    right = NumberNode(-node.expression.value, **location)
+                if node.target_type.pointer_level or self.symbol_table.lookup_value(left_name) is None or op is None:
+                    return node
+                resolved = BinaryOpNode(NameNode(left_name, **location), op, right, **location)
+                resolved._recovered_infix = True
+            resolved._parenthesized = getattr(node, "_parenthesized", False)
+            node.resolved_node = self._resolve_expression_precedence(resolved)
+            return node.resolved_node
+        if isinstance(node, (CastNode, UnaryOpNode)):
+            attribute = "expression" if isinstance(node, CastNode) else "expr"
+            expression = self._resolve_expression_precedence(getattr(node, attribute))
+            setattr(node, attribute, expression)
+            if (isinstance(expression, BinaryOpNode) and getattr(expression, "_recovered_infix", False)
+                    and not getattr(expression, "_parenthesized", False)):
+                location = dict(start_line=node.start_line, start_column=node.start_column,
+                                end_line=node.end_line, end_column=node.end_column)
+                prefix = (CastNode(node.target_type, expression.left, **location) if isinstance(node, CastNode)
+                          else UnaryOpNode(node.op, expression.left, **location))
+                expression.left = self._resolve_expression_precedence(prefix)
+                expression._parenthesized = getattr(node, "_parenthesized", False)
+                node.resolved_node = self._resolve_expression_precedence(expression)
+                return node.resolved_node
+        if isinstance(node, BinaryOpNode):
+            node.left = self._resolve_expression_precedence(node.left)
+            node.right = self._resolve_expression_precedence(node.right)
+            left, right, op = node.left, node.right, node.op
+            location = dict(start_line=node.start_line, start_column=node.start_column,
+                            end_line=node.end_line, end_column=node.end_column)
+            if (isinstance(left, BinaryOpNode) and getattr(left, "_recovered_infix", False)
+                    and not getattr(left, "_parenthesized", False)
+                    and _BINARY_PRECEDENCE[left.op] < _BINARY_PRECEDENCE[op]):
+                node.left, node.op = left.left, left.op
+                node.right = self._resolve_expression_precedence(BinaryOpNode(left.right, op, right, **location))
+                node._recovered_infix = True
+                return self._resolve_expression_precedence(node)
+            elif (isinstance(right, BinaryOpNode) and getattr(right, "_recovered_infix", False)
+                    and not getattr(right, "_parenthesized", False)
+                    and _BINARY_PRECEDENCE[right.op] <= _BINARY_PRECEDENCE[op]):
+                node.left = self._resolve_expression_precedence(BinaryOpNode(left, op, right.left, **location))
+                node.op, node.right = right.op, right.right
+                node._recovered_infix = True
+                return self._resolve_expression_precedence(node)
+        return node
+
     def visit_ParenOrCastNode(self, node: ParenOrCastNode) -> Type:
-        target_type = self.resolve_type_node(node.target_type, report_error=False)
-        if not isinstance(target_type, ErrorType):
-            cast_node = CastNode(
-                node.target_type,
-                node.expression,
-                start_line=node.start_line,
-                start_column=node.start_column,
-                end_line=node.end_line,
-                end_column=node.end_column
-            )
-            node.resolved_node = cast_node
-            source_type = self.visit(node.expression)
-            if isinstance(source_type, ErrorType):
-                return ErrorType()
-            if not self._is_castable(target_type, source_type):
-                self.errors.append(f"类型错误: 无法将类型 '{source_type}' 强制转换为 '{target_type}', 在 {node.start_line} 行")
-                return ErrorType()
-            return target_type
-
-        expr_node = None
-        if node.target_type.pointer_level == 0:
-            left_name = node.target_type.type_name.name
-            if self.symbol_table.lookup_value(left_name) is not None and isinstance(node.expression, UnaryOpNode):
-                op_map = {
-                    Operator.ADD: Operator.ADD,
-                    Operator.SUBTRACT: Operator.SUBTRACT,
-                    Operator.DEREFERENCE: Operator.MULTIPLY,
-                }
-                mapped_op = op_map.get(node.expression.op)
-                if mapped_op is not None:
-                    left = NameNode(
-                        left_name,
-                        start_line=node.start_line,
-                        start_column=node.start_column,
-                        end_line=node.end_line,
-                        end_column=node.end_column
-                    )
-                    expr_node = BinaryOpNode(
-                        left,
-                        mapped_op,
-                        node.expression.expr,
-                        start_line=node.start_line,
-                        start_column=node.start_column,
-                        end_line=node.end_line,
-                        end_column=node.end_column
-                    )
-
-        if expr_node is not None:
-            node.resolved_node = expr_node
-            return self.visit(expr_node)
-
+        resolved = self._resolve_expression_precedence(node)
+        if resolved is not node:
+            return self.visit(resolved)
         self.resolve_type_node(node.target_type, report_error=True)
         return ErrorType()
 
     def visit_CastNode(self, node: CastNode) -> Type:
+        resolved = self._resolve_expression_precedence(node)
+        if resolved is not node:
+            node.resolved_node = resolved
+            return self.visit(resolved)
         target_type = self.resolve_type_node(node.target_type)
         source_type = self.visit(node.expression)
         if isinstance(target_type, ErrorType) or isinstance(source_type, ErrorType):
@@ -1338,6 +1398,8 @@ class TypeChecker(VisitorBase):
         if not self._is_castable(target_type, source_type):
             self.errors.append(f"类型错误: 无法将类型 '{source_type}' 强制转换为 '{target_type}', 在 {node.start_line} 行")
             return ErrorType()
+        node._cast_target_type = target_type
+        self._check_constant_conversion(node.expression, target_type)
         return target_type
 
     def visit_SuperNode(self, node: SuperNode) -> Type:

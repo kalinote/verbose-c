@@ -1,5 +1,6 @@
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.object import VBCObject
+from verbose_c.object.numeric import numeric_compare, numeric_unary
 from verbose_c.utils.algorithm import hash_
 
 class VBCBool(VBCObject):
@@ -20,20 +21,13 @@ class VBCBool(VBCObject):
         return hash_(self.value)
 
     def __eq__(self, other):
-        from verbose_c.object.t_float import VBCFloat
-        from verbose_c.object.t_integer import VBCInteger
-        if isinstance(other, VBCBool):
-            return VBCBool(self.value == other.value)
-        elif isinstance(other, VBCInteger) or isinstance(other, VBCFloat):
-            return VBCBool(self.value == bool(other.value))
-
-        return VBCBool(False)
+        return numeric_compare("==", self, other)
 
     def __bool__(self):
         return self.value
 
     def __neg__(self):
-        return VBCBool(not self.value)
+        return numeric_unary("-", self)
 
     def __pos__(self):
-        return self
+        return numeric_unary("+", self)

@@ -55,6 +55,8 @@ init_list[InitListNode]: '{' els=nonnull_init_elems? '}' { InitListNode(els or [
 nonnull_init_elems[list]: head=expr tail=(',' expr)* { [head] + [t[1] for t in tail] }
 var_assign[AssignmentNode]: n=member_expr '=' v=expr ';' { AssignmentNode(n, v, LOCATIONS) }
 type_name[TypeNode]:
+      | 'long' 'long' s='*'* { TypeNode(NameNode("long long", LOCATIONS), len(s), LOCATIONS) }
+      | 'unlimited' t=('int' | 'float') s='*'* { TypeNode(NameNode("unlimited " + t.string, LOCATIONS), len(s), LOCATIONS) }
       | t1=(SOFT_KEYWORD | NAME) t2=(SOFT_KEYWORD | NAME) &(!'(') &(!('=' | ';' | ')' | ',' | '[')) s='*'* { TypeNode(NameNode(t1.string + " " + t2.string, LOCATIONS), len(s), LOCATIONS) }
       | t=(SOFT_KEYWORD | NAME) s='*'* { TypeNode(NameNode(t.string, LOCATIONS), len(s), LOCATIONS) }
 
@@ -97,17 +99,19 @@ multiplicative:
     | multiplicative '*' factor { BinaryOpNode(multiplicative, Operator.MULTIPLY, factor, LOCATIONS) }
     | multiplicative '/' factor { BinaryOpNode(multiplicative, Operator.DIVIDE, factor, LOCATIONS) }
     | factor
+# 语义阶段消除类型名歧义，普通括号的边界标记用于恢复中缀优先级。
 factor:
-    | '(' type_name ')' expr { ParenOrCastNode(type_name, expr, LOCATIONS) } 
-    | '(' expr ')' { expr }
+    | '(' type_name ')' factor { ParenOrCastNode(type_name, factor, LOCATIONS) }
+    | '(' expr ')' { (setattr(expr, '_parenthesized', True), expr)[1] }
     | unary
     | new_instance
 unary:
     | '++' operand=unary { UpdateExprNode(operand, Operator.INCREMENT, is_prefix=True, LOCATIONS) }
     | '--' operand=unary { UpdateExprNode(operand, Operator.DECREMENT, is_prefix=True, LOCATIONS) }
-    | '-' operand=unary { UnaryOpNode(Operator.SUBTRACT, operand, LOCATIONS) }
-    | '+' operand=unary { UnaryOpNode(Operator.ADD, operand, LOCATIONS) }
-    | '!' operand=unary { UnaryOpNode(Operator.NOT, operand, LOCATIONS) }
+    | '-' n=NUMBER { NumberNode('-' + n.string, LOCATIONS) }
+    | '-' operand=factor { UnaryOpNode(Operator.SUBTRACT, operand, LOCATIONS) }
+    | '+' operand=factor { UnaryOpNode(Operator.ADD, operand, LOCATIONS) }
+    | '!' operand=factor { UnaryOpNode(Operator.NOT, operand, LOCATIONS) }
     | '&' operand=factor { UnaryOpNode(Operator.ADDRESS_OF, operand, LOCATIONS) }
     | member_update_expr
 member_update_expr:

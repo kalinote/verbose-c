@@ -12,6 +12,21 @@ class ConditionCode(str, Enum):
     GE = "ge"
 
 
+def encode_sse_transfer(index: int, *, to_rax: bool = False, single: bool = False) -> bytes:
+    """
+    在 RAX 与 XMM 寄存器之间传送浮点位模式。
+
+    Args:
+        index: XMM0 到 XMM3 的寄存器编号。
+        to_rax: 是否从 XMM 读取到 RAX。
+        single: 读取时是否仅保留 float 的低 32 位。
+    """
+    if not 0 <= index <= 3:
+        raise ValueError("仅支持 XMM0 到 XMM3")
+    prefix = b"\x66" if to_rax and single else b"\x66\x48"
+    return prefix + bytes([0x0F, 0x7E if to_rax else 0x6E, 0xC0 + (index << 3)])
+
+
 _SETCC_OPCODE = {
     ConditionCode.EQ: 0x94,
     ConditionCode.NE: 0x95,

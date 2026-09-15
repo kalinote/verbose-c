@@ -13,7 +13,9 @@ def native_open(path_obj: VBCString, flags_obj: VBCInteger, mode_obj: VBCInteger
 def native_read(fd_obj: VBCInteger, count_obj: VBCInteger):
     try:
         read_bytes = SystemRuntime.instance().read(fd_obj.value, count_obj.value)
-        return VBCString(read_bytes.decode('utf-8', errors='replace'))
+        result = VBCString("")
+        result.value = read_bytes.decode('utf-8', errors='replace')
+        return result
     except SystemRuntimeError as e:
         raise VBCIOError(f"读取文件描述符 {fd_obj.value} 失败: {e}")
 

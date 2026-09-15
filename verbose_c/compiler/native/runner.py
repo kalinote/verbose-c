@@ -1,3 +1,4 @@
+from verbose_c.compiler.native.abi import FLOAT_VALUE_TYPES, SCALAR_VALUE_TYPES
 import ctypes
 import platform
 import sys
@@ -13,6 +14,7 @@ from verbose_c.compiler.native.codegen import (
 )
 from verbose_c.compiler.native.errors import NativeCodegenError
 from verbose_c.compiler.native.target import NativeTarget
+from verbose_c.object.numeric import NATIVE_NUMERIC_ERRORS
 
 
 MEM_COMMIT = 0x1000
@@ -42,6 +44,8 @@ def run_native_function_in_memory(function: NativeCodeFunction) -> int:
     """在 Windows x64 可执行内存中运行无参数 native 函数。"""
     if not isinstance(function, NativeCodeFunction):
         raise NativeCodegenError("native 单函数内存执行需要 NativeCodeFunction")
+    if any(item.source_op in {"load_string", "runtime"} for item in function.instructions):
+        raise NativeCodegenError("含字符串或系统接口的函数必须通过完整 native 程序执行")
     if not isinstance(function.name, str) or not function.name:
         raise NativeCodegenError("native 单函数内存执行函数名必须是非空字符串")
     if not isinstance(function.return_type, str) or function.return_type not in {"int64", "bool64"}:
@@ -238,12 +242,12 @@ def run_native_program_in_memory(program: NativeCodeProgram) -> int:
             raise NativeCodegenError(
                 f"native 内存执行函数表 key 与函数名不一致: key {table_name}, 函数 {function.name}"
             )
-        if not isinstance(function.return_type, str) or function.return_type not in {"int64", "bool64", "void"}:
+        if not isinstance(function.return_type, str) or function.return_type not in SCALAR_VALUE_TYPES | {"void"}:
             raise NativeCodegenError(f"native 内存执行函数 {table_name} return_type 暂不支持: {function.return_type!r}")
         if not isinstance(function.param_types, tuple) or any(not isinstance(item, str) for item in function.param_types):
             raise NativeCodegenError(f"native 内存执行函数 {table_name} param_types 必须是字符串元组")
         for index, param_type in enumerate(function.param_types):
-            if param_type not in {"int64", "bool64"}:
+            if param_type not in SCALAR_VALUE_TYPES:
                 raise NativeCodegenError(f"native 内存执行函数 {table_name} 第 {index} 个参数暂不支持类型: {param_type!r}")
     if program.entry_offset < 0:
         raise NativeCodegenError(f"native 内存执行入口偏移不能为负数: {program.entry_offset}")
@@ -287,6 +291,11 @@ def run_native_program_in_memory(program: NativeCodeProgram) -> int:
     _validate_register_allocation(program)
     _validate_relocations(program)
     _validate_exit_propagation(program)
+    if program.runtime:
+        from verbose_c.compiler.native.codegen import native_code_program_map
+        metadata = native_code_program_map(program)
+        validate_native_code_map_bytes(program.code, metadata)
+        return _run_code_in_memory(program.code, program.entry_offset, metadata["runtime"])
     return _run_code_in_memory(program.code, program.entry_offset)
 
 
@@ -296,6 +305,8 @@ def run_native_bytes_in_memory(code: bytes, metadata: dict[str, object]) -> int:
     entry_offset = metadata["entry_offset"]
     if not isinstance(entry_offset, int) or isinstance(entry_offset, bool):
         raise NativeCodegenError(f"native raw bin 内存执行 entry_offset 必须是整数，实际 {type(entry_offset).__name__}")
+    if metadata.get("runtime"):
+        return _run_code_in_memory(code, entry_offset, metadata["runtime"])
     return _run_code_in_memory(code, entry_offset)
 
 
@@ -310,6 +321,8 @@ def run_native_text_section_bytes_in_memory(text_raw: bytes, metadata: dict[str,
         raise NativeCodegenError(f"native .text 内存执行 code_size 越界: {code_size}, .text 长度 {len(text_raw)}")
     if not isinstance(entry_offset, int) or isinstance(entry_offset, bool):
         raise NativeCodegenError(f"native .text 内存执行 entry_offset 必须是整数，实际 {type(entry_offset).__name__}")
+    if metadata.get("runtime"):
+        return _run_code_in_memory(text_raw[:code_size], entry_offset, metadata["runtime"])
     return _run_code_in_memory(text_raw[:code_size], entry_offset)
 
 
@@ -345,12 +358,12 @@ def _validate_symbols(program: NativeCodeProgram) -> None:
             raise NativeCodegenError(
                 f"native 内存执行符号 {symbol.name} 大小与函数不一致: 符号 {symbol.size}, 函数 {len(function.code)}"
             )
-        if not isinstance(symbol.return_type, str) or symbol.return_type not in {"int64", "bool64", "void"}:
+        if not isinstance(symbol.return_type, str) or symbol.return_type not in SCALAR_VALUE_TYPES | {"void"}:
             raise NativeCodegenError(f"native 内存执行符号 {symbol.name} return_type 暂不支持: {symbol.return_type!r}")
         if not isinstance(symbol.param_types, tuple) or any(not isinstance(item, str) for item in symbol.param_types):
             raise NativeCodegenError(f"native 内存执行符号 {symbol.name} param_types 必须是字符串元组")
         for index, param_type in enumerate(symbol.param_types):
-            if param_type not in {"int64", "bool64"}:
+            if param_type not in SCALAR_VALUE_TYPES:
                 raise NativeCodegenError(f"native 内存执行符号 {symbol.name} 第 {index} 个参数暂不支持类型: {param_type!r}")
         if symbol.return_type != function.return_type:
             raise NativeCodegenError(
@@ -522,13 +535,14 @@ def _validate_register_allocation(program: NativeCodeProgram) -> None:
             raise NativeCodegenError(f"native 内存执行函数 {name} register_allocation.argument_registers 必须是字符串元组")
         if len(set(allocation.argument_registers)) != len(allocation.argument_registers):
             raise NativeCodegenError(f"native 内存执行函数 {name} register_allocation.argument_registers 不能重复")
-        expected_argument_prefix = argument_registers[:len(allocation.argument_registers)]
+        expected_argument_prefix = tuple(f"XMM{index}" if index < len(function.param_types) and function.param_types[index] in FLOAT_VALUE_TYPES else register
+                                         for index, register in enumerate(argument_registers[:len(allocation.argument_registers)]))
         if allocation.argument_registers != expected_argument_prefix:
             raise NativeCodegenError(
                 f"native 内存执行函数 {name} register_allocation.argument_registers 与 ABI 前缀不一致: "
                 f"记录 {list(allocation.argument_registers)}, 期望 {list(expected_argument_prefix)}"
             )
-        if allocation.return_register != return_register:
+        if allocation.return_register != ("XMM0" if function.return_type in FLOAT_VALUE_TYPES else return_register):
             raise NativeCodegenError(f"native 内存执行函数 {name} register_allocation.return_register 与 ABI 不一致")
         if allocation.frame_pointer != frame_pointer:
             raise NativeCodegenError(f"native 内存执行函数 {name} register_allocation.frame_pointer 与 ABI 不一致")
@@ -811,7 +825,7 @@ def _validate_call_frames(program: NativeCodeProgram) -> None:
     supported_value_types = getattr(abi, "supported_value_types", None)
     if not isinstance(supported_value_types, tuple) or any(not isinstance(item, str) for item in supported_value_types):
         raise NativeCodegenError("native 内存执行 ABI supported_value_types 必须是字符串元组")
-    if set(supported_value_types) != {"int64", "bool64", "void"}:
+    if set(supported_value_types) != SCALAR_VALUE_TYPES | {"void"}:
         raise NativeCodegenError(f"native 内存执行 ABI supported_value_types 不一致: {supported_value_types}")
     for name, function in program.functions.items():
         expected_frame_offsets = {
@@ -1019,7 +1033,7 @@ def _validate_source_location(owner: str, item: object) -> None:
             raise NativeCodegenError(f"{owner}.{field} 必须是非负整数或 None，实际 {value}")
 
 
-def _run_code_in_memory(code: bytes, entry_offset: int) -> int:
+def _run_code_in_memory(code: bytes, entry_offset: int, runtime: dict | None = None) -> int:
     """复制机器码到可执行内存并调用入口。"""
     if not isinstance(code, bytes):
         raise NativeCodegenError("native 内存执行 code 必须是 bytes")
@@ -1033,6 +1047,27 @@ def _run_code_in_memory(code: bytes, entry_offset: int) -> int:
         raise NativeCodegenError(f"native 内存执行入口偏移越界: {entry_offset}, 机器码长度 {len(code)}")
     if not can_run_native_memory():
         raise NativeCodegenError("native 内存执行仅支持 Windows x64")
+    # 包装入口读取 RDX 状态，不占用合法整数返回值的取值空间。
+    # 临时启用 IEEE 就近偶数舍入和次正规数，返回时恢复宿主的浮点环境。
+    prefix = bytes.fromhex("55 48 89 E5 48 83 EC 40 48 89 4D F8 0F AE 5D F0 C7 45 EC 80 1F 00 00 0F AE 55 EC 48 C7 C2 00 00 00 00")
+    suffix = bytes.fromhex("0F AE 55 F0 48 8B 4D F8 48 89 11 48 89 EC 5D C3")
+    displacement = (4096 - len(prefix) - 5 if runtime else len(suffix)) + entry_offset
+    trampoline = prefix + b"\xE8" + displacement.to_bytes(4, "little", signed=True) + suffix
+    if runtime:
+        trampoline = trampoline.ljust(4096, b"\0")
+        payload = bytearray(code)
+        payload.extend(bytes(runtime["rdata_rva"] - 4096 - len(payload)))
+        payload.extend(bytes.fromhex(runtime["rodata"]))
+        payload.extend(bytes(runtime["idata_rva"] - 4096 - len(payload)))
+        payload.extend(bytes.fromhex(runtime["idata"]))
+        library = ctypes.WinDLL("kernel32")
+        for name, offset in runtime["iat_offsets"].items():
+            import struct
+            struct.pack_into("<Q", payload, runtime["idata_rva"] - 4096 + offset,
+                             ctypes.cast(getattr(library, name), ctypes.c_void_p).value)
+        code = bytes(payload)
+    code = trampoline + code
+    entry_offset = 0
     kernel32 = ctypes.windll.kernel32
     kernel32.VirtualAlloc.restype = ctypes.c_void_p
     kernel32.VirtualAlloc.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong, ctypes.c_ulong]
@@ -1043,14 +1078,33 @@ def _run_code_in_memory(code: bytes, entry_offset: int) -> int:
     kernel32.FlushInstructionCache.restype = ctypes.c_bool
     kernel32.FlushInstructionCache.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
     size = len(code)
-    address = kernel32.VirtualAlloc(None, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+    address = kernel32.VirtualAlloc(None, size, MEM_COMMIT | MEM_RESERVE, 0x04 if runtime else PAGE_EXECUTE_READWRITE)
     if not address:
         raise NativeCodegenError("VirtualAlloc 分配可执行内存失败")
     try:
         ctypes.memmove(address, code, size)
+        if runtime:
+            kernel32.VirtualProtect.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong)]
+            kernel32.VirtualProtect.restype = ctypes.c_bool
+            old_protection = ctypes.c_ulong()
+            for offset, length, protection in (
+                (0, runtime["rdata_rva"], 0x20),
+                (runtime["rdata_rva"], runtime["idata_rva"] - runtime["rdata_rva"], 0x02),
+            ):
+                if not kernel32.VirtualProtect(address + offset, length, protection, ctypes.byref(old_protection)):
+                    raise NativeCodegenError("VirtualProtect 设置运行时节权限失败")
         current_process = kernel32.GetCurrentProcess()
         if not kernel32.FlushInstructionCache(current_process, address, size):
             raise NativeCodegenError("FlushInstructionCache 刷新指令缓存失败")
-        return int(ctypes.CFUNCTYPE(ctypes.c_int64)(address + entry_offset)())
+        status = ctypes.c_int64(0)
+        value = int(ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.POINTER(ctypes.c_int64))(address)(ctypes.byref(status)))
+        if status.value >= 2:
+            from verbose_c.standard_io import IO_ERRORS
+            if status.value in IO_ERRORS:
+                raise NativeCodegenError(IO_ERRORS[status.value])
+            message = NATIVE_NUMERIC_ERRORS.get(status.value, f"未知数值错误 {status.value}")
+            location = f"，在 {value} 行" if value > 0 else ""
+            raise NativeCodegenError(f"native {message}{location}")
+        return value
     finally:
         kernel32.VirtualFree(address, 0, MEM_RELEASE)

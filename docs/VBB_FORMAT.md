@@ -2,12 +2,14 @@
 
 本文档描述 Verbose-C 当前实现的 `.vbb`（Verbose-C Bytecode）紧凑二进制格式。实现位于 [`verbose_c/fs/artifact_store.py`](../verbose_c/fs/artifact_store.py)。
 
-- **格式版本**：`1`
+- **格式版本**：`2`
 - **字节序**：小端（little-endian）
 - **目标 ABI 字符串**：`verbose-c-vm`
 - **默认产物路径**：入口源文件同目录下的 `__vbccache__/<stem>.vbb`
 
-当前版本 **不兼容** 早期 JSON 载荷格式；加载旧文件会抛出 `VBCBytecodeError`。
+当前版本 **不兼容** version 1 和早期 JSON 载荷格式；加载旧文件会抛出 `VBCBytecodeError`，需要从源码重新编译。
+
+version 2 隔离 C-P1-2 的算术语义变化：定宽整数溢出检查、向零截断除法、与被除数同号的余数、binary32/binary64 舍入和统一转换。算术指令携带 `VBCObjectType` 类型操作数，函数参数及返回值元数据可使用 `float32` / `float64`。文件布局和 section 编码沿用原结构。
 
 ---
 
@@ -81,7 +83,7 @@ byte_len × u8
 | 偏移 | 字段 | 类型 | 说明 |
 |------|------|------|------|
 | 0 | `magic` | `4s` | 固定为 `b"VBB\0"` |
-| 4 | `version` | `u16` | 当前为 `1` |
+| 4 | `version` | `u16` | 当前为 `2` |
 | 6 | `flags` | `u16` | 保留，当前写 `0` |
 | 8 | `header_size` | `u32` | 文件头长度，当前为 `64` |
 | 12 | `section_count` | `u16` | section 数量，当前为 `9` |

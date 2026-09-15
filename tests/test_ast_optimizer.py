@@ -704,7 +704,8 @@ def test_simple_inline_preserves_argument_implicit_cast_boundary():
     result = optimize_typed_ast(main_body, main_scope, 1)
 
     assert result.stats.inlined_functions == 1
-    assert isinstance(main_body.statements[0].value.left, CastNode)
+    assert isinstance(main_body.statements[0].value, ConstantValueNode)
+    assert main_body.statements[0].value.value.value == 3
 
 
 def test_simple_inline_skips_call_with_side_effect_argument():

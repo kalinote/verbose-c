@@ -49,6 +49,8 @@ class NumberNode(ASTNode):
         super().__init__(start_line=start_line, start_column=start_column, end_line=end_line, end_column=end_column)
         self.value: int | float = float(value) if '.' in str(value) or 'e' in str(value).lower() else int(value)
         self.inferred_type: VBCObjectType | None = inferred_type
+        # 保留 (x)-1 中的减号，供括号与强转的歧义消解使用。
+        self._leading_minus = str(value).startswith("-")
         
 class BoolNode(ASTNode):
     """

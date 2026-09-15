@@ -10,7 +10,7 @@ class IncrementalCompiler:
     """依赖感知的入口翻译单元缓存复用。"""
 
     SCHEMA_VERSION = 1
-    COMPILER_REVISION = 1  # 编译语义变化时递增，避免复用旧编译器生成的字节码。
+    COMPILER_REVISION = 3  # 字符串函数签名变化，避免复用旧 native 元数据。
 
     def __init__(self, artifact_store: ArtifactStore | None = None) -> None:
         self.artifact_store = artifact_store or ArtifactStore()

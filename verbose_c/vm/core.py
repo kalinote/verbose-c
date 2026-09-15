@@ -3,6 +3,7 @@ from verbose_c.compiler.opcode import Instruction, Opcode
 from verbose_c.error import VBCRuntimeError, TracebackFrame
 from verbose_c.object.class_ import VBCClass
 from verbose_c.object.enum import VBCObjectType
+from verbose_c.object.numeric import cast_numeric
 from verbose_c.object.instance import VBCInstance
 from verbose_c.object.object import VBCObject, VBCObjectWithGC
 from verbose_c.object.t_float import VBCFloat
@@ -170,7 +171,9 @@ class VBCVirtualMachine:
         error_message = str(e)
         full_message = f"{error_type_name}: {error_message}"
 
-        return VBCRuntimeError(full_message, traceback_frames)
+        from verbose_c.error.exceptions import VBCIOError
+        error_class = VBCIOError if isinstance(e, VBCIOError) else VBCRuntimeError
+        return error_class(full_message, traceback_frames)
 
     def get_roots(self) -> list:
         """
@@ -219,6 +222,10 @@ class VBCVirtualMachine:
         self._running = True
         self._exit_code = 0
         self._source_code = source_code
+        from verbose_c.vm.builtins_functions.system_runtime import SystemRuntime
+        standard_io = SystemRuntime.instance()._standard_io
+        if standard_io is not None:
+            standard_io.reset_input()
 
         # 为顶层模块创建一个伪函数对象，作为调用栈的根
         module_func = VBCFunction(
@@ -340,37 +347,37 @@ class VBCVirtualMachine:
 
     ## 算术运算类指令
     @register_instruction(Opcode.ADD)
-    def __handle_add(self):
+    def __handle_add(self, numeric_kind=None):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
         self._stack.push(l_operand + r_operand)
 
     @register_instruction(Opcode.SUBTRACT)
-    def __handle_subtract(self):
+    def __handle_subtract(self, numeric_kind=None):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
         self._stack.push(l_operand - r_operand)
 
     @register_instruction(Opcode.MULTIPLY)
-    def __handle_multiply(self):
+    def __handle_multiply(self, numeric_kind=None):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
         self._stack.push(l_operand * r_operand)
 
     @register_instruction(Opcode.DIVIDE)
-    def __handle_divide(self):
+    def __handle_divide(self, numeric_kind=None):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
         self._stack.push(l_operand / r_operand)
 
     @register_instruction(Opcode.MODULO)
-    def __handle_modulo(self):
+    def __handle_modulo(self, numeric_kind=None):
         r_operand = self._stack.pop()
         l_operand = self._stack.pop()
         self._stack.push(l_operand % r_operand)
 
     @register_instruction(Opcode.UNARY_MINUS)
-    def __handle_unary_minus(self):
+    def __handle_unary_minus(self, numeric_kind=None):
         n = self._stack.pop()
         self._stack.push(-n)
 
@@ -597,11 +604,7 @@ class VBCVirtualMachine:
         # 规则 1: 转换为数字类型
         if target_type_enum in VBCInteger.bit_width or target_type_enum in VBCFloat.bit_width:
             if isinstance(source_obj, (VBCInteger, VBCFloat, VBCBool)):
-                value_as_float = float(source_obj.value)
-                if target_type_enum in VBCInteger.bit_width:
-                    new_obj = VBCInteger(int(value_as_float), target_type_enum)
-                else:
-                    new_obj = VBCFloat(value_as_float, target_type_enum)
+                new_obj = cast_numeric(source_obj, target_type_enum)
         
         # 规则 2: 转换为字符串类型
         elif target_type_enum == VBCObjectType.STRING:

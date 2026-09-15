@@ -2,6 +2,7 @@ import ctypes
 import ctypes.util
 import errno
 import platform
+from verbose_c.standard_io import WindowsStandardIO
 
 
 class SystemRuntimeError(RuntimeError):
@@ -25,6 +26,8 @@ class SystemRuntime:
         self._libc = self._load_library()
         self._symbols = self._register_symbols()
         self._constants = self._build_constants()
+        self._standard_io = WindowsStandardIO() if self._is_windows else None
+        self._opened_fds = set()
 
     def constants(self) -> dict[str, int]:
         """返回当前平台的底层 I/O 常量表。"""
@@ -36,16 +39,23 @@ class SystemRuntime:
             raise SystemRuntimeError("open 的路径参数必须是字符串")
 
         encoded_path = path.encode("utf-8")
-        return self._call_with_errno(
+        fd = self._call_with_errno(
             self._symbols["open"],
             ctypes.c_char_p(encoded_path),
             int(flags),
             int(mode),
             operation="打开文件",
         )
+        self._opened_fds.add(fd)
+        return fd
 
     def read(self, fd: int, count: int) -> bytes:
         """从底层文件描述符读取字节。"""
+        if self._standard_io is not None and fd in (0, 1, 2) and fd not in self._opened_fds:
+            try:
+                return self._standard_io.read(fd, count)
+            except (OSError, MemoryError) as error:
+                raise SystemRuntimeError(str(error) or "内存分配失败。") from error
         self._validate_fd(fd)
         if count < 0:
             raise SystemRuntimeError("read 的读取长度不能为负数")
@@ -64,6 +74,11 @@ class SystemRuntime:
 
     def write(self, fd: int, data: bytes) -> int:
         """向底层文件描述符写入字节。"""
+        if self._standard_io is not None and fd in (0, 1, 2) and fd not in self._opened_fds:
+            try:
+                return self._standard_io.write(fd, data)
+            except (OSError, MemoryError) as error:
+                raise SystemRuntimeError(str(error) or "内存分配失败。") from error
         self._validate_fd(fd)
         if not isinstance(data, bytes):
             raise SystemRuntimeError("write 的数据参数必须是字节")
@@ -82,11 +97,13 @@ class SystemRuntime:
     def close(self, fd: int) -> int:
         """关闭底层文件描述符。"""
         self._validate_fd(fd)
-        return self._call_with_errno(
+        result = self._call_with_errno(
             self._symbols["close"],
             int(fd),
             operation="关闭文件描述符",
         )
+        self._opened_fds.discard(fd)
+        return result
 
     def lseek(self, fd: int, offset: int, whence: int) -> int:
         """移动底层文件描述符偏移。"""

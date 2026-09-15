@@ -24,6 +24,9 @@ _PE_LOADER_FLAGS = 0
 
 def build_native_pe_image(code: bytes, metadata: dict[str, object]) -> bytes:
     """根据 native map 写出最小 PE32+ image。"""
+    if metadata.get("schema_version") == 2:
+        from verbose_c.compiler.native.runtime_image import build_runtime_pe
+        return build_runtime_pe(code, metadata)
     text_raw = _build_text_raw(code, metadata)
     validate_native_text_section_map_bytes(text_raw, metadata)
     coff_header = _require_mapping(metadata, "pe_coff_header")
@@ -47,6 +50,18 @@ def build_native_pe_image(code: bytes, metadata: dict[str, object]) -> bytes:
 
 def validate_native_pe_image_bytes(pe_image: bytes, metadata: dict[str, object]) -> None:
     """校验最小 PE32+ image 与 native map 一致。"""
+    if isinstance(metadata, dict) and metadata.get("schema_version") == 2:
+        from verbose_c.compiler.native.runtime_image import build_runtime_pe
+        if not isinstance(pe_image, bytes):
+            raise NativeCodegenError("native PE image 必须是 bytes")
+        try:
+            offset = metadata["sections"][0]["pe_raw_pointer"]
+            expected = build_runtime_pe(pe_image[offset:offset + metadata["code_size"]], metadata)
+        except (KeyError, TypeError, ValueError, IndexError) as error:
+            raise NativeCodegenError(f"native PE image map 无效：{error}") from error
+        if expected != pe_image:
+            raise NativeCodegenError("native PE image 与代码、数据节或导入表不一致")
+        return
     if not isinstance(pe_image, bytes):
         raise NativeCodegenError(f"native PE image 必须是 bytes，实际 {type(pe_image).__name__}")
     file_layout = _require_mapping(metadata, "pe_file_layout")

@@ -381,7 +381,7 @@ def test_native_codegen_supports_integer_locals_and_arithmetic():
     assert "- 帧指针 / 栈指针: `RBP` / `RSP`" in listing
     assert "- Shadow space: `32` bytes" in listing
     assert "- 栈对齐: `16` bytes" in listing
-    assert "- 支持值类型: `int64, bool64, void`" in listing
+    assert "- 支持值类型: `int64, bool64, float32, float64, string, void`" in listing
     assert "寄存器分配" in listing
     assert "保守栈槽分配" in listing
     assert "临时寄存器: `RAX`, `R10`" in listing
@@ -418,11 +418,10 @@ def test_native_codegen_supports_integer_division_and_modulo():
 
     assert "cqo" in listing
     assert "idiv r10" in listing
-    assert "test rdx, rdx ; imod remainder" in listing
-    assert "xor rax, r10 ; imod sign check" in listing
-    assert "add rdx, r10 ; imod VM remainder" in listing
+    assert "imod sign check" not in listing
+    assert "imod VM remainder" not in listing
     assert "mov rax, rdx" in listing
-    assert {item.kind for item in program.entry.relocations} == {"je_rel32", "jns_rel32"}
+    assert not program.entry.relocations
 
 
 def test_native_codegen_supports_unary_neg_and_logical_not():
@@ -1243,7 +1242,7 @@ def test_native_codegen_rejects_unsupported_helper_return_type():
     helper = MachineFunction(
         name="helper",
         params=[],
-        return_type="float64",
+        return_type="float128",
         frame=StackFrameLayout(),
         blocks=[
             MachineBlock(
@@ -1263,7 +1262,7 @@ def test_native_codegen_rejects_unsupported_helper_return_type():
     with pytest.raises(NativeCodegenError) as exc_info:
         generate_native_code(program)
 
-    assert "函数 helper 暂不支持返回类型 float64" in str(exc_info.value)
+    assert "函数 helper 暂不支持返回类型 float128" in str(exc_info.value)
 
 
 def test_native_codegen_rejects_unsupported_parameter_type():
@@ -1813,13 +1812,13 @@ def test_native_codegen_rejects_unsupported_vreg_type():
                 instructions=[
                     MachineInstruction(
                         "load_imm",
-                        result=MachineOperand.vreg(VirtualRegister("v0", "float64")),
+                        result=MachineOperand.vreg(VirtualRegister("v0", "float128")),
                         args=[MachineOperand.imm(1)],
                         source_pc=15,
                         source_line=9,
                     ),
                 ],
-                terminator=MachineTerminator("ret", args=[MachineOperand.vreg(VirtualRegister("v0", "float64"))]),
+                terminator=MachineTerminator("ret", args=[MachineOperand.vreg(VirtualRegister("v0", "float128"))]),
             )
         ],
     )
@@ -1834,7 +1833,7 @@ def test_native_codegen_rejects_unsupported_vreg_type():
         generate_native_code(program)
 
     message = str(exc_info.value)
-    assert "虚拟寄存器 %v0 类型暂不支持 float64" in message
+    assert "虚拟寄存器 %v0 类型暂不支持 float128" in message
     assert "Machine IR 指令 load_imm" in message
     assert "行 9" in message
     assert "PC 15" in message
@@ -1853,7 +1852,7 @@ def test_native_codegen_rejects_unsupported_immediate_operand_type():
                     MachineInstruction(
                         "load_imm",
                         result=MachineOperand.vreg(VirtualRegister("v0")),
-                        args=[MachineOperand("imm", 1, "float64")],
+                        args=[MachineOperand("imm", 1, "float128")],
                         source_pc=16,
                         source_line=10,
                     ),
@@ -1873,7 +1872,7 @@ def test_native_codegen_rejects_unsupported_immediate_operand_type():
         generate_native_code(program)
 
     message = str(exc_info.value)
-    assert "imm 操作数类型暂不支持 float64" in message
+    assert "imm 操作数类型暂不支持 float128" in message
     assert "Machine IR 指令 load_imm" in message
     assert "行 10" in message
     assert "PC 16" in message
@@ -1891,7 +1890,7 @@ def test_native_codegen_rejects_unsupported_slot_operand_type():
                 instructions=[
                     MachineInstruction(
                         "store_stack",
-                        args=[MachineOperand("slot", StackSlot("local", 0), "float64"), MachineOperand.imm(1)],
+                        args=[MachineOperand("slot", StackSlot("local", 0), "float128"), MachineOperand.imm(1)],
                         source_pc=17,
                         source_line=11,
                     ),
@@ -1911,7 +1910,7 @@ def test_native_codegen_rejects_unsupported_slot_operand_type():
         generate_native_code(program)
 
     message = str(exc_info.value)
-    assert "slot 操作数类型暂不支持 float64" in message
+    assert "slot 操作数类型暂不支持 float128" in message
     assert "Machine IR 指令 store_stack" in message
     assert "行 11" in message
     assert "PC 17" in message
@@ -2430,64 +2429,60 @@ def test_native_codegen_rejects_immediate_zero_modulo_divisor():
     assert "PC 32" in message
 
 
-def test_native_codegen_rejects_source_literal_zero_divisor(tmp_path):
+def test_native_codegen_checks_source_literal_zero_divisor(tmp_path):
     source_path = tmp_path / "native_zero_divisor.vbc"
     source_path.write_text("int main() {\n    return 42 / 0;\n}\n", encoding="utf-8")
     from verbose_c.engine.engine import compile_module
 
-    with pytest.raises(NativeCodegenError) as exc_info:
-        compile_module(str(source_path), require_native_code=True)
+    compiled = compile_module(str(source_path), require_native_code=True)
+    program = compiled.native_code_program
+    assert program is not None
+    assert any(instruction.source_op == "numeric_error" for instruction in program.functions["main"].instructions)
+    if can_run_native_memory():
+        with pytest.raises(NativeCodegenError, match="除零.*2 行"):
+            run_native_program_in_memory(program)
 
-    message = str(exc_info.value)
-    assert "暂不生成除数为 0 的 idiv/imod 机器码" in message
-    assert "函数 main" in message
-    assert "Machine IR 指令 idiv" in message
-    assert "行 2" in message
 
-
-def test_native_codegen_rejects_source_local_zero_divisor(tmp_path):
+def test_native_codegen_checks_source_local_zero_divisor(tmp_path):
     source_path = tmp_path / "native_local_zero_divisor.vbc"
     source_path.write_text("int main() {\n    int z = 0;\n    return 42 / z;\n}\n", encoding="utf-8")
     from verbose_c.engine.engine import compile_module
 
-    with pytest.raises(NativeCodegenError) as exc_info:
-        compile_module(str(source_path), require_native_code=True)
+    compiled = compile_module(str(source_path), require_native_code=True)
+    program = compiled.native_code_program
+    assert program is not None
+    assert any(instruction.source_op == "numeric_error" for instruction in program.functions["main"].instructions)
+    if can_run_native_memory():
+        with pytest.raises(NativeCodegenError, match="除零.*3 行"):
+            run_native_program_in_memory(program)
 
-    message = str(exc_info.value)
-    assert "暂不生成除数为 0 的 idiv/imod 机器码" in message
-    assert "函数 main" in message
-    assert "Machine IR 指令 idiv" in message
-    assert "行 3" in message
 
-
-def test_native_codegen_rejects_source_local_zero_modulo_divisor(tmp_path):
+def test_native_codegen_checks_source_local_zero_modulo_divisor(tmp_path):
     source_path = tmp_path / "native_local_zero_modulo_divisor.vbc"
     source_path.write_text("int main() {\n    int z = 0;\n    return 42 % z;\n}\n", encoding="utf-8")
     from verbose_c.engine.engine import compile_module
 
-    with pytest.raises(NativeCodegenError) as exc_info:
-        compile_module(str(source_path), require_native_code=True)
+    compiled = compile_module(str(source_path), require_native_code=True)
+    program = compiled.native_code_program
+    assert program is not None
+    assert any(instruction.source_op == "numeric_error" for instruction in program.functions["main"].instructions)
+    if can_run_native_memory():
+        with pytest.raises(NativeCodegenError, match="除零.*3 行"):
+            run_native_program_in_memory(program)
 
-    message = str(exc_info.value)
-    assert "暂不生成除数为 0 的 idiv/imod 机器码" in message
-    assert "函数 main" in message
-    assert "Machine IR 指令 imod" in message
-    assert "行 3" in message
 
-
-def test_native_codegen_rejects_source_arithmetic_zero_divisor(tmp_path):
+def test_native_codegen_checks_source_arithmetic_zero_divisor(tmp_path):
     source_path = tmp_path / "native_arithmetic_zero_divisor.vbc"
     source_path.write_text("int main() {\n    int z = 1 - 1;\n    return 42 / z;\n}\n", encoding="utf-8")
     from verbose_c.engine.engine import compile_module
 
-    with pytest.raises(NativeCodegenError) as exc_info:
-        compile_module(str(source_path), require_native_code=True)
-
-    message = str(exc_info.value)
-    assert "暂不生成除数为 0 的 idiv/imod 机器码" in message
-    assert "函数 main" in message
-    assert "Machine IR 指令 idiv" in message
-    assert "行 3" in message
+    compiled = compile_module(str(source_path), require_native_code=True)
+    program = compiled.native_code_program
+    assert program is not None
+    assert any(instruction.source_op == "numeric_error" for instruction in program.functions["main"].instructions)
+    if can_run_native_memory():
+        with pytest.raises(NativeCodegenError, match="除零.*3 行"):
+            run_native_program_in_memory(program)
 
 
 def test_native_codegen_rejects_static_phi_zero_divisor():
@@ -2557,7 +2552,7 @@ def test_native_codegen_rejects_static_phi_zero_divisor():
     assert "PC 41" in message
 
 
-def test_native_codegen_rejects_source_cross_block_local_zero_divisor(tmp_path):
+def test_native_codegen_checks_source_cross_block_local_zero_divisor(tmp_path):
     source_path = tmp_path / "native_cross_block_local_zero_divisor.vbc"
     source_path.write_text(
         "int main() {\n"
@@ -2571,14 +2566,13 @@ def test_native_codegen_rejects_source_cross_block_local_zero_divisor(tmp_path):
     )
     from verbose_c.engine.engine import compile_module
 
-    with pytest.raises(NativeCodegenError) as exc_info:
-        compile_module(str(source_path), require_native_code=True)
-
-    message = str(exc_info.value)
-    assert "暂不生成除数为 0 的 idiv/imod 机器码" in message
-    assert "函数 main" in message
-    assert "Machine IR 指令 idiv" in message
-    assert "行 6" in message
+    compiled = compile_module(str(source_path), require_native_code=True)
+    program = compiled.native_code_program
+    assert program is not None
+    assert any(instruction.source_op == "numeric_error" for instruction in program.functions["main"].instructions)
+    if can_run_native_memory():
+        with pytest.raises(NativeCodegenError, match="除零.*6 行"):
+            run_native_program_in_memory(program)
 
 
 def test_native_codegen_rejects_handwritten_cross_block_zero_divisor_without_predecessor_metadata():
@@ -2631,7 +2625,7 @@ def test_native_codegen_rejects_handwritten_cross_block_zero_divisor_without_pre
     assert "PC 42" in message
 
 
-def test_native_codegen_rejects_source_cross_block_local_zero_modulo_divisor(tmp_path):
+def test_native_codegen_checks_source_cross_block_local_zero_modulo_divisor(tmp_path):
     source_path = tmp_path / "native_cross_block_local_zero_modulo_divisor.vbc"
     source_path.write_text(
         "int main() {\n"
@@ -2645,14 +2639,13 @@ def test_native_codegen_rejects_source_cross_block_local_zero_modulo_divisor(tmp
     )
     from verbose_c.engine.engine import compile_module
 
-    with pytest.raises(NativeCodegenError) as exc_info:
-        compile_module(str(source_path), require_native_code=True)
-
-    message = str(exc_info.value)
-    assert "暂不生成除数为 0 的 idiv/imod 机器码" in message
-    assert "函数 main" in message
-    assert "Machine IR 指令 imod" in message
-    assert "行 6" in message
+    compiled = compile_module(str(source_path), require_native_code=True)
+    program = compiled.native_code_program
+    assert program is not None
+    assert any(instruction.source_op == "numeric_error" for instruction in program.functions["main"].instructions)
+    if can_run_native_memory():
+        with pytest.raises(NativeCodegenError, match="除零.*6 行"):
+            run_native_program_in_memory(program)
 
 
 def test_native_codegen_allows_cross_block_divisor_with_disagreeing_predecessors(tmp_path):
@@ -5642,9 +5635,10 @@ def test_native_memory_runner_flushes_instruction_cache_before_call(monkeypatch)
     kernel32.GetCurrentProcess = Mock(return_value=0x1234)
     kernel32.FlushInstructionCache = Mock(side_effect=lambda process, address, size: events.append("flush") or True)
 
-    def fake_cfunctype(restype):
+    def fake_cfunctype(restype, *argtypes):
+        assert argtypes == (native_runner_module.ctypes.POINTER(native_runner_module.ctypes.c_int64),)
         def factory(address):
-            def call():
+            def call(status):
                 events.append("call")
                 return 77
 
@@ -5654,13 +5648,16 @@ def test_native_memory_runner_flushes_instruction_cache_before_call(monkeypatch)
 
     monkeypatch.setattr(native_runner_module, "can_run_native_memory", lambda: True)
     monkeypatch.setattr(native_runner_module.ctypes, "windll", type("WindllMock", (), {"kernel32": kernel32})(), raising=False)
-    monkeypatch.setattr(native_runner_module.ctypes, "memmove", lambda address, code, size: events.append("memmove"))
+    memmove = Mock(side_effect=lambda address, code, size: events.append("memmove"))
+    monkeypatch.setattr(native_runner_module.ctypes, "memmove", memmove)
     monkeypatch.setattr(native_runner_module.ctypes, "CFUNCTYPE", fake_cfunctype)
 
     assert native_runner_module._run_code_in_memory(b"\xC3", 0) == 77
     assert events == ["memmove", "flush", "call", "free"]
     kernel32.GetCurrentProcess.assert_called_once_with()
-    kernel32.FlushInstructionCache.assert_called_once_with(0x1234, 0x1000, 1)
+    copied_code = memmove.call_args.args[1]
+    assert copied_code.endswith(b"\xC3") and len(copied_code) > 1
+    kernel32.FlushInstructionCache.assert_called_once_with(0x1234, 0x1000, len(copied_code))
 
 
 def test_native_memory_runner_reports_instruction_cache_flush_failure(monkeypatch):
@@ -5671,9 +5668,10 @@ def test_native_memory_runner_reports_instruction_cache_flush_failure(monkeypatc
     kernel32.GetCurrentProcess = Mock(return_value=0x1234)
     kernel32.FlushInstructionCache = Mock(side_effect=lambda process, address, size: events.append("flush") or False)
 
-    def fake_cfunctype(restype):
+    def fake_cfunctype(restype, *argtypes):
+        assert argtypes == (native_runner_module.ctypes.POINTER(native_runner_module.ctypes.c_int64),)
         def factory(address):
-            def call():
+            def call(status):
                 events.append("call")
                 return 77
 
@@ -5683,7 +5681,8 @@ def test_native_memory_runner_reports_instruction_cache_flush_failure(monkeypatc
 
     monkeypatch.setattr(native_runner_module, "can_run_native_memory", lambda: True)
     monkeypatch.setattr(native_runner_module.ctypes, "windll", type("WindllMock", (), {"kernel32": kernel32})(), raising=False)
-    monkeypatch.setattr(native_runner_module.ctypes, "memmove", lambda address, code, size: events.append("memmove"))
+    memmove = Mock(side_effect=lambda address, code, size: events.append("memmove"))
+    monkeypatch.setattr(native_runner_module.ctypes, "memmove", memmove)
     monkeypatch.setattr(native_runner_module.ctypes, "CFUNCTYPE", fake_cfunctype)
 
     with pytest.raises(NativeCodegenError) as exc_info:
@@ -8593,10 +8592,10 @@ def test_run_source_file_can_execute_native_memory_switch_fallthrough(tmp_path):
     assert result.exit_code == 7
 
 
-def test_run_source_file_can_execute_native_memory_python_style_modulo(tmp_path):
+def test_run_source_file_can_execute_native_memory_c_style_modulo(tmp_path):
     if not can_run_native_memory():
         pytest.skip("native 内存执行仅支持 Windows x64")
-    source_path = tmp_path / "native_memory_python_style_modulo.vbc"
+    source_path = tmp_path / "native_memory_c_style_modulo.vbc"
     source_path.write_text(
         "int main() {\n"
         "    int a = -5;\n"
@@ -8614,7 +8613,7 @@ def test_run_source_file_can_execute_native_memory_python_style_modulo(tmp_path)
         str(source_path),
         log_modules=set(),
         dump_modules=set(),
-        output_path=str(tmp_path / "native_memory_python_style_modulo_vm.vbb"),
+        output_path=str(tmp_path / "native_memory_c_style_modulo_vm.vbb"),
         execute=True,
         optimize_level=0,
     )
@@ -8622,7 +8621,7 @@ def test_run_source_file_can_execute_native_memory_python_style_modulo(tmp_path)
         str(source_path),
         log_modules=set(),
         dump_modules=set(),
-        output_path=str(tmp_path / "native_memory_python_style_modulo_native.vbb"),
+        output_path=str(tmp_path / "native_memory_c_style_modulo_native.vbb"),
         execute=False,
         optimize_level=0,
         run_native_memory=True,
@@ -8630,7 +8629,7 @@ def test_run_source_file_can_execute_native_memory_python_style_modulo(tmp_path)
 
     assert vm_result.success
     assert native_result.success
-    assert vm_result.exit_code == 89
+    assert vm_result.exit_code == -91
     assert native_result.exit_code == vm_result.exit_code
 
 
@@ -9152,6 +9151,8 @@ def test_run_source_file_can_execute_native_memory_cross_block_static_narrow_int
 
 
 def test_run_source_file_rejects_native_memory_local_out_of_range_narrow_integer_cast(tmp_path):
+    if not can_run_native_memory():
+        pytest.skip("native 内存执行仅支持 Windows x64")
     source_path = tmp_path / "native_local_out_of_range_narrow_cast.vbc"
     source_path.write_text(
         "int main() {\n"
@@ -9167,17 +9168,17 @@ def test_run_source_file_rejects_native_memory_local_out_of_range_narrow_integer
         log_modules=set(),
         dump_modules=set(),
         output_path=str(tmp_path / "native_local_out_of_range_narrow_cast.vbb"),
-        execute=False,
+        execute=True,
         optimize_level=0,
         run_native_memory=True,
     )
 
     assert not result.success
     assert result.error is not None
-    assert "cast 到 char 的立即数超出范围" in str(result.error)
+    assert "超出范围" in str(result.error)
 
 
-def test_native_codegen_rejects_dynamic_narrow_integer_cast_without_blocking_vm(tmp_path):
+def test_native_codegen_supports_checked_dynamic_narrow_integer_cast(tmp_path):
     source_path = tmp_path / "native_dynamic_narrow_cast.vbc"
     source_path.write_text(
         "int narrow(int value) {\n"
@@ -9202,9 +9203,10 @@ def test_native_codegen_rejects_dynamic_narrow_integer_cast_without_blocking_vm(
     assert result.success
     assert result.exit_code == 40
     assert result.compilation_output is not None
-    assert result.compilation_output.native_code_program is None
-    assert result.compilation_output.native_code_error is not None
-    assert "动态窄化整数 cast 到 char" in str(result.compilation_output.native_code_error)
+    assert result.compilation_output.native_code_program is not None
+    assert result.compilation_output.native_code_error is None
+    if native_runner_module.can_run_native_memory():
+        assert run_native_program_in_memory(result.compilation_output.native_code_program) == 40
 
 
 def test_run_source_file_rejects_native_memory_out_of_range_narrow_integer_cast(tmp_path):
@@ -9229,11 +9231,11 @@ def test_run_source_file_rejects_native_memory_out_of_range_narrow_integer_cast(
 
     assert not result.success
     assert result.error is not None
-    assert "cast 到 char 的立即数超出范围" in str(result.error)
+    assert "数值转换失败" in str(result.error)
 
 
-def test_native_lowering_rejects_float_cast_without_blocking_vm(tmp_path):
-    source_path = tmp_path / "native_float_cast_unsupported.vbc"
+def test_native_lowering_supports_float_cast(tmp_path):
+    source_path = tmp_path / "native_float_cast.vbc"
     source_path.write_text(
         "int main() {\n"
         "    float value = (float)42;\n"
@@ -9246,7 +9248,7 @@ def test_native_lowering_rejects_float_cast_without_blocking_vm(tmp_path):
         str(source_path),
         log_modules=set(),
         dump_modules=set(),
-        output_path=str(tmp_path / "native_float_cast_unsupported.vbb"),
+        output_path=str(tmp_path / "native_float_cast.vbb"),
         execute=True,
         optimize_level=0,
     )
@@ -9254,22 +9256,21 @@ def test_native_lowering_rejects_float_cast_without_blocking_vm(tmp_path):
     assert result.success
     assert result.exit_code == 0
     assert result.compilation_output is not None
-    assert result.compilation_output.machine_program is None
-    assert result.compilation_output.native_code_program is None
-    assert result.compilation_output.machine_error is not None
-    message = str(result.compilation_output.machine_error)
-    assert "IR 指令 cast" in message
-    assert "native MVP 暂不支持类型 'FLOAT'" in message
+    assert result.compilation_output.machine_program is not None
+    assert result.compilation_output.native_code_program is not None
+    assert result.compilation_output.machine_error is None
+    if native_runner_module.can_run_native_memory():
+        assert run_native_program_in_memory(result.compilation_output.native_code_program) == 0
 
 
-def test_native_codegen_rejects_float_parameter_without_blocking_vm(tmp_path):
+def test_native_codegen_supports_float_parameter(tmp_path):
     source_path = tmp_path / "native_float_param_unsupported.vbc"
     source_path.write_text(
         "int ignore(float value) {\n"
-        "    return 42;\n"
+        "    return (int)value;\n"
         "}\n\n"
         "int main() {\n"
-        "    return 0;\n"
+        "    return ignore(42.5);\n"
         "}\n",
         encoding="utf-8",
     )
@@ -9283,22 +9284,24 @@ def test_native_codegen_rejects_float_parameter_without_blocking_vm(tmp_path):
         optimize_level=0,
     )
 
-    assert result.success
-    assert result.exit_code == 0
-    assert result.compilation_output is not None
-    assert result.compilation_output.native_code_program is None
-    assert result.compilation_output.native_code_error is not None
-    assert "函数 ignore 第 0 个参数暂不支持类型 Float(FLOAT)" in str(result.compilation_output.native_code_error)
+    assert result.success, result.error
+    assert result.exit_code == 42
+    program = result.compilation_output.native_code_program
+    assert program is not None
+    assert program.functions["ignore"].param_types == ("float32",)
+    assert program.functions["ignore"].register_allocation.argument_registers == ("XMM0",)
 
 
-def test_run_source_file_rejects_native_memory_float_parameter(tmp_path):
+def test_run_source_file_executes_native_memory_float_parameter(tmp_path):
+    if not can_run_native_memory():
+        pytest.skip("native 内存执行仅支持 Windows x64")
     source_path = tmp_path / "native_memory_float_param_unsupported.vbc"
     source_path.write_text(
         "int ignore(float value) {\n"
-        "    return 42;\n"
+        "    return (int)value;\n"
         "}\n\n"
         "int main() {\n"
-        "    return 0;\n"
+        "    return ignore(42.5);\n"
         "}\n",
         encoding="utf-8",
     )
@@ -9308,13 +9311,17 @@ def test_run_source_file_rejects_native_memory_float_parameter(tmp_path):
         log_modules=set(),
         dump_modules=set(),
         output_path=str(tmp_path / "native_memory_float_param_unsupported.vbb"),
-        execute=False,
+        execute=True,
         optimize_level=0,
         run_native_memory=True,
     )
 
-    assert not result.success
-    assert "函数 ignore 第 0 个参数暂不支持类型 Float(FLOAT)" in str(result.error)
+    assert result.success, result.error
+    assert result.exit_code == 42
+    program = result.compilation_output.native_code_program
+    assert program is not None
+    assert program.functions["ignore"].param_types == ("float32",)
+    assert program.functions["ignore"].register_allocation.argument_registers == ("XMM0",)
 
 
 def test_run_source_file_can_execute_native_memory_inc_dec(tmp_path):
@@ -10050,7 +10057,7 @@ def test_native_code_program_map_describes_raw_binary(tmp_path):
         "return_register": "RAX",
         "frame_pointer": "RBP",
         "stack_pointer": "RSP",
-        "supported_value_types": ["int64", "bool64", "void"],
+        "supported_value_types": ["int64", "bool64", "float32", "float64", "string", "void"],
     }
     assert metadata["global_frame_owner"] is None
     assert metadata["code_size"] == len(program.code)
@@ -16320,7 +16327,7 @@ def test_cli_emit_native_pe_image_runs_as_windows_process(tmp_path, monkeypatch)
 
 
 @pytest.mark.skipif(not native_runner_module.can_run_native_memory(), reason="仅 Windows x64 支持运行生成的 PE image")
-def test_cli_emit_native_pe_image_runs_imod_adjustment_as_windows_process(tmp_path, monkeypatch):
+def test_cli_emit_native_pe_image_runs_c_remainder_as_windows_process(tmp_path, monkeypatch):
     from verbose_c import cli
 
     source_path = tmp_path / "native_cli_emit_pe_run_imod.vbc"
@@ -16364,10 +16371,11 @@ def test_cli_emit_native_pe_image_runs_imod_adjustment_as_windows_process(tmp_pa
         for function in metadata["functions"]
         for relocation in function["relocations"]
     }
-    assert {"je_rel32", "jns_rel32"} <= relocation_kinds
+    assert "call_rel32" in relocation_kinds
+    assert "jns_rel32" not in relocation_kinds
     validate_native_pe_image_bytes(pe_path.read_bytes(), metadata)
     completed = subprocess.run([str(pe_path)], check=False)
-    assert completed.returncode == 89
+    assert completed.returncode == (-91 & 0xFFFFFFFF)
 
 
 def test_cli_emit_native_map_writes_json(tmp_path, monkeypatch):
@@ -16431,7 +16439,7 @@ def test_cli_check_native_map_accepts_matching_files(tmp_path, monkeypatch, caps
     assert "native map 校验通过" in capsys.readouterr().out
 
 
-def test_cli_check_native_map_accepts_imod_adjustment_relocations(tmp_path, monkeypatch, capsys):
+def test_cli_check_native_map_accepts_c_remainder_relocations(tmp_path, monkeypatch, capsys):
     from verbose_c import cli
 
     source_path = tmp_path / "native_cli_check_map_imod.vbc"
@@ -16460,7 +16468,8 @@ def test_cli_check_native_map_accepts_imod_adjustment_relocations(tmp_path, monk
         for function in metadata["functions"]
         for relocation in function["relocations"]
     }
-    assert {"je_rel32", "jns_rel32"} <= relocation_kinds
+    assert "call_rel32" in relocation_kinds
+    assert "jns_rel32" not in relocation_kinds
     monkeypatch.setattr("sys.argv", ["verbose-c", str(bin_path), "--check-native-map", str(map_path)])
 
     with pytest.raises(SystemExit) as exc_info:
@@ -16560,7 +16569,7 @@ def test_cli_check_native_text_map_accepts_matching_text_section(tmp_path, monke
         ("pe_image", "--check-native-pe-map", ".exe", "native PE map 校验通过"),
     ],
 )
-def test_cli_check_native_container_maps_accept_imod_adjustment_relocations(
+def test_cli_check_native_container_maps_accept_c_remainder_relocations(
     tmp_path,
     monkeypatch,
     capsys,
@@ -16597,7 +16606,8 @@ def test_cli_check_native_container_maps_accept_imod_adjustment_relocations(
         for function in metadata["functions"]
         for relocation in function["relocations"]
     }
-    assert {"je_rel32", "jns_rel32"} <= relocation_kinds
+    assert "call_rel32" in relocation_kinds
+    assert "jns_rel32" not in relocation_kinds
     monkeypatch.setattr("sys.argv", ["verbose-c", str(artifact_path), check_option, str(map_path)])
 
     with pytest.raises(SystemExit) as exc_info:
@@ -16857,11 +16867,11 @@ def test_cli_run_native_bin_memory_rejects_mismatched_map(tmp_path, monkeypatch,
 @pytest.mark.parametrize(
     ("option_name", "artifact_suffix", "message"),
     [
-        ("--run-native-bin-memory", ".bin", "native raw bin 入口返回值: 89"),
-        ("--run-native-text-bin-memory", ".text.bin", "native .text 入口返回值: 89"),
+        ("--run-native-bin-memory", ".bin", "native raw bin 入口返回值: -91"),
+        ("--run-native-text-bin-memory", ".text.bin", "native .text 入口返回值: -91"),
     ],
 )
-def test_cli_run_native_file_memory_accepts_imod_adjustment_relocations(
+def test_cli_run_native_file_memory_accepts_c_remainder_relocations(
     tmp_path,
     monkeypatch,
     capsys,
@@ -16904,13 +16914,14 @@ def test_cli_run_native_file_memory_accepts_imod_adjustment_relocations(
         for function in metadata["functions"]
         for relocation in function["relocations"]
     }
-    assert {"je_rel32", "jns_rel32"} <= relocation_kinds
+    assert "call_rel32" in relocation_kinds
+    assert "jns_rel32" not in relocation_kinds
     if option_name == "--run-native-bin-memory":
         artifact_path.write_bytes(program.code)
     else:
         artifact_path.write_bytes(program.code + bytes(metadata["sections"][0]["raw_padding_size"]))
     map_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
-    runner = Mock(return_value=89)
+    runner = Mock(return_value=-91)
     monkeypatch.setattr(native_runner_module, "_run_code_in_memory", runner)
     monkeypatch.setattr(
         "sys.argv",
@@ -16930,7 +16941,7 @@ def test_cli_run_native_file_memory_accepts_imod_adjustment_relocations(
 
     assert exc_info.value.code == 0
     runner.assert_called_once_with(program.code, program.entry_offset)
-    assert result_path.read_text(encoding="utf-8") == "89\n"
+    assert result_path.read_text(encoding="utf-8") == "-91\n"
     assert message in capsys.readouterr().out
 
 

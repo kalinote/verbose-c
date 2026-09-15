@@ -21,3 +21,5 @@ parser.py
 
 __vbccache__/
 .venv/
+
+build/

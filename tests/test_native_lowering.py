@@ -267,17 +267,15 @@ def test_native_lowering_marks_bool_phi_result_type():
     assert [operand.type_hint for operand in phis[0].args] == ["bool64", "bool64"]
 
 
-def test_native_lowering_reports_unsupported_string_constant_with_context():
-    program = _program([(Opcode.LOAD_CONSTANT, 0), (Opcode.RETURN,)], module_constants=[VBCString("bad")])
-
-    with pytest.raises(NativeLoweringError) as exc_info:
-        lower_ir_program_to_machine(program)
-
-    message = str(exc_info.value)
-    assert "函数 <module>" in message
-    assert "IR 指令 const" in message
-    assert "String" in message or "STRING" in message
-    assert "PC 0" in message
+def test_native_lowering_preserves_string_constant_with_context():
+    """字符串常量保留内容、类型和源位置。"""
+    program = _program([(Opcode.LOAD_CONSTANT, 0), (Opcode.RETURN,)], module_constants=[VBCString("中文")])
+    machine = lower_ir_program_to_machine(program)
+    instruction = machine.module.blocks[0].instructions[0]
+    assert instruction.op == "load_string"
+    assert instruction.result.type_hint == "string"
+    assert instruction.attrs["value"] == "中文"
+    assert instruction.source_pc == 0
 
 
 def test_native_lowering_reports_unsupported_builtin_call():

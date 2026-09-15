@@ -3,8 +3,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from verbose_c.compiler.enum import ScopeType, SymbolKind
+from verbose_c.compiler.constant_evaluation import evaluate_numeric_constant
 from verbose_c.compiler.symbol import Symbol, SymbolTable
 from verbose_c.object.enum import VBCObjectType
+from verbose_c.object.numeric import cast_numeric
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_float import VBCFloat
 from verbose_c.object.t_integer import VBCInteger
@@ -24,6 +26,7 @@ from verbose_c.typing.types import (
     StringType,
     StructType,
     Type,
+    common_arithmetic_type,
 )
 
 
@@ -380,6 +383,10 @@ class _ASTConstantOptimizer:
         return node
 
     def _optimize_expr(self, node: ASTNode, env: _OptimizationEnv) -> ASTNode:
+        if getattr(node, "resolved_node", None) is not None:
+            resolved = self._optimize_expr(node.resolved_node, env)
+            self._copy_optimizer_attrs(node, resolved)
+            return resolved
         if isinstance(node, ConstantValueNode):
             return node
         method = getattr(self, f"_optimize_expr_{node.__class__.__name__}", None)
@@ -510,12 +517,23 @@ class _ASTConstantOptimizer:
 
     def _optimize_expr_CastNode(self, node: CastNode, env: _OptimizationEnv) -> ASTNode:
         node.expression = self._optimize_expr(node.expression, env)
+        target = getattr(node, "_cast_target_type", None)
+        value = self._constant_value(node.expression)
+        if isinstance(target, (IntegerType, FloatType, BoolType)) and value is not None:
+            kind = VBCObjectType.BOOL if isinstance(target, BoolType) else target.kind
+            try:
+                return self._folded_node(node, cast_numeric(value, kind))
+            except (TypeError, ValueError, ArithmeticError):
+                self.stats.skip("常量转换失败")
+                return node
         self.stats.skip("显式类型转换")
         return node
 
     def _optimize_expr_ParenOrCastNode(self, node: ParenOrCastNode, env: _OptimizationEnv) -> ASTNode:
         if node.resolved_node is not None:
             node.resolved_node = self._optimize_expr(node.resolved_node, env)
+            self._copy_optimizer_attrs(node, node.resolved_node)
+            return node.resolved_node
         else:
             node.expression = self._optimize_expr(node.expression, env)
         return node
@@ -600,25 +618,15 @@ class _ASTConstantOptimizer:
         return value
 
     def _constant_value(self, node: ASTNode):
-        if isinstance(node, ConstantValueNode):
-            return node.value
-        if isinstance(node, NumberNode):
-            target_type = getattr(node, "inferred_type", None)
-            try:
-                if isinstance(node.value, int):
-                    return VBCInteger(node.value, target_type) if target_type is not None else VBCInteger(node.value)
-                if isinstance(node.value, float):
-                    return VBCFloat(node.value, target_type) if target_type is not None else VBCFloat(node.value)
-            except Exception:
-                self.stats.skip("数字常量构造失败")
-                return None
-        if isinstance(node, StringNode):
-            return VBCString(node.value[1:-1])
-        if isinstance(node, BoolNode):
-            return VBCBool(node.value)
-        if isinstance(node, NullNode):
-            return VBCNull()
-        return None
+        try:
+            if isinstance(node, StringNode):
+                return VBCString(node.value[1:-1])
+            if isinstance(node, NullNode):
+                return VBCNull()
+            return evaluate_numeric_constant(node, self.symbol_table)
+        except (TypeError, ValueError, ArithmeticError):
+            self.stats.skip("常量转换失败")
+            return None
 
     def _folded_node(self, original: ASTNode, value) -> ConstantValueNode:
         replacement = ConstantValueNode(
@@ -676,7 +684,7 @@ class _ASTConstantOptimizer:
                 setattr(target, key, value)
 
     def _copy_source(self, node: ASTNode, env: _OptimizationEnv):
-        if not isinstance(node, NameNode):
+        if not isinstance(node, NameNode) or getattr(node, "_implicit_cast_target", None) is not None:
             return None
         symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None or not self._is_copyable_symbol(symbol):
@@ -758,17 +766,23 @@ class _ASTConstantOptimizer:
 
     def _is_side_effect_free_expr(self, node: ASTNode) -> bool:
         """判断表达式能否在分支合并时安全删除。"""
+        if getattr(node, "_implicit_cast_target", None) is not None and self._constant_value(node) is None:
+            return False
         if isinstance(node, (ConstantValueNode, NumberNode, StringNode, BoolNode, NullNode, NameNode)):
             return True
         if isinstance(node, UnaryOpNode):
+            if node.op in (Operator.ADD, Operator.SUBTRACT):
+                return self._constant_value(node) is not None
             return node.op in (Operator.ADD, Operator.SUBTRACT, Operator.NOT) and self._is_side_effect_free_expr(node.expr)
         if isinstance(node, BinaryOpNode):
+            if node.op in (Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO):
+                return self._constant_value(node) is not None
             return self._is_side_effect_free_expr(node.left) and self._is_side_effect_free_expr(node.right)
         if isinstance(node, ParenOrCastNode):
             expr = node.resolved_node if node.resolved_node is not None else node.expression
             return self._is_side_effect_free_expr(expr)
         if isinstance(node, CastNode):
-            return self._is_side_effect_free_expr(node.expression)
+            return self._constant_value(node) is not None
         return False
 
     def _nodes_equivalent(self, left, right) -> bool:
@@ -812,6 +826,15 @@ class _ASTConstantOptimizer:
             return []
         if self._statement_has_write_read_overlap(statement):
             return []
+        pending = self._cse_child_nodes(statement)
+        while pending:
+            expression = pending.pop()
+            if isinstance(expression, (CallNode, AssignmentNode, CompoundAssignmentNode, UpdateExprNode,
+                                       CastNode, ParenOrCastNode, SubscriptNode, GetPropertyNode, NewInstanceNode)):
+                return []
+            if isinstance(expression, UnaryOpNode) and expression.op not in (Operator.ADD, Operator.SUBTRACT, Operator.NOT):
+                return []
+            pending.extend(self._cse_child_nodes(expression))
 
         counts: dict[tuple, int] = {}
         nodes_by_sig: dict[tuple, ASTNode] = {}
@@ -863,6 +886,8 @@ class _ASTConstantOptimizer:
         return declarations
 
     def _collect_cse_candidates(self, node: ASTNode, counts: dict[tuple, int], nodes_by_sig: dict[tuple, ASTNode]) -> None:
+        if isinstance(node, BinaryOpNode) and node.op in (Operator.LOGICAL_AND, Operator.LOGICAL_OR):
+            return
         signature = self._cse_signature(node)
         if signature is not None and self._is_cse_composite_candidate(node):
             counts[signature] = counts.get(signature, 0) + 1
@@ -872,6 +897,8 @@ class _ASTConstantOptimizer:
             self._collect_cse_candidates(child, counts, nodes_by_sig)
 
     def _replace_cse_candidates(self, node: ASTNode, replacements: dict[tuple, NameNode]) -> ASTNode:
+        if isinstance(node, BinaryOpNode) and node.op in (Operator.LOGICAL_AND, Operator.LOGICAL_OR):
+            return node
         signature = self._cse_signature(node)
         if signature in replacements:
             return copy.deepcopy(replacements[signature])
@@ -902,6 +929,8 @@ class _ASTConstantOptimizer:
         return node
 
     def _cse_signature(self, node: ASTNode):
+        if getattr(node, "_implicit_cast_target", None) is not None:
+            return None
         if isinstance(node, ConstantValueNode):
             return ("constant", type(node.value).__name__, getattr(node.value, "value", None), repr(getattr(node.value, "_object_type", None)))
         if isinstance(node, NumberNode):
@@ -1047,8 +1076,8 @@ class _ASTConstantOptimizer:
             return symbol.type_
         if isinstance(node, UnaryOpNode):
             operand_type = self._infer_cse_type(node.expr)
-            if node.op in (Operator.ADD, Operator.SUBTRACT) and isinstance(operand_type, (IntegerType, FloatType)):
-                return operand_type
+            if node.op in (Operator.ADD, Operator.SUBTRACT) and isinstance(operand_type, (IntegerType, FloatType, BoolType)):
+                return common_arithmetic_type(operand_type)
             if node.op == Operator.NOT and isinstance(operand_type, (IntegerType, FloatType, BoolType, PointerType)):
                 return IntegerType(VBCObjectType.INT)
             return None
@@ -1065,20 +1094,15 @@ class _ASTConstantOptimizer:
             return None
 
         if node.op == Operator.MODULO:
-            if isinstance(left_type, IntegerType) and isinstance(right_type, IntegerType):
-                return IntegerType(VBCObjectType.INT)
+            if isinstance(left_type, (IntegerType, BoolType)) and isinstance(right_type, (IntegerType, BoolType)):
+                return common_arithmetic_type(left_type, right_type)
             return None
 
         if node.op in (Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE):
             if node.op == Operator.ADD and isinstance(left_type, StringType) and isinstance(right_type, StringType):
                 return StringType()
-            if isinstance(left_type, (IntegerType, FloatType)) and isinstance(right_type, (IntegerType, FloatType)):
-                if isinstance(left_type, FloatType) or isinstance(right_type, FloatType):
-                    return left_type if self._numeric_priority(left_type) >= self._numeric_priority(right_type) else right_type
-                int_priority = self._object_type_priority(VBCObjectType.INT)
-                left_p = IntegerType(VBCObjectType.INT) if self._numeric_priority(left_type) < int_priority else left_type
-                right_p = IntegerType(VBCObjectType.INT) if self._numeric_priority(right_type) < int_priority else right_type
-                return left_p if self._numeric_priority(left_p) >= self._numeric_priority(right_p) else right_p
+            if isinstance(left_type, (IntegerType, FloatType, BoolType)) and isinstance(right_type, (IntegerType, FloatType, BoolType)):
+                return common_arithmetic_type(left_type, right_type)
             return None
 
         if node.op in (
@@ -1099,16 +1123,6 @@ class _ASTConstantOptimizer:
                 return BoolType()
         return None
 
-    def _numeric_priority(self, type_: IntegerType | FloatType) -> int:
-        return self._object_type_priority(type_.kind)
-
-    def _object_type_priority(self, kind: VBCObjectType) -> int:
-        if kind in VBCInteger.bit_width:
-            return VBCInteger.bit_width[kind][1]
-        if kind in VBCFloat.bit_width:
-            return VBCFloat.bit_width[kind][1]
-        return 0
-
     def _type_node_for_type(self, type_: Type) -> TypeNode:
         if isinstance(type_, IntegerType):
             return TypeNode(NameNode(self._type_name_for_object_type(type_.kind)))
@@ -1123,6 +1137,7 @@ class _ASTConstantOptimizer:
     def _type_name_for_object_type(self, kind: VBCObjectType) -> str:
         mapping = {
             VBCObjectType.CHAR: "char",
+            VBCObjectType.SHORT: "short",
             VBCObjectType.INT: "int",
             VBCObjectType.LONG: "long",
             VBCObjectType.LONGLONG: "long long",
@@ -1227,6 +1242,7 @@ class _ASTConstantOptimizer:
                 end_line=node.end_line,
                 end_column=node.end_column,
             )
+            inlined._cast_target_type = candidate.return_cast_target
         self._copy_optimizer_attrs(node, inlined)
         return inlined
 
@@ -1253,7 +1269,7 @@ class _ASTConstantOptimizer:
         cast_target = getattr(arg, "_implicit_cast_target", None)
         if cast_target is None:
             return arg_copy
-        return CastNode(
+        converted = CastNode(
             self._type_node_for_type(cast_target),
             arg_copy,
             start_line=arg.start_line,
@@ -1261,10 +1277,13 @@ class _ASTConstantOptimizer:
             end_line=arg.end_line,
             end_column=arg.end_column,
         )
+        converted._cast_target_type = cast_target
+        return converted
 
     def _replace_inline_params(self, node: ASTNode, replacements: dict[str, ASTNode]) -> ASTNode:
         if isinstance(node, NameNode) and node.name in replacements:
             replacement = copy.deepcopy(replacements[node.name])
+            self._copy_optimizer_attrs(node, replacement)
             replacement.start_line = node.start_line
             replacement.start_column = node.start_column
             replacement.end_line = node.end_line

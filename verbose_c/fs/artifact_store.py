@@ -329,7 +329,7 @@ class ArtifactStore:
     """编译产物持久化"""
 
     MAGIC = b"VBB\0"
-    FORMAT_VERSION = 1
+    FORMAT_VERSION = 2
     TARGET_ABI = "verbose-c-vm"
     SECTION_STRINGS = 1
     SECTION_MODULE = 2

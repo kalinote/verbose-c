@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Sequence
 from verbose_c.object.enum import VBCObjectType
+from verbose_c.object.numeric import common_numeric_kind
 
 # --- 基础类型 ---
 
@@ -32,7 +33,7 @@ class IntegerType(Type):
     """代表整数类型，并区分具体的整数种类。"""
     def __init__(self, kind: VBCObjectType):
         # char在C语言体系中也被当作一种整数类型
-        if kind not in {VBCObjectType.INT, VBCObjectType.LONG, VBCObjectType.LONGLONG, VBCObjectType.NLINT, VBCObjectType.CHAR}:
+        if kind not in {VBCObjectType.INT, VBCObjectType.LONG, VBCObjectType.LONGLONG, VBCObjectType.NLINT, VBCObjectType.CHAR, VBCObjectType.SHORT}:
             raise ValueError(f"'{kind}' is not a valid integer type kind.")
         self.kind = kind
 
@@ -68,6 +69,18 @@ class BoolType(Type):
     """代表布尔类型。"""
     def __repr__(self) -> str:
         return "Bool"
+
+
+def common_arithmetic_type(left: Type, right: Type | None = None) -> Type:
+    """根据共享的数值提升规则推导一元或二元运算的类型。"""
+    right = left if right is None else right
+    left_kind = VBCObjectType.BOOL if isinstance(left, BoolType) else left.kind
+    right_kind = VBCObjectType.BOOL if isinstance(right, BoolType) else right.kind
+    kind = common_numeric_kind(left_kind, right_kind)
+    if kind in (VBCObjectType.FLOAT, VBCObjectType.DOUBLE, VBCObjectType.NLFLOAT):
+        return FloatType(kind)
+    return IntegerType(kind)
+
 
 class PointerType(Type):
     """

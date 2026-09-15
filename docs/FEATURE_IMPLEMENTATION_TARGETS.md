@@ -60,7 +60,7 @@
   - 【已完成】常量池支持现有运行时对象的可序列化子集：`int`/`float`/`bool`/`string`/`null`、函数元数据、类元数据（方法字节码通过索引引用）、结构体布局；`VBCPointer`/`VBCInstance`/`VBCNativeFunction` 暂不支持
   - 【已完成】实现 `ArtifactStore.save_bytecode()` / `load_bytecode()`（`verbose_c/fs/artifact_store.py`）
   - 【已完成】实现 `artifact_path_for_source()`：由 `.vbc` 推导默认 `.vbb` 路径为 `<源目录>/__vbccache__/<stem>.vbb`，可与 `-o/--output` 配合
-  - 【待完善】格式版本策略：版本不匹配、魔数错误、截断、section checksum/SHA 失败时抛出 `VBCBytecodeError`（含文件路径）；当前仅定义 version 1，不提供旧版 JSON 载荷或跨版本自动迁移
+  - 【已完成】格式版本策略：版本不匹配、魔数错误、截断、section checksum/SHA 失败时抛出 `VBCBytecodeError`（含文件路径）；C-P1-2 使用 version 2 隔离旧算术语义，旧 `.vbb` 需从源码重编译，不提供跨版本自动迁移
 - 当前现状：
   - `ArtifactStore` 已实现紧凑二进制读写，section 化打包函数/类/常量池/字节码块/行号表/调试信息
   - 编译 `.vbc` 时始终写出 `.vbb`（`run_source_file()` 在编译成功后调用 `save_bytecode()`）
@@ -378,7 +378,7 @@
   - 【已完成】机器码 listing、raw bin、对齐后的 `.text`、map 和统一 bundle 导出，并在写出后进行产物与 map 自检。
   - 【已完成】Windows x64 可执行内存 runner；调试用最小 PE 的写出和 loader 验证状态统一归入 P2-5。
 - 支持边界：
-  - 当前只面向 Windows x64，值模型限于 native 标量子集；除受限 `_exit(int)` / `exit(int)` 外的内置函数、字符串、数组、结构体、指针和运行时对象尚不支持，遇到这些能力会明确报错。
+  - 当前只面向 Windows x64；支持标量、字符串常量及值传递、标准流 `read/write`、`_exit(int)` / `exit(int)`。其他内置函数、字符串拼接、数组、结构体、指针和 GC 对象仍明确报错。
   - 当前采用 `RAX` / `R10` 临时寄存器与全量栈槽的保守策略；线性扫描寄存器分配属于后续优化，不影响 P2-4 完成判定。
   - P2-4 完成的是机器码后端与调试执行闭环，不包含正式 native runtime、导入表、基址重定位或完整独立 AOT。
 - 验收入口：
@@ -391,14 +391,15 @@
 ### 【依赖 C-P1-5】【依赖 F-P2-4】P2-5 PE/COFF 可执行文件与运行时 MVP
 
 - 完成状态：
-  - 【部分完成】调试用最小 PE32+ 已可由 Windows loader 加载执行；面向正式 AOT 的完整 PE/COFF 布局和 native runtime 尚未完成。
+  - 【部分完成】PE32+ 已可独立执行中文标准输入输出；最小 I/O 运行时已完成，完整对象运行时及其他 PE/COFF 能力仍待完善。
 - 已完成：
   - 【已完成】固定 DOS header、PE signature、AMD64 COFF header、PE32+ Optional Header、单 `.text` section 和入口地址写出；产物不依赖系统 C 编译器。
   - 【已完成】通过 `--emit native-pe` 或 `--emit native-bundle` 导出最小 `.exe`，支持写后读回、native map 交叉校验和 `--check-native-pe-map`。
   - 【已完成】`--run-native-pe` 与 `--run-native-pe-file` 可在 Windows x64 上通过 OS loader 执行临时或已导出的最小 PE，并观测进程退出码。
+  - 【已完成】按需附加 `.rdata`、`.idata`、KERNEL32 导入描述符、ILT/IAT，使用 Windows x64 参数窗口和 16 字节栈对齐；代码节不可写，数据节不可执行，map schema 2 校验节内容及地址修补。
+  - 【已完成】内置启动/退出包装、UTF-8 字符串常量及读入缓冲区、STDIN/STDOUT/STDERR、控制台宽字符与文件/管道重定向；运行时错误传播、错误输出与退出码、私有堆分配及统一释放。验收入口为 `tests/grammar/native_io_greeting.vbc`、`tests/test_native_io.py`。
 - 待完成：
-  - 【未完成】补齐 `.rdata`、导入表、基址重定位及其他面向正式 AOT 的 PE/COFF 布局；当前 image 仅含单 `.text`，data directory 全空。
-  - 【未完成】定义并实现 native runtime ABI，包括启动入口、运行时错误、stdout/stderr、基础堆分配，以及字符串、数组、结构体和指针对象存储。
+  - 【未完成】基址重定位及其他面向完整 AOT 的 PE/COFF 布局，以及数组、结构体、指针对象存储和逐对象内存回收。
   - 【未完成】提供 `--emit-exe` 或 `--target=native` 等正式 AOT 入口，并明确其稳定性和受支持语言子集；现有 `native-pe` 仍定位为调试产物。
   - 【未完成】后续支持可选 GC 安全点及更完整的运行时能力。
 - 当前现状：
