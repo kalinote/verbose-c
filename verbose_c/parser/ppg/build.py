@@ -1,12 +1,12 @@
 import pathlib
-import tokenize
 
+from verbose_c.fs.source_manager import SourceManager
+from verbose_c.parser.lexer.tokenizer import Tokenizer
 from verbose_c.parser.ppg.grammar import Grammar
 from verbose_c.parser.ppg.grammar_parser import GeneratedParser as GrammarParser
 from verbose_c.parser.ppg.parser import Parser
 from verbose_c.parser.ppg.parser_generator import ParserGenerator
 from verbose_c.parser.ppg.python_generator import PythonParserGenerator
-from verbose_c.parser.ppg.tokenizer import Tokenizer
 
 MOD_DIR = pathlib.Path(__file__).resolve().parent
 
@@ -16,13 +16,12 @@ TokenDefinitions = tuple[dict[int, str], dict[str, int], set[str]]
 def build_parser(
     grammar_file: str
 ) -> tuple[Grammar, Parser, Tokenizer]:
-    with open(grammar_file, encoding="utf-8") as file:
-        tokenizer = Tokenizer(tokenize.generate_tokens(file.readline))
-        parser = GrammarParser(tokenizer)
-        grammar = parser.start()
+    tokenizer = Tokenizer(grammar_file, SourceManager(), grammar_mode=True)
+    parser = GrammarParser(tokenizer)
+    grammar = parser.start()
 
-        if not grammar:
-            raise parser.make_syntax_error(grammar_file)
+    if not grammar:
+        raise parser.make_syntax_error("语法文件解析失败", grammar_file)
 
     return grammar, parser, tokenizer
 

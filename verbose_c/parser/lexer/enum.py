@@ -82,6 +82,7 @@ class TokenType(Enum):
     # 预留
     INDENT     = ("INDENT", r"$^")                    # 缩进
     DEDENT     = ("DEDENT", r"$^")                    # 去缩进
+    OP         = ("OP", r"$^")                        # 语法文件中的操作符
     
     def __init__(self, literal, pattern):
         self._literal: str = literal

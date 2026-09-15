@@ -1,7 +1,6 @@
 import ast
 from datetime import datetime
 import re
-import token
 from typing import IO, Any, Dict, List, Optional, Sequence, Set, Text, Tuple
 
 from verbose_c.parser.ppg import grammar

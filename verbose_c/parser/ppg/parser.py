@@ -2,22 +2,17 @@ import argparse
 import ast
 import sys
 import time
-import token
-import tokenize
 import traceback
 from abc import abstractmethod
 from typing import Any, Callable, ClassVar, Optional, Type, TypeVar, cast
 
-from verbose_c.parser.ppg.tokenizer import Mark, Tokenizer, exact_token_types
+from verbose_c.parser.lexer.enum import TokenType
+from verbose_c.parser.lexer.token import Token
+from verbose_c.parser.lexer.tokenizer import Mark, Tokenizer
 
 T = TypeVar("T")
 P = TypeVar("P", bound="Parser")
 F = TypeVar("F", bound=Callable[..., Any])
-
-# Tokens added in Python 3.12
-FSTRING_START = getattr(token, "FSTRING_START", None)
-FSTRING_MIDDLE = getattr(token, "FSTRING_MIDDLE", None)
-FSTRING_END = getattr(token, "FSTRING_END", None)
 
 
 def logger(method: F) -> F:
@@ -171,89 +166,60 @@ class Parser:
 
     def showpeek(self) -> str:
         tok = self._tokenizer.peek()
-        return f"{tok.start[0]}.{tok.start[1]}: {token.tok_name[tok.type]}:{tok.string!r}"
+        return f"{tok.line}.{tok.column}: {tok.type.name}:{tok.string!r}"
 
     @memoize
-    def name(self) -> Optional[tokenize.TokenInfo]:
+    def name(self) -> Optional[Token]:
         tok = self._tokenizer.peek()
-        if tok.type == token.NAME and tok.string not in self.KEYWORDS:
+        if tok.type == TokenType.NAME and tok.string not in self.KEYWORDS:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def number(self) -> Optional[tokenize.TokenInfo]:
+    def number(self) -> Optional[Token]:
         tok = self._tokenizer.peek()
-        if tok.type == token.NUMBER:
+        if tok.type == TokenType.NUMBER:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def string(self) -> Optional[tokenize.TokenInfo]:
+    def string(self) -> Optional[Token]:
         tok = self._tokenizer.peek()
-        if tok.type == token.STRING:
+        if tok.type == TokenType.STRING:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def fstring_start(self) -> Optional[tokenize.TokenInfo]:
+    def op(self) -> Optional[Token]:
         tok = self._tokenizer.peek()
-        if tok.type == FSTRING_START:
+        if tok.type == TokenType.OP:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def fstring_middle(self) -> Optional[tokenize.TokenInfo]:
+    def type_comment(self) -> Optional[Token]:
         tok = self._tokenizer.peek()
-        if tok.type == FSTRING_MIDDLE:
+        if tok.type == TokenType.COMMENT:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def fstring_end(self) -> Optional[tokenize.TokenInfo]:
+    def soft_keyword(self) -> Optional[Token]:
         tok = self._tokenizer.peek()
-        if tok.type == FSTRING_END:
+        if tok.type == TokenType.NAME and tok.string in self.SOFT_KEYWORDS:
             return self._tokenizer.getnext()
         return None
 
     @memoize
-    def op(self) -> Optional[tokenize.TokenInfo]:
+    def expect(self, type: str) -> Optional[Token]:
         tok = self._tokenizer.peek()
-        if tok.type == token.OP:
+        if tok.string == type or tok.type == TokenType.__members__.get(type):
             return self._tokenizer.getnext()
         return None
 
-    @memoize
-    def type_comment(self) -> Optional[tokenize.TokenInfo]:
-        tok = self._tokenizer.peek()
-        if tok.type == token.TYPE_COMMENT:
-            return self._tokenizer.getnext()
-        return None
-
-    @memoize
-    def soft_keyword(self) -> Optional[tokenize.TokenInfo]:
-        tok = self._tokenizer.peek()
-        if tok.type == token.NAME and tok.string in self.SOFT_KEYWORDS:
-            return self._tokenizer.getnext()
-        return None
-
-    @memoize
-    def expect(self, type: str) -> Optional[tokenize.TokenInfo]:
-        tok = self._tokenizer.peek()
-        if tok.string == type:
-            return self._tokenizer.getnext()
-        if type in exact_token_types:
-            if tok.type == exact_token_types[type]:
-                return self._tokenizer.getnext()
-        if type in token.__dict__:
-            if tok.type == token.__dict__[type]:
-                return self._tokenizer.getnext()
-        if tok.type == token.OP and tok.string == type:
-            return self._tokenizer.getnext()
-        return None
-
-    def expect_forced(self, res: Any, expectation: str) -> Optional[tokenize.TokenInfo]:
+    def expect_forced(self, res: Any, expectation: str) -> Optional[Token]:
         if res is None:
-            raise self.make_syntax_error(f"expected {expectation}")
+            raise self.make_syntax_error(f"期望 {expectation}")
         return res
 
     def positive_lookahead(self, func: Callable[..., T], *args: object) -> T:
@@ -270,4 +236,6 @@ class Parser:
 
     def make_syntax_error(self, message: str, filename: str = "<unknown>") -> SyntaxError:
         tok = self._tokenizer.diagnose()
-        return SyntaxError(message, (filename, tok.start[0], 1 + tok.start[1], tok.line))
+        path = tok.path if filename == "<unknown>" else filename
+        line = self._tokenizer.get_line_source(path, tok.line)
+        return SyntaxError(message, (path, tok.line, 1 + tok.column, line))

@@ -38,7 +38,7 @@ class GeneratedParser(Parser):
     def start(self) -> Optional[Grammar]:
         # start: grammar $
         mark = self._mark()
-        if (grammar := self.grammar()) and (self.expect("ENDMARKER")):
+        if (grammar := self.grammar()) and (self.expect("END")):
             return grammar
         self._reset(mark)
         return None
@@ -197,10 +197,10 @@ class GeneratedParser(Parser):
         # alt: items '$' action | items '$' | items action | items
         mark = self._mark()
         if (items := self.items()) and (self.expect("$")) and (action := self.action()):
-            return Alt(items + [NamedItem(None, NameLeaf("ENDMARKER"))], action=action)
+            return Alt(items + [NamedItem(None, NameLeaf("END"))], action=action)
         self._reset(mark)
         if (items := self.items()) and (self.expect("$")):
-            return Alt(items + [NamedItem(None, NameLeaf("ENDMARKER"))], action=None)
+            return Alt(items + [NamedItem(None, NameLeaf("END"))], action=None)
         self._reset(mark)
         if (items := self.items()) and (action := self.action()):
             return Alt(items, action=action)
