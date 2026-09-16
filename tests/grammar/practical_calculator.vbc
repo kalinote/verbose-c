@@ -1,0 +1,30 @@
+#include "../practical_console.inc"
+
+// 依次输入运算编号、左操作数和右操作数，例如：1 17 25。
+int main() {
+    write(STDOUT, "整数计算器：1加 2减 3乘 4除 5取余\n运算编号：");
+    int operation = read_integer();
+    if (operation < 1 || operation > 5) {
+        write(STDERR, "运算编号必须为 1～5。\n");
+        return 2;
+    }
+    write(STDOUT, "两个整数：");
+    long left = read_integer();
+    long right = read_integer();
+    if (operation >= 4 && right == 0) {
+        write(STDERR, "除数不能为零。\n");
+        return 2;
+    }
+    long result = 0;
+    switch (operation) {
+        case 1: result = left + right; break;
+        case 2: result = left - right; break;
+        case 3: result = left * right; break;
+        case 4: result = left / right; break;
+        case 5: result = left % right; break;
+    }
+    write(STDOUT, "结果：");
+    print_integer(result);
+    write(STDOUT, "\n");
+    return 0;
+}

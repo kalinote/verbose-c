@@ -1,6 +1,6 @@
 import struct
 
-from verbose_c.compiler.native.codegen import validate_native_text_section_map_bytes
+from verbose_c.compiler.native.map_format import validate_native_text_section_map_bytes
 from verbose_c.compiler.native.errors import NativeCodegenError
 
 
@@ -24,6 +24,9 @@ _PE_LOADER_FLAGS = 0
 
 def build_native_pe_image(code: bytes, metadata: dict[str, object]) -> bytes:
     """根据 native map 写出最小 PE32+ image。"""
+    if metadata.get("schema_version") == 3:
+        from verbose_c.compiler.native.aot_image import build_aot_pe
+        return build_aot_pe(code, metadata)
     if metadata.get("schema_version") == 2:
         from verbose_c.compiler.native.runtime_image import build_runtime_pe
         return build_runtime_pe(code, metadata)
@@ -50,13 +53,12 @@ def build_native_pe_image(code: bytes, metadata: dict[str, object]) -> bytes:
 
 def validate_native_pe_image_bytes(pe_image: bytes, metadata: dict[str, object]) -> None:
     """校验最小 PE32+ image 与 native map 一致。"""
-    if isinstance(metadata, dict) and metadata.get("schema_version") == 2:
-        from verbose_c.compiler.native.runtime_image import build_runtime_pe
+    if isinstance(metadata, dict) and metadata.get("schema_version") in {2, 3}:
         if not isinstance(pe_image, bytes):
             raise NativeCodegenError("native PE image 必须是 bytes")
         try:
             offset = metadata["sections"][0]["pe_raw_pointer"]
-            expected = build_runtime_pe(pe_image[offset:offset + metadata["code_size"]], metadata)
+            expected = build_native_pe_image(pe_image[offset:offset + metadata["code_size"]], metadata)
         except (KeyError, TypeError, ValueError, IndexError) as error:
             raise NativeCodegenError(f"native PE image map 无效：{error}") from error
         if expected != pe_image:

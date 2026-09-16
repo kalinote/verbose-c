@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from verbose_c.engine.engine import run_bytecode_file, run_parser_generation, run_source_file, grammar_file
-from verbose_c.engine.native_exporter import NativeExportRequest, parse_native_export_kinds
+from verbose_c.engine.native_exporter import NativeExportKind, NativeExportRequest, parse_native_export_kinds
 from verbose_c.engine.recorder import create_dump_path
 
 
@@ -22,6 +22,7 @@ def parse_args():
     parser.add_argument("--no-warn", help="静默编译告警输出", action="store_true")
     parser.add_argument("-cp", "--compile-parser", help="编译语法文件生成解析器", action="store_true")
     parser.add_argument("--compile-only", help="只编译不执行源代码", action="store_true")
+    parser.add_argument("--emit-exe", metavar="PATH", help="将 .vbc 或 .vbb 编译为独立 Windows x64 exe，包含运行时和基址重定位；只编译不执行")
     parser.add_argument("--run-native-memory", help="调试模式：从源码或 .vbb 生成 x64 机器码并在 Windows x64 可执行内存中运行 native 入口，打印返回值并作为进程退出码", action="store_true")
     parser.add_argument("--run-native-pe", help="调试模式：从源码或 .vbb 生成最小 PE32+ image 并通过 Windows loader 运行，打印返回值并作为进程退出码", action="store_true")
     parser.add_argument("--native-result", help="调试模式：将 native 调试执行入口的完整返回值写入指定文本文件")
@@ -244,6 +245,39 @@ def main():
         except ValueError as error:
             print(f"错误: {error}")
             sys.exit(1)
+    if args.emit_exe is not None:
+        conflicts = [
+            (args.compile_parser, "--compile-parser"),
+            (args.run_native_memory, "--run-native-memory"),
+            (args.run_native_pe, "--run-native-pe"),
+            (args.check_native_map, "--check-native-map"),
+            (args.check_native_text_map, "--check-native-text-map"),
+            (args.check_native_pe_map, "--check-native-pe-map"),
+            (args.run_native_pe_file, "--run-native-pe-file"),
+            (args.run_native_bin_memory, "--run-native-bin-memory"),
+            (args.run_native_text_bin_memory, "--run-native-text-bin-memory"),
+            (args.native_result, "--native-result"),
+            (args.native_zero_exit_code, "--native-zero-exit-code"),
+        ]
+        for enabled, option in conflicts:
+            if enabled:
+                print(f"错误: --emit-exe 不能与 {option} 同时使用")
+                sys.exit(1)
+        if os.path.splitext(args.filename)[1].lower() not in {".vbc", ".vbb"}:
+            print("错误: --emit-exe 只接受 .vbc 或 .vbb 输入")
+            sys.exit(1)
+        if os.path.splitext(args.emit_exe)[1].lower() != ".exe":
+            print("错误: --emit-exe 输出路径必须以 .exe 结尾")
+            sys.exit(1)
+        if os.path.realpath(args.filename) == os.path.realpath(args.emit_exe):
+            print("错误: --emit-exe 输出路径不能覆盖输入文件")
+            sys.exit(1)
+        request = native_export_request or NativeExportRequest()
+        native_export_request = NativeExportRequest(
+            outputs={**request.outputs, NativeExportKind.PE_IMAGE: os.path.abspath(args.emit_exe)},
+            manifest_path=request.manifest_path,
+            aot=True,
+        )
     unified_emit_conflicts = [
         (args.emit, "--emit"),
     ]
@@ -412,12 +446,12 @@ def main():
 
     if args.compile_parser:
         dump_path = create_dump_path(grammar_file) if dump_modules else None
-        run_parser_generation(
+        result = run_parser_generation(
             log_modules=log_modules,
             dump_modules=dump_modules,
             dump_path=dump_path,
         )
-        sys.exit(0)
+        sys.exit(0 if result.success else 1)
     else:
         dump_path = create_dump_path(args.filename) if dump_modules else None
         ext = os.path.splitext(args.filename)[1].lower()
@@ -433,6 +467,7 @@ def main():
                 log_modules=log_modules,
                 dump_modules=dump_modules,
                 dump_path=dump_path,
+                execute=not args.emit_exe,
                 run_native_memory=args.run_native_memory,
                 run_native_pe=args.run_native_pe,
                 native_result_path=args.native_result,
@@ -445,7 +480,7 @@ def main():
                 dump_modules=dump_modules,
                 dump_path=dump_path,
                 output_path=args.output,
-                execute=not args.compile_only and not args.run_native_memory and not args.run_native_pe,
+                execute=not args.compile_only and not args.run_native_memory and not args.run_native_pe and not args.emit_exe,
                 refresh_parser=args.refresh_parser,
                 show_warnings=not args.no_warn,
                 optimize_level=args.optimize_level,
@@ -462,6 +497,8 @@ def main():
             print(f"native PE 入口返回值: {result.exit_code}")
             if args.native_zero_exit_code:
                 sys.exit(0)
+        if args.emit_exe and result.success:
+            print(f"独立 Windows x64 可执行文件已生成: {os.path.abspath(args.emit_exe)}")
         if args.emit and result.success and result.export_report is not None:
             print(f"native 产物已导出到: {emit_dir}")
             if result.export_report.manifest_path is not None:

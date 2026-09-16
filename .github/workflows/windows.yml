@@ -1,0 +1,43 @@
+name: Windows x64 回归
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: 准备项目虚拟环境
+        run: |
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+          $OutputEncoding = [Console]::OutputEncoding
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./.venv/Scripts/python.exe -m pip install -r requirement.txt
+          exit $LASTEXITCODE
+      - name: 运行完整验收
+        run: ./scripts/verify.ps1
+      - name: 保留验收报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-results
+          path: build/verify-*/results.xml
+          if-no-files-found: warn

@@ -66,7 +66,7 @@ python -m verbose_c.cli example.vbc --log all
 
 ### 重新生成解析器
 ```bash
-python -m verbose_c.cli --compile-parser
+python -m verbose_c.cli Grammar/verbose_c.gram --compile-parser
 ```
 
 ### 调试虚拟机执行
@@ -87,6 +87,27 @@ python -m verbose_c.cli example.vbc --compile-only --emit native-bin,native-map,
 ```
 
 `--emit` 支持 `native-listing`、`native-bin`、`native-text-bin`、`native-pe`、`native-map` 和一次导出全部类型的 `native-bundle`。统一导出会按输入文件名组织产物，并生成包含路径、大小和 SHA-256 的 `.native.manifest.json`。`--emit-dir` 可省略，此时输出到入口文件所在目录的 `<入口文件名>_emit_out_<时间戳>` 目录；未设置 `--emit` 时，单独提供 `--emit-dir` 不生效。
+
+### 编译独立 Windows 可执行文件
+
+稳定 AOT 入口接受 `.vbc` 或 `.vbb`，只编译、不运行目标程序：
+
+```powershell
+.\.venv\Scripts\python.exe -m verbose_c.cli .\tests\grammar\native_io_greeting.vbc --emit-exe .\build\greeting.exe -O1
+.\build\greeting.exe
+```
+
+`--emit-exe PATH` 明确指定 exe 路径；`-o/--output` 仍指定 `.vbb` 路径。需要检查产物时，可附加 `--emit native-map --emit-dir build/maps`，或使用 `--emit native-bundle`。正式编译不与 `--run-native-*` 等调试执行选项组合。缓存输入 `.vbb` 使用其编译时已有的优化结果，`-O` 只对源码生效。
+
+| 稳定 AOT 子集 | 支持范围 |
+| --- | --- |
+| 数值与控制流 | 定宽有符号整数、bool、float/double、隐式/显式数值转换、分支、循环、switch、递归、寄存器及栈参数、受限全局标量 |
+| 入口与退出 | 沿用顶层初始化和无参 main 语义；正常返回及 `exit/_exit` 使用 Windows 32 位进程退出码 |
+| 字符串与 I/O | 字符串传值、别名、比较及标准输入输出，详见下表 |
+| 运行时错误 | 整数/浮点溢出、除零和转换失败输出具体中文原因；I/O 和分配失败均输出 STDERR 并以 1 退出 |
+| 部署 | exe 自带启动与运行时，仅依赖系统 KERNEL32.dll；支持 ASLR、DEP 和实际 DIR64 基址重定位 |
+
+Native 数组、指针、结构体、类、普通文件 I/O、字符串拼接和逐对象 GC 属于后续扩展；当前遇到这些能力会明确编译失败。预处理、解析和类型检查与 VM 共用；只对已知后端能力限制允许 VM 降级，内部编译器异常会明确失败并保留 traceback。
 
 ### Windows 原生 I/O 示例
 
@@ -109,15 +130,25 @@ python -m verbose_c.cli example.vbc --compile-only --emit native-bin,native-map,
 | 错误与退出 | 无效标准流、负数或过大长度、系统读写失败及分配失败均停止执行，诊断写入 STDERR，进程退出码为 1；系统错误附 Win32 错误码。正常 `return/exit` 保留退出码。STDERR 本身失效时仍以非零码退出。 |
 | 字符串生命周期 | UTF-8 常量位于只读节，值是指向“8 字节长度 + 文本”的地址；支持赋值、别名、传参、返回、相等比较和空串判断。读入结果保存在本次执行的私有堆，正常结束、显式退出和运行时失败均销毁堆；转换临时缓冲区及时释放。 |
 
-当前 native I/O 子集限于标准流和字符串写入；`open/close/lseek`、字符串拼接及完整 GC 仍未实现。长时间循环读取时，已返回字符串会保留到程序结束，尚无逐对象回收。VM 的普通文件接口继续可用。只有使用字符串或 I/O 的程序才附加运行时；已有纯标量 PE 路径保留。
+当前 native I/O 子集限于标准流和字符串写入；`open/close/lseek`、字符串拼接及完整 GC 仍未实现。长时间循环读取时，已返回字符串会保留到程序结束，尚无逐对象回收。VM 的普通文件接口继续可用。正式 `--emit-exe` 总是附加运行时，确保纯标量程序也有错误诊断；调试导出仍按需附加运行时。
 
-产物 map 的 `schema_version=2` 记录 `.text`、只读 `.rdata`、可写 `.idata`、系统导入及相对地址。`native-bin` / `native-text-bin` 内存执行从 map 恢复数据和导入；独立 exe 不需要 map。当前采用固定首选基址与 RIP 相对寻址，尚未提供基址重定位表。
+调试 map 的 `schema_version=1/2` 保持兼容。正式 AOT 使用 `schema_version=3`，在 `.text`、只读 `.rdata`、可写 `.idata` 之外增加 `.aot` 启动节和只读可丢弃的 `.reloc`；启动中的 64 位目标地址由 Windows loader 修补。所有 map、节内容、导入、重定位和文件布局均校验后写出，并读回复核。布局遵循 [Microsoft PE/COFF 规范](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#the-reloc-section-image-only)。`native-bin` / `native-text-bin` 内存执行从 map 恢复数据和导入；独立 exe 不需要 map。
+
+运行时 ABI 版本为 1：语言标量和字符串占用 8 字节槽，浮点参数按 Windows x64 约定放入 XMM 参数寄存器。运行时函数以 RAX 返回值、RDX 传递状态（0 为正常，1 为显式退出，2～9 为数值错误，20 起为 I/O 错误）；R11 保存语言全局帧，R12 保存私有堆及标准流状态。系统调用使用 Windows x64 的四个参数寄存器、32 字节 shadow space 和 16 字节栈对齐。`read/write/equal` 分别接收 `(int64,int64)`、`(int64,string)`、`(string,string)`；返回 `string/int64/bool64`。
 
 验收测试：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_native_io.py
 ```
+
+### 完整回归验收
+
+```powershell
+.\scripts\verify.ps1
+```
+
+脚本复用项目 `.venv` 和已安装的依赖，检查 Windows x64、重新生成解析器，再运行全部测试。每次在 `build/verify-<唯一编号>` 下创建独立临时目录和 JUnit 报告，避免共享临时目录的权限或并发冲突。GitHub Actions 的 Windows 工作流执行相同入口，覆盖 O0/O1、VM、字节码重载、原生内存执行、独立 exe、强制异址重定位及损坏产物拒绝。可用 `-TestPaths tests/test_native_aot.py` 运行专项验收。
 
 ## 编译器自身打包为可执行文件
 ```bash

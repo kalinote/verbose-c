@@ -4,6 +4,7 @@ import struct
 from dataclasses import replace
 
 from verbose_c.standard_io import MAX_READ_BYTES, IO_ERRORS
+from verbose_c.object.numeric import NATIVE_NUMERIC_ERRORS
 
 
 RUNTIME_SIGNATURES = {
@@ -115,7 +116,9 @@ class RuntimeAssembler:
 
     def end(self):
         """结束函数并登记供清单、调用和符号校验使用的元数据。"""
-        from verbose_c.compiler.native.codegen import NativeCodeFunction, NativeCodeInstruction, NativeRegisterAllocation
+        from verbose_c.compiler.native.model import NativeCodeFunction
+        from verbose_c.compiler.native.model import NativeCodeInstruction
+        from verbose_c.compiler.native.model import NativeRegisterAllocation
 
         self.labels[self.function_name + ":return"] = len(self.code)
         self.mem("8b", "r11", "rbp", -8)
@@ -144,7 +147,7 @@ class RuntimeAssembler:
         self.branch(self.function_name + f":error{code}", 0x84)
 
 
-def append_runtime(code, functions, entry_name):
+def append_runtime(code, functions, entry_name, *, detailed_numeric_errors=False):
     """追加运行时并链接系统接口和常量引用。
 
     输入字符串在私有堆中存活至本次程序结束，退出时统一销毁，允许跨函数别名。
@@ -153,6 +156,7 @@ def append_runtime(code, functions, entry_name):
         code: 已有用户函数机器码，原地追加运行时。
         functions: 待更新的函数表。
         entry_name: 用户程序的入口函数名。
+        detailed_numeric_errors: 正式 AOT 是否按统一数值错误码输出具体原因。
 
     Returns:
         只读数据、导入布局、PE 入口及相对地址修补记录。
@@ -502,12 +506,13 @@ def append_runtime(code, functions, entry_name):
 
     a.begin("<native:diagnostic>")
     a.mem("89", "rcx", "rbp", -64)
-    for status in (2, *IO_ERRORS):
+    diagnostics = {**(NATIVE_NUMERIC_ERRORS if detailed_numeric_errors else {2: "数值运算失败。"}), **IO_ERRORS}
+    for status in diagnostics:
         a.mov("rax", status)
         a.emit("48 39 c1")
         a.branch(f"diagnostic:{status}", 0x84)
     a.branch("diagnostic:2")
-    for status, message in {2: "数值运算失败。", **IO_ERRORS}.items():
+    for status, message in diagnostics.items():
         a.labels[f"diagnostic:{status}"] = len(code)
         a.address("rax", message + "\n")
         a.mem("89", "rax", "rbp", -16)

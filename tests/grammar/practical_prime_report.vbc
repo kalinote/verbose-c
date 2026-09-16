@@ -1,0 +1,36 @@
+#include "../practical_console.inc"
+
+// 试除法判断素数，供区间内的每个候选值调用。
+bool is_prime(int value) {
+    if (value < 2) { return false; }
+    for (int divisor = 2; divisor * divisor <= value; divisor = divisor + 1) {
+        if (value % divisor == 0) { return false; }
+    }
+    return true;
+}
+
+// 输入 1～5000 的上限，例如 30。
+int main() {
+    write(STDOUT, "素数统计，上限(1～5000)：");
+    int limit = read_integer();
+    if (limit < 1 || limit > 5000) {
+        write(STDERR, "上限必须在 1～5000 之间。\n");
+        return 2;
+    }
+    int count = 0;
+    long total = 0;
+    write(STDOUT, "素数：");
+    for (int candidate = 2; candidate <= limit; candidate = candidate + 1) {
+        if (!is_prime(candidate)) { continue; }
+        if (count > 0) { write(STDOUT, " "); }
+        print_integer(candidate);
+        count = count + 1;
+        total = total + candidate;
+    }
+    write(STDOUT, "\n数量：");
+    print_integer(count);
+    write(STDOUT, "\n总和：");
+    print_integer(total);
+    write(STDOUT, "\n");
+    return 0;
+}

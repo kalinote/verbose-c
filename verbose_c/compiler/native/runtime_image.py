@@ -111,7 +111,7 @@ def runtime_base_map(metadata):
 
 def validate_runtime_map(code, metadata):
     """校验数据节、导入内容、RIP 引用以及原有代码 map。"""
-    from verbose_c.compiler.native.codegen import validate_native_code_map_bytes
+    from verbose_c.compiler.native.map_format import validate_native_code_map_bytes
 
     try:
         raw = metadata["runtime"]

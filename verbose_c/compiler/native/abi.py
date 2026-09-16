@@ -4,6 +4,9 @@ from verbose_c.compiler.native.target import NativeTarget, WINDOWS_X64_REGISTERS
 
 FLOAT_VALUE_TYPES = {"float32", "float64"}
 SCALAR_VALUE_TYPES = {"int64", "bool64", "string", *FLOAT_VALUE_TYPES}
+SUPPORTED_RETURN_TYPES = SCALAR_VALUE_TYPES | {"void"}
+SUPPORTED_VALUE_TYPES = SCALAR_VALUE_TYPES
+SUPPORTED_ARGUMENT_REGISTERS = {"RCX", "RDX", "R8", "R9"}
 
 @dataclass(frozen=True)
 class ArgumentLocation:
@@ -53,3 +56,8 @@ class StackFrameLayout:
 
 
 WINDOWS_X64_ABI = WindowsX64ABI()
+
+
+def is_argument_type_compatible(param_type: str, value_type: str) -> bool:
+    """判断 call 实参类型是否匹配形参类型。"""
+    return param_type == value_type or (param_type == "int64" and value_type == "bool64")

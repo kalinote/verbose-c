@@ -4,10 +4,84 @@ from unittest.mock import Mock, call
 
 import pytest
 
+from verbose_c.compiler.ir import IRLoweringError
+from verbose_c.compiler.native.errors import NativeCodegenError, NativeLoweringError
 from verbose_c.engine.engine import CompilerOutput, compile_module, run_bytecode_file, run_source_file
 from verbose_c.engine.recorder import PipelineRecorder
 from verbose_c.error import VBCCompileError, VBCRuntimeError
 from verbose_c.fs.incremental_compile import IncrementalCompiler
+
+
+@pytest.mark.parametrize("stage,error_type,error_field", [
+    ("verbose_c.compiler.ir.lower_compiler_output_to_ir", IRLoweringError, "ir_error"),
+    ("verbose_c.compiler.native.lower_ir_program_to_machine", NativeLoweringError, "machine_error"),
+    ("verbose_c.compiler.native.generate_native_code", NativeCodegenError, "native_code_error"),
+])
+@pytest.mark.parametrize("required", [False, True])
+def test_backend_expected_errors_only_fallback_when_optional(
+    tmp_path, monkeypatch, stage, error_type, error_field, required,
+):
+    """验证已知后端限制可降级，强制生成时仍保留原始错误。"""
+    source = tmp_path / "expected.vbc"
+    source.write_text("int main() { return 7; }", encoding="utf-8")
+    error = error_type("模拟不支持的后端能力")
+    monkeypatch.setattr(stage, Mock(side_effect=error))
+    if required:
+        with pytest.raises(error_type) as raised:
+            compile_module(str(source), require_native_code=True)
+        assert raised.value is error
+    else:
+        output = compile_module(str(source))
+        assert getattr(output, error_field) is error
+        assert output.bytecode
+
+
+@pytest.mark.parametrize("stage", [
+    "verbose_c.compiler.ir.lower_compiler_output_to_ir",
+    "verbose_c.compiler.native.lower_ir_program_to_machine",
+    "verbose_c.compiler.native.generate_native_code",
+])
+@pytest.mark.parametrize("error_type", [RuntimeError, TypeError, AttributeError])
+@pytest.mark.parametrize("input_kind,mode", [
+    ("source", "vm"), ("source", "ir"), ("source", "machine"),
+    ("source", "native"), ("bytecode", "machine"), ("bytecode", "native"),
+])
+def test_backend_internal_errors_fail_pipeline(
+    tmp_path, monkeypatch, capsys, stage, error_type, input_kind, mode,
+):
+    """验证内部异常在源码、字节码和强制后端路径均失败并输出 traceback。"""
+    source = tmp_path / "internal.vbc"
+    artifact = tmp_path / "internal.vbb"
+    source.write_text("int main() { return 7; }", encoding="utf-8")
+    if input_kind == "bytecode":
+        prepared = run_source_file(
+            str(source), log_modules=set(), dump_modules=set(),
+            output_path=str(artifact), execute=False,
+        )
+        assert prepared.success
+    error = error_type("模拟后端内部缺陷")
+    monkeypatch.setattr(stage, Mock(side_effect=error))
+    execute_vm = Mock()
+    monkeypatch.setattr("verbose_c.engine.engine._execute_compilation_output", execute_vm)
+    options = {
+        "log_modules": set(),
+        "dump_modules": {mode} if mode in {"ir", "machine"} else set(),
+        "dump_path": str(tmp_path / "failure.md"),
+        "run_native_memory": mode == "native",
+    }
+    if input_kind == "source":
+        result = run_source_file(str(source), output_path=str(artifact), **options)
+        assert not artifact.exists()
+    else:
+        result = run_bytecode_file(str(artifact), **options)
+    captured = capsys.readouterr()
+    assert not result.success
+    assert result.exit_code == 1
+    assert result.error is error
+    assert "意外的内部错误" in captured.out
+    assert f"{error_type.__name__}: 模拟后端内部缺陷" in captured.err
+    assert "Traceback" in captured.err
+    execute_vm.assert_not_called()
 
 
 def test_source_and_bytecode_native_errors_use_embedded_source_path(tmp_path, capsys):

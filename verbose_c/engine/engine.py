@@ -187,6 +187,7 @@ def compile_module(
     require_ir: bool = False,
     require_machine: bool = False,
     require_native_code: bool = False,
+    native_aot: bool = False,
 ) -> CompilerOutput:
     """
     编译单个模块文件，分阶段执行并在每阶段完成后通知 recorder。
@@ -262,6 +263,7 @@ def compile_module(
         require_ir=require_ir,
         require_machine=require_machine,
         require_native_code=require_native_code,
+        native_aot=native_aot,
     )
     if recorder:
         recorder.on_compiled(output)
@@ -274,13 +276,16 @@ def _populate_backend_outputs(
     require_ir: bool = False,
     require_machine: bool = False,
     require_native_code: bool = False,
+    native_aot: bool = False,
 ) -> None:
     """为编译输出补齐 IR、Machine IR 和 native 机器码产物。"""
-    from verbose_c.compiler.ir import lower_compiler_output_to_ir
+    from verbose_c.compiler.ir import IRLoweringError, lower_compiler_output_to_ir
+    from verbose_c.compiler.native.errors import NativeCodegenError, NativeLoweringError
 
+    require_native_code = require_native_code or native_aot
     try:
         output.ir_program = lower_compiler_output_to_ir(output)
-    except Exception as error:
+    except IRLoweringError as error:
         if require_ir or require_machine or require_native_code:
             raise
         output.ir_error = error
@@ -289,14 +294,14 @@ def _populate_backend_outputs(
 
         try:
             output.machine_program = lower_ir_program_to_machine(output.ir_program)
-        except Exception as error:
+        except NativeLoweringError as error:
             if require_machine or require_native_code:
                 raise
             output.machine_error = error
         if output.machine_program is not None:
             try:
-                output.native_code_program = generate_native_code(output.machine_program)
-            except Exception as error:
+                output.native_code_program = generate_native_code(output.machine_program, aot=native_aot)
+            except NativeCodegenError as error:
                 if require_native_code:
                     raise
                 output.native_code_error = error
@@ -562,6 +567,7 @@ def _run_file_pipeline(
                     require_ir=require_ir,
                     require_machine=False,
                     require_native_code=require_native_code,
+                    native_aot=export_request.aot,
                 )
                 recorder_notified = True
                 compile_warnings = compilation_output.warnings or []
@@ -602,6 +608,7 @@ def _run_file_pipeline(
                     require_ir=require_ir,
                     require_machine=False,
                     require_native_code=require_native_code,
+                    native_aot=export_request.aot,
                 )
 
         if not recorder_notified:
@@ -707,6 +714,7 @@ def run_bytecode_file(
     log_modules: set[str],
     dump_modules: set[str],
     dump_path: str | None = None,
+    execute: bool = True,
     run_native_memory: bool = False,
     run_native_pe: bool = False,
     native_result_path: str | None = None,
@@ -716,6 +724,7 @@ def run_bytecode_file(
     return _run_file_pipeline(
         filename,
         input_kind="bytecode",
+        execute=execute,
         log_modules=log_modules,
         dump_modules=dump_modules,
         dump_path=dump_path,

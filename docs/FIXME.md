@@ -66,10 +66,10 @@
 
 | 编号 | 优先级 | 状态 | 问题 |
 | --- | --- | --- | --- |
-| FIXME-001 | 高 | 待处理 | 后端阶段捕获所有 `Exception`，可能掩盖内部缺陷 |
+| FIXME-001 | 高 | 已处理 | 仅降级已知后端错误，内部异常进入失败及 traceback 通路 |
 | FIXME-002 | 中 | 已处理 | P2-5 已标记为部分完成，并区分调试用最小 PE 与正式 runtime/AOT |
-| FIXME-003 | 中 | 待处理 | `codegen.py` 职责过载，文件和函数体量过大 |
-| FIXME-004 | 中 | 待处理 | native 模块跨文件依赖私有符号并重复定义常量 |
+| FIXME-003 | 中 | 首阶段已处理 | 已拆出模型、listing 和 map；指令选择、静态分析及大校验函数的进一步拆分可后续进行 |
+| FIXME-004 | 中 | 已处理 | 模型、ABI 规则及 rel32 共享定义公开复用，runner 不再依赖 codegen 私有函数 |
 | FIXME-005 | 中 | 待处理 | CLI 模式分发、冲突检测和结果处理重复 |
 | FIXME-006 | 中 | 已处理 | 源码与 `.vbb` engine 执行流程已统一，错误路径分叉已修复 |
 | FIXME-007 | 低 | 待处理 | native exporter 对 `.text` 和 PE 做重复校验 |
@@ -79,6 +79,8 @@
 ## 3. 详细问题
 
 ### FIXME-001：后端阶段不应捕获所有异常
+
+**处理结果（2026-09-16）：** IR、Machine IR 和 codegen 分别只捕获 `IRLoweringError`、`NativeLoweringError`、`NativeCodegenError`。内部异常透传到 engine 的失败诊断；`tests/test_engine_execution.py` 覆盖源码、字节码、dump 和强制 native 路径的异常注入。以下保留原问题说明。
 
 **优先级：高**
 
@@ -170,6 +172,8 @@ P2-4 已经具备：
 
 ### FIXME-003：拆分职责过载的 `codegen.py`
 
+**首阶段结果（2026-09-16）：** 已迁出 `model.py`、`listing_formatter.py`、`map_format.py`，并以 `pe_layout.py`、`relocations.py` 共享常量；旧公共导入继续兼容。169 个 map 测试函数迁至 `tests/test_native_map.py`。迁移前后 50 个样例各自 O0/O1 的机器码、map、listing 和 PE 摘要完全一致。生成上下文和静态分析仍保留原模块，大 map 校验函数的细分留待后续。以下保留原问题和长期拆分建议。
+
 **优先级：中**
 
 **涉及文件：**
@@ -222,6 +226,8 @@ verbose_c/compiler/native/
 - 拆分过程中机器码字节、map JSON 和 listing 快照不发生非预期变化。
 
 ### FIXME-004：消除私有跨模块依赖和重复 rel32 定义
+
+**处理结果（2026-09-16）：** 类型兼容规则位于 `abi.py`，符号/栈槽描述位于 `model.py`，rel32 指令长度、opcode、助记符前缀统一位于 `relocations.py`；runner 和 PE writer 直接消费公开模型及 map 接口，不再依赖 codegen 的私有函数。以下保留原问题说明。
 
 **优先级：中**
 

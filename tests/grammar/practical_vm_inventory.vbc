@@ -1,0 +1,19 @@
+#include "../practical_console.inc"
+
+// VM 库存示例；数组尚不属于 Native 子集，正式 exe 编译应明确拒绝。
+int main() {
+    int stock[4] = {12, 5, 8, 3};
+    int price_in_cents[4] = {250, 990, 350, 1299};
+    int quantity = 0;
+    long total_value = 0;
+    for (int index = 0; index < 4; index = index + 1) {
+        quantity = quantity + stock[index];
+        total_value = total_value + (long)stock[index] * price_in_cents[index];
+    }
+    write(STDOUT, "库存件数：");
+    print_integer(quantity);
+    write(STDOUT, "\n库存价值（元）：");
+    print_fixed2(total_value);
+    write(STDOUT, "\n");
+    return 0;
+}

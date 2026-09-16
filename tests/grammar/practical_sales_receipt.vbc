@@ -1,0 +1,30 @@
+#include "../practical_console.inc"
+
+long sales_total = 0;
+int order_count = 0;
+
+// 金额以分计；六个形参同时覆盖寄存器参数和栈参数。
+long record_sale(int quantity, int unit_price, int percent, int packaging, int delivery, int coupon) {
+    long amount = (long)quantity * unit_price;
+    amount = amount * percent / 100 + packaging + delivery - coupon;
+    if (amount < 0) { amount = 0; }
+    sales_total = sales_total + amount;
+    order_count = order_count + 1;
+    return amount;
+}
+
+// 无需输入；计算三笔订单，折扣产生的不足一分部分舍去。
+int main() {
+    write(STDOUT, "订单小票（元）\n图书：");
+    print_fixed2(record_sale(2, 3990, 90, 200, 600, 500));
+    write(STDOUT, "\n杯子：");
+    print_fixed2(record_sale(3, 1250, 100, 0, 0, 250));
+    write(STDOUT, "\n文具：");
+    print_fixed2(record_sale(5, 350, 95, 100, 300, 100));
+    write(STDOUT, "\n订单数：");
+    print_integer(order_count);
+    write(STDOUT, "\n总额：");
+    print_fixed2(sales_total);
+    write(STDOUT, "\n");
+    return 0;
+}

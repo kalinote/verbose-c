@@ -73,6 +73,7 @@ class NativeExportRequest:
 
     outputs: dict[NativeExportKind, str] = field(default_factory=dict)
     manifest_path: str | None = None
+    aot: bool = False
 
     @property
     def enabled(self) -> bool:

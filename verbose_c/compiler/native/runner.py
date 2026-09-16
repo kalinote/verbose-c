@@ -1,18 +1,26 @@
-from verbose_c.compiler.native.abi import FLOAT_VALUE_TYPES, SCALAR_VALUE_TYPES
 import ctypes
 import platform
 import sys
-
-from verbose_c.compiler.native.codegen import (
-    NativeCodeFunction,
-    NativeCodeProgram,
-    NativeRegisterAllocation,
-    _is_argument_type_compatible,
-    _native_program_symbols,
+from verbose_c.compiler.native.abi import (
+    FLOAT_VALUE_TYPES,
+    SCALAR_VALUE_TYPES,
+    is_argument_type_compatible as _is_argument_type_compatible,
+)
+from verbose_c.compiler.native.errors import NativeCodegenError
+from verbose_c.compiler.native.map_format import (
     validate_native_code_map_bytes,
     validate_native_text_section_map_bytes,
 )
-from verbose_c.compiler.native.errors import NativeCodegenError
+from verbose_c.compiler.native.model import (
+    NativeCodeFunction,
+    NativeCodeProgram,
+    NativeRegisterAllocation,
+    native_program_symbols as _native_program_symbols,
+)
+from verbose_c.compiler.native.relocations import (
+    REL32_JUMP_ASM_PREFIXES,
+    REL32_JUMP_OPCODES,
+)
 from verbose_c.compiler.native.target import NativeTarget
 from verbose_c.object.numeric import NATIVE_NUMERIC_ERRORS
 
@@ -21,18 +29,6 @@ MEM_COMMIT = 0x1000
 MEM_RESERVE = 0x2000
 MEM_RELEASE = 0x8000
 PAGE_EXECUTE_READWRITE = 0x40
-REL32_JUMP_OPCODES = {
-    "je_rel32": b"\x0F\x84",
-    "jmp_rel32": b"\xE9",
-    "jne_rel32": b"\x0F\x85",
-    "jns_rel32": b"\x0F\x89",
-}
-REL32_JUMP_ASM_PREFIXES = {
-    "je_rel32": "je ",
-    "jmp_rel32": "jmp ",
-    "jne_rel32": "jne ",
-    "jns_rel32": "jns ",
-}
 
 
 def can_run_native_memory() -> bool:
@@ -292,7 +288,7 @@ def run_native_program_in_memory(program: NativeCodeProgram) -> int:
     _validate_relocations(program)
     _validate_exit_propagation(program)
     if program.runtime:
-        from verbose_c.compiler.native.codegen import native_code_program_map
+        from verbose_c.compiler.native.map_format import native_code_program_map
         metadata = native_code_program_map(program)
         validate_native_code_map_bytes(program.code, metadata)
         return _run_code_in_memory(program.code, program.entry_offset, metadata["runtime"])

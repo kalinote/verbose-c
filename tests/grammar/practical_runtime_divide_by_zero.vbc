@@ -1,0 +1,12 @@
+#include "../practical_console.inc"
+
+// 输入 5 时正常输出 20；输入 0 时故意触发运行时除零诊断，退出码为 1。
+int main() {
+    write(STDOUT, "请输入除数：");
+    int divisor = read_integer();
+    int quotient = 100 / divisor;
+    write(STDOUT, "商：");
+    print_integer(quotient);
+    write(STDOUT, "\n");
+    return 0;
+}

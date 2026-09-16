@@ -1,0 +1,17 @@
+#include "../practical_console.inc"
+
+// 无需输入；混合使用 float、double、整数转换和循环生成温度表。
+int main() {
+    write(STDOUT, "摄氏℃ | 华氏℉ | 开尔文K\n");
+    for (int celsius = -20; celsius <= 40; celsius = celsius + 20) {
+        float fahrenheit = (float)((double)celsius * 9.0 / 5.0 + 32.0);
+        double kelvin = (double)celsius + 273.15;
+        print_integer(celsius);
+        write(STDOUT, " | ");
+        print_integer((long)fahrenheit);
+        write(STDOUT, " | ");
+        print_fixed2((long)(kelvin * 100.0 + 0.5));
+        write(STDOUT, "\n");
+    }
+    return 0;
+}

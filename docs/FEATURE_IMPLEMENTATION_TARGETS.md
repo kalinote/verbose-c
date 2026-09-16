@@ -15,7 +15,7 @@
 6.  F-P2-2  O2/O3 优化等级             【未完成】IR/CFG 层高级优化
 7.  F-P2-3  Native 后端设计与目标 ABI   【已完成】目标平台、调用约定、机器级 IR
 8.  F-P2-4  x64 机器码后端 MVP          【已完成】源码/字节码到 x64 机器码、Windows x64 内存执行与完整返回值观测的 MVP 闭环已跑通
-9.  F-P2-5  PE/COFF 可执行文件与运行时   【部分完成】调试用单 .text 最小 PE32+ 已完成，正式 runtime/AOT 未完成
+9.  F-P2-5  PE/COFF 可执行文件与运行时   【稳定子集已完成】正式 Windows AOT、标准 I/O、运行时错误、基址重定位；对象存储和逐对象 GC 待扩展
 10. F-P3-2  热点识别与 JIT 报告         【未完成】统计热点，不生成机器码
 11. F-P3-3  JIT 代码缓存与可执行内存    【未完成】trampoline 与代码页
 12. F-P3-4  受限整数热循环 JIT MVP      【未完成】首版 JIT 执行
@@ -391,16 +391,18 @@
 ### 【依赖 C-P1-5】【依赖 F-P2-4】P2-5 PE/COFF 可执行文件与运行时 MVP
 
 - 完成状态：
-  - 【部分完成】PE32+ 已可独立执行中文标准输入输出；最小 I/O 运行时已完成，完整对象运行时及其他 PE/COFF 能力仍待完善。
+  - 【稳定 AOT 子集已完成】PE32+ 可通过正式入口独立执行，包含中文标准 I/O、数值/I/O 错误处理、ASLR/DEP 及 DIR64 基址重定位。完整对象运行时仍为后续扩展，不代表通用 C 编译器已完成。
 - 已完成：
   - 【已完成】固定 DOS header、PE signature、AMD64 COFF header、PE32+ Optional Header、单 `.text` section 和入口地址写出；产物不依赖系统 C 编译器。
   - 【已完成】通过 `--emit native-pe` 或 `--emit native-bundle` 导出最小 `.exe`，支持写后读回、native map 交叉校验和 `--check-native-pe-map`。
   - 【已完成】`--run-native-pe` 与 `--run-native-pe-file` 可在 Windows x64 上通过 OS loader 执行临时或已导出的最小 PE，并观测进程退出码。
   - 【已完成】按需附加 `.rdata`、`.idata`、KERNEL32 导入描述符、ILT/IAT，使用 Windows x64 参数窗口和 16 字节栈对齐；代码节不可写，数据节不可执行，map schema 2 校验节内容及地址修补。
   - 【已完成】内置启动/退出包装、UTF-8 字符串常量及读入缓冲区、STDIN/STDOUT/STDERR、控制台宽字符与文件/管道重定向；运行时错误传播、错误输出与退出码、私有堆分配及统一释放。验收入口为 `tests/grammar/native_io_greeting.vbc`、`tests/test_native_io.py`。
+  - 【已完成】`--emit-exe PATH` 从 `.vbc` 或 `.vbb` 经 IR/native 管线生成独立 exe，只编译不执行；沿用原 `--emit` 调试导出，受支持范围及 ABI 见 README 的「编译独立 Windows 可执行文件」。
+  - 【已完成】schema 3 描述 `.aot` 和 `.reloc`、DIR64 修补项、完整 PE 布局；所有正式 exe 包含运行时，数值错误输出具体原因，失败写入 STDERR 并非零退出。
+  - 【已完成】`tests/test_native_aot.py` 覆盖 O0/O1、源码/字节码输入、仅复制 exe 的独立运行、损坏产物拒绝，以及占用首选基址后由 Windows loader 修补实际启动地址。
 - 待完成：
-  - 【未完成】基址重定位及其他面向完整 AOT 的 PE/COFF 布局，以及数组、结构体、指针对象存储和逐对象内存回收。
-  - 【未完成】提供 `--emit-exe` 或 `--target=native` 等正式 AOT 入口，并明确其稳定性和受支持语言子集；现有 `native-pe` 仍定位为调试产物。
+  - 【未完成】数组、结构体、指针对象存储和逐对象内存回收；扩展前需要单独确定对象布局及生命周期。
   - 【未完成】后续支持可选 GC 安全点及更完整的运行时能力。
 - 当前现状：
   - VM 的对象模型、内存管理、GC 和大部分内置函数仍由 Python `verbose_c/vm`、`verbose_c/object` 提供，尚未迁移到 native runtime。
@@ -630,7 +632,7 @@ flowchart LR
 
 
 
-## 11. 当前基线快照（2026-07-09）
+## 11. 当前基线快照（2026-09-16）
 
 
 | 能力域                         | 状态            | 关键模块                                                                  |
@@ -649,5 +651,6 @@ flowchart LR
 | 字节码优化                       | 【已完成】         | `-O1` 已启用基础字节码优化、typed AST 常量折叠、常量传播、拷贝传播、简单分支优化、语句级 CSE 与简单内联        |
 | IR / CFG                    | 【已完成】         | `verbose_c/compiler/ir`、`CompilerOutput.ir_program`、`--dump ir`       |
 | Machine IR / Native 前端       | 【已完成】         | `verbose_c/compiler/native`、`CompilerOutput.machine_program`、`--dump machine`       |
-| x64 机器码 / AOT               | 【P2-4 已完成，P2-5 部分完成】 | 已跑通源码/字节码到 x64 机器码和调试执行；单 `.text` 最小 PE32+ 已可由 Windows loader 运行，正式 PE/COFF 与 runtime 尚未完成 |
+| x64 机器码 / AOT               | 【P2-4 及稳定 AOT 子集已完成】 | 正式 `--emit-exe`、字符串与标准 I/O 运行时、数值错误、ASLR/DEP 和 DIR64 重定位；对象模型仍待扩展 |
+| Windows 自动验收             | 【已完成】 | `scripts/verify.ps1`、`.github/workflows/windows.yml`；重新生成解析器及执行完整回归 |
 | JIT                         | 【未实现】         | 无                                                                     |

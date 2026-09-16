@@ -1,0 +1,31 @@
+#include "../practical_console.inc"
+
+// 用 long 保存 0!～20!，验证递归及完整 64 位整数精度。
+long factorial(int value) {
+    if (value <= 1) { return 1; }
+    return (long)value * factorial(value - 1);
+}
+
+// 欧几里得算法递归计算两个正整数的最大公约数。
+int gcd(int left, int right) {
+    if (right == 0) { return left; }
+    return gcd(right, left % right);
+}
+
+// 输入阶乘参数，例如 20；大于 20 会超出 64 位整数范围。
+int main() {
+    write(STDOUT, "阶乘参数(0～20)：");
+    int value = read_integer();
+    if (value < 0 || value > 20) {
+        write(STDERR, "阶乘参数必须在 0～20 之间。\n");
+        return 2;
+    }
+    write(STDOUT, "阶乘：");
+    print_integer(factorial(value));
+    write(STDOUT, "\n最大公约数(48,18)：");
+    print_integer(gcd(48, 18));
+    write(STDOUT, "\n最大公约数(1071,462)：");
+    print_integer(gcd(1071, 462));
+    write(STDOUT, "\n");
+    return 0;
+}
