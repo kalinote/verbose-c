@@ -78,9 +78,12 @@ def test_backend_internal_errors_fail_pipeline(
     assert not result.success
     assert result.exit_code == 1
     assert result.error is error
-    assert "意外的内部错误" in captured.out
+    assert "意外的内部错误" in captured.err
+    assert "意外的内部错误" not in captured.out
     assert f"{error_type.__name__}: 模拟后端内部缺陷" in captured.err
     assert "Traceback" in captured.err
+    recorded = (tmp_path / "failure.md").read_text(encoding="utf-8")
+    assert captured.err in recorded
     execute_vm.assert_not_called()
 
 
@@ -112,14 +115,14 @@ def test_source_and_bytecode_native_errors_use_embedded_source_path(tmp_path, ca
         execute=False,
         run_native_memory=True,
     )
-    source_output = capsys.readouterr().out
+    source_output = capsys.readouterr().err
     bytecode_result = run_bytecode_file(
         str(bytecode_path),
         log_modules=set(),
         dump_modules=set(),
         run_native_memory=True,
     )
-    bytecode_output = capsys.readouterr().out
+    bytecode_output = capsys.readouterr().err
 
     expected_source_path = str(source_path.resolve())
     assert not source_result.success
@@ -148,7 +151,7 @@ def test_bytecode_load_error_without_filepath_uses_input_path(tmp_path, monkeypa
         dump_modules=set(),
     )
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert not result.success
     assert result.error.filepath == str(bytecode_path)
     assert f"编译错误: 文件 {bytecode_path}" in output

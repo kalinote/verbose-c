@@ -1,5 +1,6 @@
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+
+from .report import DiagnosticEntry, DiagnosticReport
 
 @dataclass
 class TracebackFrame:
@@ -13,22 +14,31 @@ class TracebackFrame:
 
 class VBCError(Exception):
     """所有 VBC 解释器错误的基类"""
-    def __init__(self, message, line: int | None = None, filepath: str | None = None):
+    category = "错误"
+
+    def __init__(self, message, line: int | None = None, filepath: str | None = None, *, report: DiagnosticReport | None = None):
+        """保留原异常字段，并为没有专用报告的错误建立默认条目。"""
         super().__init__(message)
         self.message = message
         self.line = line
         self.filepath = filepath
+        self.report = report if report is not None else DiagnosticReport(
+            self.category, [DiagnosticEntry(str(message), filepath=filepath, line=line)]
+        )
 
 class VBCCompileError(VBCError):
     """编译时错误"""
-    def __init__(self, message, line: int | None = None, filepath: str | None = None, warnings: list[str] | None = None):
-        super().__init__(message, line, filepath)
+    category = "编译错误"
+
+    def __init__(self, message, line: int | None = None, filepath: str | None = None, warnings: list[str] | None = None, *, report: DiagnosticReport | None = None):
+        """兼容原有编译异常参数，允许附带结构化诊断。"""
+        super().__init__(message, line, filepath, report=report)
         self.warnings = warnings or []
 
 
 class VBCBytecodeError(VBCCompileError):
     """字节码产物格式错误"""
-    pass
+    category = "字节码错误"
 
 
 class VBCRuntimeError(VBCError):
@@ -39,12 +49,15 @@ class VBCRuntimeError(VBCError):
         message (str): 错误的核心信息.
         traceback (list[TracebackFrame]): 结构化的调用栈轨迹.
     """
-    def __init__(self, message: str, traceback: list[TracebackFrame] = field(default_factory=list)):
-        super().__init__(message)
-        self.message = message
-        self.traceback = traceback
+    category = "运行时错误"
+
+    def __init__(self, message: str, traceback: list[TracebackFrame] | None = None, *, report: DiagnosticReport | None = None):
+        """为每个异常创建独立调用栈，并让报告复用同一份栈信息。"""
+        super().__init__(message, report=report)
+        self.traceback = traceback if traceback is not None else self.report.traceback
+        self.report.traceback = self.traceback
 
 
 class VBCIOError(VBCRuntimeError):
     """I/O 相关异常"""
-    pass
+    category = "I/O 错误"

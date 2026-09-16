@@ -225,7 +225,8 @@ def test_cli_aot_rejects_unsupported_native_feature(tmp_path):
     output.write_bytes(b"existing executable")
     completed = subprocess.run([sys.executable, "-m", "verbose_c.cli", str(source), "--emit-exe", str(output)],
                                capture_output=True, timeout=20, env={**os.environ, "PYTHONUTF8": "1"})
-    text = completed.stdout.decode("utf-8")
+    text = completed.stderr.decode("utf-8")
     assert completed.returncode == 1
+    assert completed.stdout == b""
     assert str(source) in text and "行 1" in text and "不支持" in text
     assert output.read_bytes() == b"existing executable"

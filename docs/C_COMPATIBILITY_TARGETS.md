@@ -401,26 +401,27 @@
 
 ### P1-7 统一错误诊断与输出（`verbose_c/error`）
 
-- 背景与动机：
+- 当前状态（2026-09-16）：核心闭环已完成。`DiagnosticReport` / `DiagnosticEntry` 承载解析、类型、运行时、I/O、字节码和后端错误；`format_error()` 返回纯文本，由 engine 写入 stderr、recorder 记录相同正文。正常退出码、警告和日志约定保持兼容。专项覆盖位于 `tests/test_diagnostics.py`，全量验收入口为 `scripts/verify.ps1`。
+- 原始问题（实施前基线）：
   - 当前错误/警告输出分散在 `engine.py`、`recorder.py`、`error_collector.py`、`preprocessor.py`、`type_checker_visitor.py`、`vm/core.py` 等模块，格式不统一
   - 终端与 dump 文案不一致：解析错误有较完整报告，dump 中仅 `{ExceptionType}: {message}` 一行摘要
   - `VBCCompileError.message` 为平铺字符串，`engine` 用 `split('\n')` 逐行打印，难以实现树形层级展示
   - 验收原则（§8）要求错误含文件、行号、核心原因；需统一格式化层支撑
 - 设计原则：
   - **采集与展示分离**：各阶段只负责产生结构化信息；`verbose_c/error` 只负责「长什么样、怎么输出」
-  - **Dump 格式化进 error 包，文件 I/O 留在 recorder**：`error` 提供 `format_dump_section(error) -> str`，`PipelineRecorder.on_error` 负责何时写入 markdown
+  - **Dump 格式化进 error 包，文件 I/O 留在 recorder**：`error` 提供 `format_error(error) -> str`，`PipelineRecorder.on_error` 负责何时写入 markdown
   - **不迁入 error 包的内容**：解析/类型检查/VM 的错误采集逻辑；PPG 语法文件工具链；CLI 参数校验；`opcode_generator` 内部 `RuntimeError`（编译器 bug）
 - 目标包结构（`verbose_c/error/`）：
 
 ```
 verbose_c/error/
   exceptions.py    # 已有：VBCError / VBCCompileError / VBCRuntimeError / TracebackFrame
-  report.py        # 【待实现】结构化报告数据（ParseErrorReport、Diagnostic 等）
-  format.py        # 【待实现】CLI 树形 / 纯文本 / dump markdown 格式化
+  report.py        # 【已完成】DiagnosticReport / DiagnosticEntry
+  format.py        # 【已完成】终端与 dump 共用的树形纯文本格式化
   __init__.py      # 导出公开 API
 ```
 
-- 当前各阶段错误/警告分布（基线）：
+- 各阶段错误/警告分布（实施前基线）：
 
 
 | 阶段   | 产生位置                          | 载体                                   | 格式化                             | 终端输出                               |
@@ -442,50 +443,47 @@ verbose_c/error/
 
 #### 步骤 1（必须）：解析错误树形 CLI 输出 + `VBCCompileError` 统一格式化
 
-- 【未完成】新建 `verbose_c/error/format.py`，实现树形渲染（`├─` / `└─` / `│` / `─`）
-- 【未完成】`error_collector` 产出结构化 `ParseErrorReport`（或 formatter 可消费的 section 列表），去掉 `"\n错误上下文:"` 等嵌在字符串里的换行
-- 【未完成】`Parser.get_error_report()` 返回结构化数据或委托 `error.format.format_parse_report(...)`
-- 【未完成】`engine.compile_module` 抛出 `VBCCompileError` 时携带结构化报告，而非仅平铺 `message` 字符串
-- 【未完成】`engine.run_source_file` 对 `VBCCompileError` 改为调用 `error.format.print_compile_error(e)`，删除 `split('\n')` 打印循环
-- 【未完成】`recorder.on_error` 对 `VBCCompileError` 复用同一 formatter 写入 dump「错误信息」节
-- CLI 树形示例（目标效果）：
+- 【已完成】新建 `verbose_c/error/format.py`，实现树形渲染（`├─` / `└─` / `│` / `─`）
+- 【已完成】`error_collector` 产出结构化 `DiagnosticReport`，去掉 `"\n错误上下文:"` 等嵌在字符串里的换行
+- 【已完成】`Parser.get_error_report()` 返回结构化数据或委托 `error.format.format_report(...)`
+- 【已完成】`engine.compile_module` 抛出 `VBCCompileError` 时携带结构化报告，而非仅平铺 `message` 字符串
+- 【已完成】`engine.run_source_file` 对 `VBCCompileError` 改为调用 `error.format.format_error(e)` 并写入 stderr，删除 `split('\n')` 打印循环
+- 【已完成】`recorder.on_error` 对 `VBCCompileError` 复用同一 formatter 写入 dump「错误信息」节
+- CLI 树形示例：
 
 ```text
 编译错误: 文件 <entry.vbc>
- ├─ 在文件 <entry.vbc> 中解析失败:
- ├─ 错误位置: 第 N 行，第 M 列，位于 <included.inc> 文件
- ├─ 错误: 期望 ... 其中之一, 实际是 '...'
- │
+ ├─ 错误位置: 文件 <included.inc>，第 N 行，第 M 列
+ ├─ 解析错误: 期望 ... 其中之一, 实际是 '...'
  ├─ 错误上下文:
- │    L | <source line>
- │         ^^^
- │
+ │  L | <source line>
+ │      ^^^
  └─ 语法解析规则调用栈:
-     start -> ... -> expect
+    start -> ... -> expect
 ```
 
-- 回归用例：【已有】`tests/error_report_test.vbc` + `tests/error_report_bad.inc`（include 文件内语法错误）
+- 回归用例：【已有】`tests/error/report_test.vbc` + `tests/error/report_bad.inc`（include 文件内语法错误）
 
 
 
 #### 步骤 2（必须）：运行时错误格式化迁入 `error` 包
 
-- 【未完成】将 `recorder.format_runtime_error` 迁至 `verbose_c/error/format.py`
-- 【未完成】`engine.run_source_file` 对 `VBCRuntimeError` 显式调用 formatter 打印（不再由 `recorder.on_error` 副作用打印）
-- 【未完成】`recorder.on_error` 对 `VBCRuntimeError` 复用 formatter 写 dump
-- 【待完善】`vm/core.py` 中 `TracebackFrame.source_line_context` 改用 `SourceManager` 取多行上下文（当前为单行 strip）
+- 【已完成】将 `recorder.format_runtime_error` 迁至 `verbose_c/error/format.py`
+- 【已完成】`engine.run_source_file` 对 `VBCRuntimeError` 显式调用 formatter 打印（不再由 `recorder.on_error` 副作用打印）
+- 【已完成】`recorder.on_error` 对 `VBCRuntimeError` 复用 formatter 写 dump
+- 【已完成】`vm/core.py` 中 `TracebackFrame.source_line_context` 改用 `SourceManager` 取多行上下文（缺失或不可读时省略上下文）
 
 
 
 #### 步骤 3（必须）：类型检查错误接入统一 formatter
 
-- 【未完成】`compiler.py` 抛出 `VBCCompileError` 前，将 `type_checker.errors` 转为与解析错误兼容的 section 列表
-- 【未完成】类型检查多条错误时，树形输出每条为 `├─`，最后一条为 `└─`
-- 【未完成】dump 与终端共用同一格式化路径
+- 【已完成】`compiler.py` 抛出 `VBCCompileError` 前，将 `type_checker.errors` 按原顺序转为 `DiagnosticEntry` 列表
+- 【已完成】类型检查多条错误时，树形输出每条为 `├─`，最后一条为 `└─`
+- 【已完成】dump 与终端共用同一格式化路径
 
 
 
-#### 步骤 4（高优）：警告输出统一
+#### 步骤 4（后续阶段）：警告输出统一
 
 - 【未完成】新建 `format_warning(message, path?, line?)` 或 `Diagnostic(severity=warning)`
 - 【未完成】`Preprocessor._warn` 改为只构造 diagnostic，不直接 `print`；由 `engine` 或统一 `ErrorSink` 输出（兼容 `--no-warn`）
@@ -493,26 +491,26 @@ verbose_c/error/
 
 
 
-#### 步骤 5（可选）：结构化 Diagnostic 模型
+#### 步骤 5（后续阶段）：扩展 Diagnostic 模型与原生类型诊断
 
-- 【未完成】定义 `Diagnostic`：`severity`、`filepath`、`line`、`column`、`code`、`message`、`context_lines`、`rule_stack` 等
+- 【部分完成】已有文件、行列、原因、上下文、规则栈及调用栈；后续扩展 `severity` 和稳定错误码 `code`
 - 【未完成】`type_checker_visitor` 从 `errors.append(f"...")` 改为 `diagnostics.append(Diagnostic(...))`
-- 【未完成】解析、类型、运行时均产出 `Diagnostic`，formatter 只消费 `list[Diagnostic]`
+- 【部分完成】formatter 统一消费 `DiagnosticReport`；类型检查器仍保留兼容字符串列表，在编译边界转换
 - 收益：多文件/多错误排序、国际化、IDE 集成、稳定错误码
 
 
 
 #### 步骤 6（可选）：词法错误纳入 `VBCCompileError`
 
-- 【未完成】`lexer.py` 非法字符等不再抛裸 `SyntaxError`，改为 `VBCCompileError` 或 `Diagnostic`
-- 【未完成】经统一 formatter 输出，与解析错误样式一致
+- 【已完成】`lexer.py` 在源码词法处理边界将 `SyntaxError` 转为携带报告的 `VBCCompileError`；语法工具链保留原行为
+- 【已完成】经统一 formatter 输出，与解析错误样式一致
 
 
 
 #### 步骤 7（可选）：Dump 错误节增强
 
-- 【未完成】dump「错误信息」节输出完整树形/结构化报告（与终端一致），而非仅 `VBCCompileError: ...` 摘要
-- 【未完成】运行时 dump 包含完整调用栈与源码上下文块
+- 【已完成】dump「错误信息」节输出完整树形/结构化报告（与终端一致），而非仅 `VBCCompileError: ...` 摘要
+- 【已完成】运行时 dump 包含完整调用栈与源码上下文块
 - 文件写入仍由 `PipelineRecorder` 编排，`error` 包只返回字符串
 
 
@@ -523,11 +521,11 @@ verbose_c/error/
 - PPG 语法文件生成链路（`validator.py`、`build.py`）的错误格式
 - CLI 参数错误（足够简单，可保持 `cli.py` 内 `print`）
 - 验收标准：
-  - 【未完成】`tests/error_report_test.vbc` 终端输出为树形格式，且指向 include 文件的正确源码行
-  - 【未完成】`--dump` 时「错误信息」节与终端报告内容一致（允许 markdown 代码块包裹）
-  - 【未完成】类型检查失败时多条错误有统一树形/列表格式
-  - 【未完成】`VBCRuntimeError` 打印职责不在 `recorder` 内隐式副作用，而经 `engine` + `error.format` 显式调用
-  - 【待完善】反向样例测试覆盖：解析错误、类型错误、运行时错误各至少 1 个专用 `.vbc` 用例
+  - 【已完成】`tests/error/report_test.vbc` 终端输出为树形格式，且指向 include 文件的正确源码行
+  - 【已完成】`--dump` 时「错误信息」节与终端报告内容一致（允许 markdown 代码块包裹）
+  - 【已完成】类型检查失败时多条错误有统一树形/列表格式
+  - 【已完成】`VBCRuntimeError` 打印职责不在 `recorder` 内隐式副作用，而经 `engine` + `error.format` 显式调用
+  - 【已完成】`tests/test_diagnostics.py` 覆盖解析、类型、词法、运行时、字节码、I/O、dump 一致性及跨后端输出；复用 include `.vbc` 样例并在临时目录生成其余输入
 
 
 

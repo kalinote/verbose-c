@@ -1,6 +1,7 @@
 import bisect
 from verbose_c.compiler.opcode import Instruction, Opcode
 from verbose_c.error import VBCRuntimeError, TracebackFrame
+from verbose_c.fs.source_manager import SourceManager
 from verbose_c.object.class_ import VBCClass
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.numeric import cast_numeric
@@ -130,15 +131,11 @@ class VBCVirtualMachine:
 
         if self._current_function:
             line = self._find_line_from_pc(self._current_function, self._pc)
-            source_line_context = []
-            if 1 <= line <= len(self._source_code):
-                source_line_context = [self._source_code[line - 1].strip()]
             traceback_frames.append(
                 TracebackFrame(
                     filepath=self._current_function.source_path or "<unknown>",
                     line=line,
                     scope_name=self._current_function.name,
-                    source_line_context=source_line_context,
                 )
             )
 
@@ -151,20 +148,22 @@ class VBCVirtualMachine:
 
             if isinstance(func, VBCFunction):
                 line = self._find_line_from_pc(func, pc)
-                source_line_context = []
-                if 1 <= line <= len(self._source_code):
-                    source_line_context = [self._source_code[line - 1].strip()]
                 traceback_frames.append(
                     TracebackFrame(
                         filepath=func.source_path or "<unknown>",
                         line=line,
                         scope_name=func.name,
-                        source_line_context=source_line_context
                     )
                 )
         
         # Python 的 traceback 是从调用者到被调用者，所以我们需要反转列表
         traceback_frames.reverse()
+        source_manager = SourceManager()
+        for frame in traceback_frames:
+            context = source_manager.get_context(frame.filepath, frame.line)
+            if not context and frame.filepath == self._source_path and 1 <= frame.line <= len(self._source_code):
+                context = [(frame.line, self._source_code[frame.line - 1])]
+            frame.source_line_context = [f"{number} | {source.expandtabs(4)}" for number, source in context]
         
         # 获取原始异常的类型和消息
         error_type_name = type(e).__name__
@@ -222,6 +221,7 @@ class VBCVirtualMachine:
         self._running = True
         self._exit_code = 0
         self._source_code = source_code
+        self._source_path = source_path
         from verbose_c.vm.builtins_functions.system_runtime import SystemRuntime
         standard_io = SystemRuntime.instance()._standard_io
         if standard_io is not None:

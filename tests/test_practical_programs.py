@@ -95,11 +95,6 @@ def test_practical_program_execution(compiled_programs, request, filename, data,
             encoding="utf-8",
         )
         assert completed.returncode == status, (backend, output, diagnostic)
-        if status == 1 and backend != "EXE":
-            # VM 的运行时异常沿用 CLI 跟踪输出，独立 exe 将诊断写入标准错误。
-            output, marker, diagnostic = output.partition("错误跟踪:")
-            assert marker, (backend, completed.stdout.decode("utf-8"))
-            assert completed.stderr == b"", (backend, completed.stderr.decode("utf-8"))
         assert output.encode("utf-8") == expected.encode("utf-8"), (backend, output)
         if error:
             assert error in diagnostic, (backend, diagnostic)
@@ -115,8 +110,9 @@ def test_vm_inventory_rejected_by_native(compiled_programs):
     completed = subprocess.run([sys.executable, "-m", "verbose_c.cli", str(source), f"-O{level}", "--emit-exe", str(executable)],
                                input=b"", capture_output=True, timeout=30, cwd=PROJECT_ROOT,
                                env={**os.environ, "PYTHONUTF8": "1"})
-    output = completed.stdout.decode("utf-8")
+    output = completed.stderr.decode("utf-8")
     assert completed.returncode == 1
+    assert completed.stdout == b""
     assert str(source) in output and "不支持" in output
     assert "array" in output or "数组" in output
     assert not executable.exists()

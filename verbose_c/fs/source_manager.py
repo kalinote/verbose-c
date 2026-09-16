@@ -48,6 +48,26 @@ class SourceManager:
         """检查文件是否存在。"""
         return os.path.exists(self.normalize_path(path))
 
+    def get_context(self, path: str, line: int | None, radius: int = 2) -> list[tuple[int, str]]:
+        """读取诊断上下文；源码缺失或不可读时保留错误本身。
+
+        Args:
+            path: 已知的源码路径。
+            line: 从 1 开始的错误行号，未知时允许为空。
+            radius: 错误行前后的上下文行数。
+
+        Returns:
+            带原始行号的源码行，无法读取时返回空列表。
+        """
+        if line is None or line < 1:
+            return []
+        try:
+            count = self.line_count(path)
+            return [(number, self.get_line(path, number))
+                    for number in range(max(1, line - radius), min(count, line + radius) + 1)]
+        except (OSError, UnicodeError):
+            return []
+
     def resolve_include(self, include_name: str, from_path: str) -> str:
         """将 #include 相对路径解析为绝对路径。"""
         base_dir = os.path.dirname(self.normalize_path(from_path))

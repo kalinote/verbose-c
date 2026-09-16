@@ -37,8 +37,9 @@ def test_cli_rejects_corrupted_bytecode(tmp_path):
     loaded = subprocess.run([sys.executable, "-m", "verbose_c.cli", str(artifact)],
                             capture_output=True, timeout=20, env={**os.environ, "PYTHONUTF8": "1"})
     assert loaded.returncode == 1
-    assert "截断" in loaded.stdout.decode("utf-8")
-    assert str(artifact) in loaded.stdout.decode("utf-8")
+    assert loaded.stdout == b""
+    assert "截断" in loaded.stderr.decode("utf-8")
+    assert str(artifact) in loaded.stderr.decode("utf-8")
 
 
 @pytest.mark.parametrize("success,status", [(True, 0), (False, 1)])

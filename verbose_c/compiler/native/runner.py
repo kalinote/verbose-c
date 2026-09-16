@@ -23,6 +23,7 @@ from verbose_c.compiler.native.relocations import (
 )
 from verbose_c.compiler.native.target import NativeTarget
 from verbose_c.object.numeric import NATIVE_NUMERIC_ERRORS
+from verbose_c.error import DiagnosticEntry, DiagnosticReport
 
 
 MEM_COMMIT = 0x1000
@@ -1097,10 +1098,15 @@ def _run_code_in_memory(code: bytes, entry_offset: int, runtime: dict | None = N
         if status.value >= 2:
             from verbose_c.standard_io import IO_ERRORS
             if status.value in IO_ERRORS:
-                raise NativeCodegenError(IO_ERRORS[status.value])
+                message = IO_ERRORS[status.value]
+                raise NativeCodegenError(message, report=DiagnosticReport("I/O 错误", [DiagnosticEntry(message)]))
             message = NATIVE_NUMERIC_ERRORS.get(status.value, f"未知数值错误 {status.value}")
             location = f"，在 {value} 行" if value > 0 else ""
-            raise NativeCodegenError(f"native {message}{location}")
+            line = value if value > 0 else None
+            raise NativeCodegenError(
+                f"native {message}{location}", line=line,
+                report=DiagnosticReport("运行时错误", [DiagnosticEntry(message, line=line)]),
+            )
         return value
     finally:
         kernel32.VirtualFree(address, 0, MEM_RELEASE)

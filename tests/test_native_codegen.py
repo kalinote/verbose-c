@@ -11350,7 +11350,7 @@ def test_cli_emit_asm_reports_native_codegen_failure(tmp_path, monkeypatch, caps
     with pytest.raises(SystemExit) as exc_info:
         cli.main()
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert exc_info.value.code == 1
     assert f"编译错误: 文件 {source_path}" in output
     assert "native MVP 暂不支持特性 'array'" in output
@@ -11388,7 +11388,7 @@ def test_cli_emit_native_bin_reports_native_codegen_failure(tmp_path, monkeypatc
     with pytest.raises(SystemExit) as exc_info:
         cli.main()
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert exc_info.value.code == 1
     assert f"编译错误: 文件 {source_path}" in output
     assert "native MVP 暂不支持特性 'array'" in output
@@ -11426,7 +11426,7 @@ def test_cli_emit_native_map_reports_native_codegen_failure(tmp_path, monkeypatc
     with pytest.raises(SystemExit) as exc_info:
         cli.main()
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert exc_info.value.code == 1
     assert f"编译错误: 文件 {source_path}" in output
     assert "native MVP 暂不支持特性 'array'" in output
@@ -11464,7 +11464,7 @@ def test_cli_emit_native_text_bin_reports_native_codegen_failure(tmp_path, monke
     with pytest.raises(SystemExit) as exc_info:
         cli.main()
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert exc_info.value.code == 1
     assert f"编译错误: 文件 {source_path}" in output
     assert "native MVP 暂不支持特性 'array'" in output

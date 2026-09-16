@@ -1,3 +1,5 @@
+import re
+
 from verbose_c.compiler.enum import CompilerPass, ScopeType
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.compiler.opcode_generator_visitor import OpcodeGenerator
@@ -9,7 +11,7 @@ from verbose_c.object.t_null import VBCNull
 from verbose_c.parser.parser.ast.node import ASTNode
 from verbose_c.typing.types import IntegerType
 from verbose_c.vm.builtins_functions import BUILTIN_FUNCTION_SIGNATURES, BUILTIN_CONSTANTS
-from verbose_c.error import VBCCompileError
+from verbose_c.error import DiagnosticEntry, DiagnosticReport, VBCCompileError
 
 
 class Compiler:
@@ -92,7 +94,17 @@ class Compiler:
             if self._type_checker.errors:
                 # 将所有收集到的错误信息合并，并抛出异常
                 combined_error_message = "\n".join(self._type_checker.errors)
-                raise VBCCompileError(combined_error_message, filepath=self._source_path, warnings=self._type_checker.warnings)
+                entries = []
+                for message in self._type_checker.errors:
+                    location = re.search(r", 在 (\d+) 行$", message)
+                    entries.append(DiagnosticEntry(
+                        message[:location.start()] if location else message,
+                        line=int(location.group(1)) if location else None,
+                    ))
+                raise VBCCompileError(
+                    combined_error_message, filepath=self._source_path, warnings=self._type_checker.warnings,
+                    report=DiagnosticReport("类型检查错误", entries),
+                )
         
         should_generate = run_all or CompilerPass.GENERATE_CODE in passes
         should_optimize_ast = (

@@ -3,7 +3,7 @@ import re
 import time
 from typing import Any
 
-from verbose_c.error import VBCRuntimeError
+from verbose_c.error.format import format_error
 from verbose_c.vm.memory import MemoryManager
 
 
@@ -99,20 +99,6 @@ def format_parser_generation_markdown(report, heading_level: int = 2, include_de
 
     lines.append("")
     return "\n".join(lines)
-
-
-def format_runtime_error(error: VBCRuntimeError) -> None:
-    from verbose_c.error.exceptions import VBCIOError
-    if isinstance(error, VBCIOError):
-        import sys
-        print(error.message, file=sys.stderr)
-        return
-    print("错误跟踪:")
-    for frame in error.traceback:
-        print(f'  在文件 "{frame.filepath}" 中, 第 {frame.line} 行, {frame.scope_name} 中:')
-        for source in frame.source_line_context or []:
-            print(f"    {source}")
-    print(error.message)
 
 
 class VmDebugLogCollector(list):
@@ -308,12 +294,11 @@ class PipelineRecorder:
             f.write(entry + "\n")
         self._section_body += entry + "\n"
 
-    def on_error(self, error: Exception) -> None:
+    def on_error(self, error: Exception, *, diagnostic: str | None = None) -> None:
+        """只记录统一诊断正文，不负责终端输出。"""
         if self._error_recorded:
             return
         self._error_recorded = True
-        if isinstance(error, VBCRuntimeError):
-            format_runtime_error(error)
         if not self.dump_path:
             return
         if self._vm_section_open:
@@ -322,7 +307,7 @@ class PipelineRecorder:
             self._section_body += "```\n"
             self._vm_section_open = False
         content = "## 错误信息\n\n```text\n"
-        content += f"{type(error).__name__}: {error}\n"
+        content += (diagnostic if diagnostic is not None else format_error(error)) + "\n"
         content += "```\n\n"
         self._append_section("错误信息", content)
 

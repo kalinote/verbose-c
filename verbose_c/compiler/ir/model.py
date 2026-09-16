@@ -6,6 +6,7 @@ from verbose_c.error import VBCCompileError
 
 class IRLoweringError(VBCCompileError):
     """操作码 lowering 到 IR 失败。"""
+    category = "后端错误"
 
 
 @dataclass(frozen=True)

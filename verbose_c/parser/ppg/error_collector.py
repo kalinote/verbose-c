@@ -1,6 +1,8 @@
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Set
 from dataclasses import dataclass
-from verbose_c.parser.lexer.enum import Operator, TokenType
+from verbose_c.error import DiagnosticEntry, DiagnosticReport
+from verbose_c.error.format import format_report
+from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.token import Token
 from verbose_c.parser.lexer.tokenizer import Mark, Tokenizer
 
@@ -61,15 +63,6 @@ class ErrorCollector:
         
         self.errors.append(error)
     
-    def _get_context(self, path: str, line: int, column: int) -> List[Tuple[int, str]]:
-        """获取错误位置的上下文"""
-        source_manager = self.tokenizer.source_manager
-        line_count = source_manager.line_count(path)
-        context_lines = []
-        for i in range(max(1, line - 2), min(line_count, line + 2) + 1):
-            context_lines.append((i, self.tokenizer.get_line_source(path, i)))
-        return context_lines
-    
     def get_best_error(self) -> Optional[ParseError]:
         """获取最远位置的错误"""
         if not self.errors:
@@ -77,10 +70,14 @@ class ErrorCollector:
             
         return max(self.errors, key=lambda e: e.position)
     
-    def format_error_report(self) -> str:
-        """格式化错误报告"""
+    def get_report(self) -> DiagnosticReport | None:
+        """收集最远失败位置的结构化诊断。
+
+        Returns:
+            包含实际文件、源码上下文及规则栈的报告；无错误时返回 None。
+        """
         if not self.errors:
-            return "没有发现解析错误"
+            return None
         
         # 从最远的位置开始，查找第一个有效token作为错误报告的目标
         peek_index = self.furthest_position
@@ -93,38 +90,31 @@ class ErrorCollector:
             peek_index += 1
         
         if actual_token_at_furthest is None:
-            # 如果找不到有效token，就用peek的结果
-            actual_token_at_furthest = self.tokenizer.peek()
+            actual_token_at_furthest = self.tokenizer.tokens[-1]
 
-        line = actual_token_at_furthest.line or 0
-        column = actual_token_at_furthest.column or 0
+        line = actual_token_at_furthest.line
+        column = actual_token_at_furthest.column
         path = actual_token_at_furthest.path or self.tokenizer.lexer.filename
-
-        context_lines_with_numbers = self._get_context(path, line, column)
-
-        lines = []
-        lines.append(f"错误位置: 第 {line} 行，第 {column} 列，位于 {path} 文件")
-        
+        actual = "EOF" if actual_token_at_furthest.type == TokenType.END else actual_token_at_furthest.string
         if self.furthest_expected:
-            expected_set = self.furthest_expected
-            expected_str = ', '.join(sorted(expected_set))
-
-            lines.append(f"错误: 期望 {expected_str} 其中之一, 实际是 '{actual_token_at_furthest.string}'")
+            message = f"期望 {', '.join(sorted(self.furthest_expected))} 其中之一, 实际是 {actual!r}"
         else:
-            lines.append(f"错误: 在 '{actual_token_at_furthest.string}' 处遇到未知语法错误")
-
-        if context_lines_with_numbers:
-            lines.append("\n错误上下文:")
-            max_lineno_width = len(str(context_lines_with_numbers[-1][0]))
-            for lineno, line_content in context_lines_with_numbers:
-                lines.append(f"  {lineno:>{max_lineno_width}} | {line_content}")
-                if lineno == line:
-                    padding = 2 + max_lineno_width + 3 + column
-                    indicator = ' ' * padding + '^' * len(actual_token_at_furthest.string)
-                    lines.append(indicator)
-
+            message = f"在 {actual!r} 处遇到未知语法错误"
+        context = self.tokenizer.source_manager.get_context(path, line)
+        if (actual_token_at_furthest.type == TokenType.END and column == 0
+                and line is not None and self.tokenizer.lexer.source.endswith("\n")):
+            # SourceManager 不保存末尾空行，EOF 指示仍需落在实际终止位置。
+            context.append((line, ""))
         best_error = self.get_best_error()
-        if best_error and best_error.rule_stack:
-            lines.append(f"\n语法解析规则调用栈:\n {' -> '.join(best_error.rule_stack)}")
+        return DiagnosticReport("解析错误", [DiagnosticEntry(
+            message, filepath=path, line=line, column=column,
+            source_context=context,
+            highlight_length=1 if actual_token_at_furthest.type == TokenType.END else max(1, len(actual)),
+            expected_tokens=sorted(self.furthest_expected), actual_token=actual,
+            rule_stack=best_error.rule_stack.copy() if best_error else [],
+        )])
 
-        return '\n'.join(lines)
+    def format_error_report(self) -> str:
+        """保留字符串接口，正文统一交给错误包渲染。"""
+        report = self.get_report()
+        return format_report(report) if report is not None else "没有发现解析错误"

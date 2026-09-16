@@ -2,6 +2,7 @@ import re
 from collections.abc import Iterator
 from verbose_c.parser.lexer.token import Token
 from verbose_c.parser.lexer.enum import TokenType
+from verbose_c.error import DiagnosticEntry, DiagnosticReport, VBCCompileError
 import os
 
 
@@ -61,9 +62,30 @@ class Lexer:
             patterns = [f"(?P<{t.name}>{pattern})" for t, pattern in self.GRAMMAR_PATTERNS.items()]
         self.master_pattern = re.compile("|".join(patterns), re.UNICODE)
 
-    def tokenize(self):
-        tokens = self._tokenize()
-        self.tokens = list(self._apply_grammar_layout(tokens) if self.grammar_mode else tokens)
+    def tokenize(self, *, compile_errors: bool = False):
+        """扫描文本，可在源码编译边界转换词法异常。
+
+        Args:
+            compile_errors: 将具有词法位置的 SyntaxError 转换为编译诊断。
+
+        Returns:
+            包含结束标记的 Token 列表。
+        """
+        try:
+            tokens = self._tokenize()
+            self.tokens = list(self._apply_grammar_layout(tokens) if self.grammar_mode else tokens)
+        except SyntaxError as error:
+            if not compile_errors or error.lineno is None:
+                raise
+            entry = DiagnosticEntry(
+                error.msg, filepath=error.filename, line=error.lineno,
+                column=error.offset - 1 if error.offset is not None else None,
+                source_context=[(error.lineno, error.text.rstrip("\r\n"))] if error.text else [],
+            )
+            raise VBCCompileError(
+                error.msg, line=error.lineno, filepath=error.filename,
+                report=DiagnosticReport("词法错误", [entry]),
+            ) from error
         return self.tokens
 
     def _tokenize(self):
@@ -90,7 +112,10 @@ class Lexer:
                          self.source.splitlines(keepends=True)[token_start_line - 1]),
                     )
                 raise SyntaxError(
-                    f"非法字符 {value!r} 在行 {token_start_line}, 列 {token_start_column}")
+                    f"非法字符 {value!r} 在行 {token_start_line}, 列 {token_start_column}",
+                    (self.filename, token_start_line, token_start_column + 1,
+                     self.source.splitlines(keepends=True)[token_start_line - 1]),
+                )
 
             tok_type = TokenType[kind]
 

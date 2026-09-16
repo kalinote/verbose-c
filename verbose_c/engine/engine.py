@@ -1,6 +1,7 @@
 import os
 import importlib.util
 import subprocess
+import sys
 import tempfile
 import time
 import traceback
@@ -15,7 +16,8 @@ from verbose_c.parser.parser.ast.node import ASTNode
 from verbose_c.compiler.compiler import Compiler
 from verbose_c.parser.ppg.build import build_python_parser_and_generator
 from verbose_c.parser.ppg.validator import validate_grammar
-from verbose_c.error import VBCCompileError, VBCRuntimeError
+from verbose_c.error import VBCCompileError, VBCIOError, VBCRuntimeError
+from verbose_c.error.format import format_error
 from verbose_c.fs.artifact_store import ArtifactStore
 from verbose_c.fs.incremental_compile import IncrementalCompiler
 from verbose_c.engine.recorder import PipelineRecorder, create_dump_path
@@ -232,7 +234,10 @@ def compile_module(
     ast_node = parser.start()
     if ast_node is None:
         error_report = parser.get_error_report() if parser.has_errors() else "未知的解析错误"
-        raise VBCCompileError(f"在文件 {file_path} 中解析失败:\n{error_report}", filepath=file_path)
+        report = parser.error_collector.get_report()
+        raise VBCCompileError(
+            f"在文件 {file_path} 中解析失败:\n{error_report}", filepath=file_path, report=report,
+        )
 
     context.ast_node = ast_node
     if recorder:
@@ -357,7 +362,16 @@ def _run_native_memory_output(
     try:
         exit_code = run_native_program_in_memory(compilation_output.native_code_program)
     except NativeCodegenError as error:
-        raise VBCCompileError(str(error), filepath=filename) from error
+        if error.report.category in {"运行时错误", "I/O 错误"}:
+            for entry in error.report.entries:
+                if entry.filepath is None:
+                    entry.filepath = filename
+            error_class = VBCIOError if error.report.category == "I/O 错误" else VBCRuntimeError
+            runtime_error = error_class(str(error), report=error.report)
+            runtime_error.filepath = filename
+            runtime_error.line = error.line
+            raise runtime_error from error
+        raise VBCCompileError(str(error), line=error.line, filepath=filename, report=error.report) from error
     if native_result_path is not None:
         result_dir = os.path.dirname(os.path.abspath(native_result_path))
         if result_dir:
@@ -615,7 +629,7 @@ def _run_file_pipeline(
             recorder.on_compiled(compilation_output)
 
         if run_native_memory:
-            exit_code = _run_native_memory_output(compilation_output, filename, native_result_path)
+            exit_code = _run_native_memory_output(compilation_output, source_path, native_result_path)
         if run_native_pe:
             exit_code = _run_native_pe_output(compilation_output, filename, native_result_path)
         export_report = _emit_native_outputs(
@@ -636,26 +650,27 @@ def _run_file_pipeline(
     except VBCRuntimeError as e:
         captured_error = e
         exit_code = 1
-        recorder.on_error(e)
+        diagnostic = format_error(e)
+        print(diagnostic, file=sys.stderr)
+        recorder.on_error(e, diagnostic=diagnostic)
     except VBCCompileError as e:
         if e.filepath is None:
             e.filepath = source_path or filename
         captured_error = e
         exit_code = 1
-        print(f"编译错误: 文件 {e.filepath}")
-        for error_line in e.message.split('\n'):
-            print(f"    {error_line}")
+        diagnostic = format_error(e)
+        print(diagnostic, file=sys.stderr)
         compile_warnings = e.warnings or []
         if show_warnings and compile_warnings:
             for warning_line in compile_warnings:
                 print(f"警告: {warning_line}")
-        recorder.on_error(e)
+        recorder.on_error(e, diagnostic=diagnostic)
     except Exception as e:
         captured_error = e
         exit_code = 1
-        print(f"发生了一个意外的内部错误: {e}")
-        traceback.print_exc()
-        recorder.on_error(e)
+        diagnostic = format_error(e)
+        print(diagnostic, file=sys.stderr)
+        recorder.on_error(e, diagnostic=diagnostic)
     finally:
         if vm is not None:
             recorder.on_memory(vm.memory)
@@ -742,5 +757,5 @@ def _read_source_lines(source_path: str | None) -> list[str]:
     try:
         with open(source_path, "r", encoding="utf-8-sig") as file:
             return file.read().split("\n")
-    except OSError:
+    except (OSError, UnicodeError):
         return []

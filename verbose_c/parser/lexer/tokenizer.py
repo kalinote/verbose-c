@@ -1,6 +1,7 @@
 from typing import List
 
 from verbose_c.fs.source_manager import SourceManager
+from verbose_c.error import VBCCompileError
 from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.token import Token
 from verbose_c.parser.lexer.lexer import Lexer
@@ -17,9 +18,14 @@ class Tokenizer:
         if not grammar_mode:
             self._ignored_types.add(TokenType.NEWLINE)
         abs_path = source_manager.normalize_path(filename)
-        source = source_manager.read(abs_path)
+        try:
+            source = source_manager.read(abs_path)
+        except (OSError, UnicodeError) as error:
+            if grammar_mode:
+                raise
+            raise VBCCompileError(f"无法读取源码文件: {error}", filepath=abs_path) from error
         self.lexer: Lexer = Lexer(abs_path, source, grammar_mode=grammar_mode)
-        self.tokens: List[Token] = self.lexer.tokenize()
+        self.tokens: List[Token] = self.lexer.tokenize(compile_errors=not grammar_mode)
         self._total_tokens: int = len(self.tokens)
         self._index: int = 0
         self._marks: List[int] = []

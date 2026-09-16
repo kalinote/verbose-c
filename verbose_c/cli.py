@@ -282,9 +282,6 @@ def main():
         (args.emit, "--emit"),
     ]
 
-    if not args.compile_parser and args.filename and not os.path.exists(args.filename):
-        print(f"错误: 文件 '{args.filename}' 不存在")
-        sys.exit(1)
     if args.check_native_map and args.check_native_text_map:
         print("错误: --check-native-map 不能与 --check-native-text-map 同时使用")
         sys.exit(1)

@@ -361,10 +361,13 @@ class Preprocessor:
 
         macro_type = MacroDefinitionType.FUNCTION if params_str else MacroDefinitionType.OBJECT
         params = [p.strip() for p in params_str.strip()[1:-1].split(",") if p.strip()] if params_str else []
-        body_tokens = [
-            tok for tok in Lexer(os.path.abspath(token.path or ""), body, macro_body=True).tokenize()
-            if tok.type != TokenType.END
-        ]
+        try:
+            body_tokens = [
+                tok for tok in Lexer(os.path.abspath(token.path or ""), body, macro_body=True).tokenize()
+                if tok.type != TokenType.END
+            ]
+        except SyntaxError as error:
+            self._error(f"宏定义词法错误: {error.msg}", token)
         validate_macro_body(macro_type, params, body_tokens, token)
         self.macro_register[name] = MacroDefinition(
             macro_type,
@@ -398,7 +401,7 @@ class Preprocessor:
         self._included_files.add(abs_path)
         try:
             content = self.source_manager.read(abs_path)
-            included_tokens = Lexer(abs_path, content).tokenize()
+            included_tokens = Lexer(abs_path, content).tokenize(compile_errors=True)
             processed = self.process_tokens(included_tokens)
             return [t for t in processed if t.type != TokenType.END]
         finally:

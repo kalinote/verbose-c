@@ -81,6 +81,14 @@ python -m verbose_c.cli example.vbc --dump ir --compile-only
 
 `--dump` 支持 `parser`、`tokens`、`preprocess`、`ast`、`opcode`、`ir`、`machine`、`optimize`、`const`、`label`、`vm`、`memory`、`all`。
 
+### 错误诊断与输出通道
+
+源码编译、字节码加载、VM 和 Native 内存执行的错误诊断统一写入 **stderr**，失败退出码为 `1`；正常 `return` / `exit` 保留程序返回值。默认关闭日志且没有警告时，stdout 仅包含程序输出。警告和显式开启的日志沿用原有通道，`--no-warn` 不会屏蔽错误。
+
+解析错误使用树形正文，包含实际出错的 include 文件、行列、源码指示及规则栈；类型错误按原顺序展示，运行时错误保留已有调用栈。终端列号从 `1` 开始。加载 `.vbb` 失败时定位产物文件，执行失败时使用内嵌源码位置；源码不可读时省略上下文。开启 `--dump` 后，「错误信息」节保存与终端相同的诊断正文，内部异常同时保留 Python traceback。
+
+独立 exe 沿用 Native 运行时诊断，错误原因、stderr 通道和失败退出码与 VM 一致，VM 可以附带更完整的调用栈。
+
 ### 统一导出 Native 产物
 ```bash
 python -m verbose_c.cli example.vbc --compile-only --emit native-bin,native-map,native-pe --emit-dir build/native

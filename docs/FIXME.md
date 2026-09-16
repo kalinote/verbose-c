@@ -559,7 +559,7 @@ docs/NATIVE_PE_MVP.md
 本清单可在满足以下条件后关闭：
 
 - `_populate_backend_outputs()` 不再吞掉非预期内部异常。
-- P2-5 文档准确描述最小 PE 已完成、正式 runtime/AOT 未完成。
+- P2-5 文档准确描述 Windows x64 稳定子集的正式 runtime/AOT 已完成，数组、指针等扩展能力仍待实现。
 - `codegen.py` 不再承载 model、map validator 和 listing formatter 的全部职责。
 - native 模块不再跨文件导入私有符号。
 - rel32 和类型兼容规则只有一个定义源。
