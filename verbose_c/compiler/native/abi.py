@@ -7,6 +7,11 @@ SCALAR_VALUE_TYPES = {"int64", "bool64", "string", *FLOAT_VALUE_TYPES}
 SUPPORTED_RETURN_TYPES = SCALAR_VALUE_TYPES | {"void"}
 SUPPORTED_VALUE_TYPES = SCALAR_VALUE_TYPES
 SUPPORTED_ARGUMENT_REGISTERS = {"RCX", "RDX", "R8", "R9"}
+ARRAY_ELEMENT_TYPES = {
+    "CHAR": "int64", "SHORT": "int64", "INT": "int64", "LONG": "int64", "LONGLONG": "int64",
+    "BOOL": "bool64", "FLOAT": "float32", "DOUBLE": "float64",
+}
+MAX_ARRAY_FRAME_SIZE = 4096
 
 @dataclass(frozen=True)
 class ArgumentLocation:
@@ -48,11 +53,12 @@ class StackFrameLayout:
     local_slots: list[object] = field(default_factory=list)
     temp_slots: list[object] = field(default_factory=list)
     spill_slots: list[object] = field(default_factory=list)
+    array_slots: list[object] = field(default_factory=list)
 
     @property
     def frame_size(self) -> int:
         """返回栈帧大小。"""
-        return (len(self.global_slots) + len(self.local_slots) + len(self.temp_slots) + len(self.spill_slots)) * self.word_size
+        return (len(self.global_slots) + len(self.local_slots) + len(self.temp_slots) + len(self.spill_slots)) * self.word_size + sum(slot.size for slot in self.array_slots)
 
 
 WINDOWS_X64_ABI = WindowsX64ABI()

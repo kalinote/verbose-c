@@ -333,7 +333,43 @@ class OpcodeGenerator(VisitorBase):
 
         raise RuntimeError(f"不支持取地址的左值: {type(target).__name__}")
 
-    def _emit_load_lvalue(self, target: ASTNode) -> None:
+    def _prepare_array_lvalue(self, target: ASTNode) -> tuple[int, int] | None:
+        """保存数组更新目标的基址与下标，供读取和写回共同使用。
+
+        Args:
+            target: 复合赋值或自增减的左值。
+
+        Returns:
+            不与现有局部变量重叠的基址、下标临时槽；其他左值返回 None。
+        """
+        if not isinstance(target, SubscriptNode) or self._subscript_operand(target) is None:
+            return None
+        root = self.symbol_table
+        while root._parent is not None and root._scope_type != ScopeType.FUNCTION:
+            root = root._parent
+        scopes = [root]
+        for scope in scopes:
+            scopes.extend(child for child in scope._nested_scopes if child._scope_type == ScopeType.BLOCK)
+        address = max(scope._next_local_address for scope in scopes)
+        # 临时槽位于所有块作用域变量之后，也为后续 switch 临时槽预留空间。
+        for scope in scopes:
+            scope._next_local_address = address + 2
+        self._emit_subscript_base(target.base)
+        self._emit(Opcode.STORE_LOCAL_VAR, address)
+        self.visit(target.index)
+        self._emit(Opcode.STORE_LOCAL_VAR, address + 1)
+        return address, address + 1
+
+    def _emit_array_operands(self, target: SubscriptNode, prepared: tuple[int, int] | None) -> None:
+        """压入数组基址与下标，更新表达式优先使用已保存的目标。"""
+        if prepared is None:
+            self._emit_subscript_base(target.base)
+            self.visit(target.index)
+        else:
+            for address in prepared:
+                self._emit(Opcode.LOAD_LOCAL_VAR, address)
+
+    def _emit_load_lvalue(self, target: ASTNode, prepared: tuple[int, int] | None = None) -> None:
         """将左值当前值压栈：NameNode / *p / obj.field"""
         if isinstance(target, NameNode):
             symbol = self.symbol_table.lookup_value(target.name)
@@ -361,8 +397,7 @@ class OpcodeGenerator(VisitorBase):
             operand = self._subscript_operand(target)
             if operand is not None:
                 size, elem_enum = operand
-                self._emit_subscript_base(target.base)
-                self.visit(target.index)
+                self._emit_array_operands(target, prepared)
                 self._emit(Opcode.LOAD_INDEX, (size, elem_enum))
             else:
                 self._emit_lvalue_address(target)
@@ -370,7 +405,7 @@ class OpcodeGenerator(VisitorBase):
         else:
             raise RuntimeError(f"不支持的左值读取目标: {type(target).__name__}")
 
-    def _emit_store_lvalue(self, target: ASTNode) -> None:
+    def _emit_store_lvalue(self, target: ASTNode, prepared: tuple[int, int] | None = None) -> None:
         """弹出栈顶值写入左值，不保留表达式结果。"""
         if isinstance(target, NameNode):
             symbol = self.symbol_table.lookup_value(target.name)
@@ -401,8 +436,7 @@ class OpcodeGenerator(VisitorBase):
             operand = self._subscript_operand(target)
             if operand is not None:
                 size, elem_enum = operand
-                self._emit_subscript_base(target.base)
-                self.visit(target.index)
+                self._emit_array_operands(target, prepared)
                 self._emit(Opcode.STORE_INDEX, (size, elem_enum))
                 self._emit(Opcode.POP)
             else:
@@ -412,7 +446,7 @@ class OpcodeGenerator(VisitorBase):
         else:
             raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
 
-    def _emit_store_lvalue_keep(self, target: ASTNode) -> None:
+    def _emit_store_lvalue_keep(self, target: ASTNode, prepared: tuple[int, int] | None = None) -> None:
         """写入左值并保留刚写入的值在栈顶。"""
         if isinstance(target, NameNode):
             self._emit(Opcode.DUP)
@@ -441,8 +475,7 @@ class OpcodeGenerator(VisitorBase):
             operand = self._subscript_operand(target)
             if operand is not None:
                 size, elem_enum = operand
-                self._emit_subscript_base(target.base)
-                self.visit(target.index)
+                self._emit_array_operands(target, prepared)
                 self._emit(Opcode.STORE_INDEX, (size, elem_enum))
             else:
                 self._emit_lvalue_address(target)
@@ -812,7 +845,8 @@ class OpcodeGenerator(VisitorBase):
         if node.op not in op_to_opcode:
             raise RuntimeError(f"不支持的复合赋值运算符: {node.op}")
 
-        self._emit_load_lvalue(node.left)
+        prepared = self._prepare_array_lvalue(node.left)
+        self._emit_load_lvalue(node.left, prepared)
         self._emit_implicit_cast_if_needed(node.left)
         self.visit(node.right)
         self._emit_implicit_cast_if_needed(node.right)
@@ -826,7 +860,7 @@ class OpcodeGenerator(VisitorBase):
         store_kind = self._runtime_type_enum_from_type(getattr(node, "_compound_cast_target", None))
         if store_kind is not None:
             self._emit(Opcode.CAST, store_kind)
-        self._emit_store_lvalue_keep(node.left)
+        self._emit_store_lvalue_keep(node.left, prepared)
 
     def visit_UpdateExprNode(self, node: UpdateExprNode):
         base = node.base
@@ -840,7 +874,8 @@ class OpcodeGenerator(VisitorBase):
             )
         )
 
-        self._emit_load_lvalue(base)
+        prepared = self._prepare_array_lvalue(base)
+        self._emit_load_lvalue(base, prepared)
         if not node.is_prefix:
             self._emit(Opcode.DUP)
         if numeric_kind is not None:
@@ -850,9 +885,9 @@ class OpcodeGenerator(VisitorBase):
         if numeric_kind is not None:
             self._emit(Opcode.CAST, base_type.kind)
         if node.is_prefix:
-            self._emit_store_lvalue_keep(base)
+            self._emit_store_lvalue_keep(base, prepared)
         else:
-            self._emit_store_lvalue(base)
+            self._emit_store_lvalue(base, prepared)
 
     def visit_ExprStmtNode(self, node: ExprStmtNode):
         self.visit(node.expr)

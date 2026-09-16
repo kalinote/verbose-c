@@ -23,6 +23,17 @@ class StackSlot:
 
 
 @dataclass(frozen=True)
+class ArraySlot:
+    """函数内数组的独立存储声明，地址不能作为标量使用。"""
+
+    index: int
+    length: int
+    element_type: str
+    size: int
+    kind: str = field(default="array", init=False)
+
+
+@dataclass(frozen=True)
 class MachineOperand:
     """Machine IR 操作数。"""
 

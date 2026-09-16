@@ -16,6 +16,8 @@ from verbose_c.compiler.native.model import (
     native_program_symbols,
     native_symbol_function,
     native_value_location,
+    native_stack_slot_map,
+    validate_native_array_layout,
 )
 from verbose_c.compiler.native.pe_layout import (
     PE_COFF_HEADER_SIZE,
@@ -238,6 +240,8 @@ _MAP_STACK_SLOT_FIELDS = {
     "name",
     "offset",
     "size",
+    "array_length",
+    "element_type",
 }
 
 
@@ -634,7 +638,7 @@ def _native_code_program_map(program: NativeCodeProgram) -> dict[str, object]:
                     "global_frame_role": function.register_allocation.global_frame_role,
                 },
                 "stack_slots": [
-                    {"name": slot.name, "offset": slot.offset, "size": slot.size}
+                    native_stack_slot_map(slot)
                     for slot in function.stack_slots
                 ],
                 "value_locations": [
@@ -1825,7 +1829,7 @@ def validate_native_code_map_bytes(code: bytes, metadata: dict[str, object]) -> 
                 raise NativeCodegenError(f"native 机器码 map 函数 {name} 栈槽 {slot_name} size 必须是整数")
             if slot_offset <= 0:
                 raise NativeCodegenError(f"native 机器码 map 函数 {name} 栈槽 {slot_name} offset 必须为正数")
-            if slot_size != 8:
+            if slot_size != 8 and not slot_name.startswith("array["):
                 raise NativeCodegenError(f"native 机器码 map 函数 {name} 栈槽 {slot_name} size 必须为 8，实际 {slot_size}")
             if slot_name.startswith("global[") and not owns_global_frame:
                 has_global_slots = True
@@ -2848,6 +2852,7 @@ def validate_native_code_map_bytes(code: bytes, metadata: dict[str, object]) -> 
     for function in functions:
         name = function["name"]
         stack_slots = function.get("stack_slots", [])
+        validate_native_array_layout(name, stack_slots, function["instructions"], function["frame_size"])
         expected_value_locations = [
             native_value_location(
                 name,

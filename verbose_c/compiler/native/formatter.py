@@ -63,6 +63,7 @@ def _format_stack_slots(function: MachineFunction) -> list[str]:
         *function.frame.local_slots,
         *function.frame.temp_slots,
         *function.frame.spill_slots,
+        *function.frame.array_slots,
     ]
     if not slots:
         lines.append("| `-` | `-` | `0` |\n")
@@ -116,6 +117,8 @@ def _format_operand(operand: MachineOperand | None) -> str:
         return f"%{operand.value.name}:{operand.type_hint}"
     if operand.kind == "slot":
         return f"{operand.value.kind}[{operand.value.index}]"
+    if operand.kind == "array":
+        return f"array[{operand.value.index}]:{operand.value.element_type}[{operand.value.length}]"
     if operand.kind == "imm":
         return f"#{operand.value}"
     if operand.kind == "symbol":

@@ -22,7 +22,7 @@ def compiled_programs(request, tmp_path_factory):
     """通过真实 CLI 编译样例，保留字节码、exe 和运行记录。
 
     每个优化等级使用独立目录；复制源码和 include 文件，避免写入样例目录。
-    VM 专属数组样例仅生成字节码，其余样例同时生成独立 exe。
+    所有样例同时生成字节码和独立 exe。
     """
     root = tmp_path_factory.mktemp(f"practical-O{request.param}")
     sources = root / "sources"
@@ -37,10 +37,7 @@ def compiled_programs(request, tmp_path_factory):
         name = source.stem.removeprefix("practical_")
         command = [sys.executable, "-m", "verbose_c.cli", str(source), f"-O{request.param}",
                    "-o", str(artifacts / f"{name}.vbb")]
-        if name == "vm_inventory":
-            command += ["--compile-only"]
-        else:
-            command += ["--emit-exe", str(artifacts / f"{name}.exe")]
+        command += ["--emit-exe", str(artifacts / f"{name}.exe")]
         compiled = subprocess.run(command, input=b"", capture_output=True, timeout=30,
                                   cwd=PROJECT_ROOT, env={**os.environ, "PYTHONUTF8": "1"})
         assert compiled.returncode == 0, (source.name, compiled.stdout.decode("utf-8"), compiled.stderr.decode("utf-8"))
@@ -79,12 +76,24 @@ def test_practical_program_execution(compiled_programs, request, filename, data,
         "VM": [sys.executable, "-m", "verbose_c.cli", str(root / "sources" / f"practical_{filename}.vbc"), f"-O{level}"],
         "字节码": [sys.executable, "-m", "verbose_c.cli", str(root / "artifacts" / f"{filename}.vbb")],
     }
-    if filename != "vm_inventory" and can_run_native_memory():
-        commands["EXE"] = [str(root / "artifacts" / f"{filename}.exe")]
+    if can_run_native_memory():
+        standalone = root / "standalone" / filename
+        standalone.mkdir(parents=True, exist_ok=True)
+        executable = standalone / f"{filename}.exe"
+        shutil.copy2(root / "artifacts" / executable.name, executable)
+        commands["EXE"] = [str(executable)]
+        if filename == "vm_inventory":
+            commands["Native 内存"] = [
+                sys.executable, "-c",
+                "import sys\nfrom verbose_c.engine.engine import run_source_file\n"
+                "result = run_source_file(sys.argv[1], optimize_level=int(sys.argv[2]), "
+                "run_native_memory=True, log_modules=set(), dump_modules=set())\nsys.exit(result.exit_code)",
+                str(root / "sources" / f"practical_{filename}.vbc"), str(level),
+            ]
     records = []
     for backend, command in commands.items():
         completed = subprocess.run(command, input=data.encode("utf-8"), capture_output=True, timeout=20,
-                                   cwd=PROJECT_ROOT if backend != "EXE" else root / "artifacts",
+                                   cwd=PROJECT_ROOT if backend != "EXE" else standalone,
                                    env={**os.environ, "PYTHONUTF8": "1"})
         output = completed.stdout.decode("utf-8")
         diagnostic = completed.stderr.decode("utf-8")
@@ -102,17 +111,8 @@ def test_practical_program_execution(compiled_programs, request, filename, data,
             assert completed.stderr == b"", (backend, diagnostic)
 
 
-def test_vm_inventory_rejected_by_native(compiled_programs):
-    """同一份库存源码可以运行于 VM，但 Native 编译必须明确报告数组限制。"""
+def test_inventory_native_executable_exists(compiled_programs):
+    """库存示例与其他正式样例一样生成可独立分发的 exe。"""
     root, level = compiled_programs
-    source = root / "sources" / "practical_vm_inventory.vbc"
     executable = root / "artifacts" / "vm_inventory.exe"
-    completed = subprocess.run([sys.executable, "-m", "verbose_c.cli", str(source), f"-O{level}", "--emit-exe", str(executable)],
-                               input=b"", capture_output=True, timeout=30, cwd=PROJECT_ROOT,
-                               env={**os.environ, "PYTHONUTF8": "1"})
-    output = completed.stderr.decode("utf-8")
-    assert completed.returncode == 1
-    assert completed.stdout == b""
-    assert str(source) in output and "不支持" in output
-    assert "array" in output or "数组" in output
-    assert not executable.exists()
+    assert executable.read_bytes().startswith(b"MZ")

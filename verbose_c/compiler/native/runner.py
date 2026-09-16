@@ -15,6 +15,8 @@ from verbose_c.compiler.native.model import (
     NativeCodeFunction,
     NativeCodeProgram,
     NativeRegisterAllocation,
+    native_stack_slot_map,
+    validate_native_array_layout,
     native_program_symbols as _native_program_symbols,
 )
 from verbose_c.compiler.native.relocations import (
@@ -207,6 +209,11 @@ def run_native_function_in_memory(function: NativeCodeFunction) -> int:
                     f"native 单函数内存执行函数 {function.name} rel32 目标与清单不一致: "
                     f"记录 {relocation.target}, 指令 {instruction_target}"
                 )
+    validate_native_array_layout(
+        function.name, [native_stack_slot_map(slot) for slot in function.stack_slots],
+        [{"source_op": item.source_op, "source_attrs": item.source_attrs, "bytes": item.code.hex()} for item in function.instructions],
+        function.frame_size,
+    )
     return _run_code_in_memory(function.code, 0)
 
 
@@ -468,7 +475,7 @@ def _validate_stack_frame_layout(program: NativeCodeProgram) -> None:
                     raise NativeCodegenError(f"native 内存执行函数 {name} 栈槽 {slot.name} {field} 必须是整数")
             if slot.offset <= 0:
                 raise NativeCodegenError(f"native 内存执行函数 {name} 栈槽 {slot.name} offset 必须为正数")
-            if slot.size != 8:
+            if slot.size != 8 and not slot.name.startswith("array["):
                 raise NativeCodegenError(f"native 内存执行函数 {name} 栈槽 {slot.name} size 必须为 8，实际 {slot.size}")
             if slot.name.startswith("global[") and not owns_global_frame:
                 if slot.offset in global_slot_offsets:
@@ -485,6 +492,11 @@ def _validate_stack_frame_layout(program: NativeCodeProgram) -> None:
             raise NativeCodegenError(
                 f"native 内存执行函数 {name} 栈槽超出栈帧: 最大偏移 {max_frame_slot_offset}, frame_size {function.frame_size}"
             )
+        validate_native_array_layout(
+            name, [native_stack_slot_map(slot) for slot in function.stack_slots],
+            [{"source_op": item.source_op, "source_attrs": item.source_attrs, "bytes": item.code.hex()} for item in function.instructions],
+            function.frame_size,
+        )
     if global_frame_owners and not global_owner_slots:
         owner = next(iter(global_frame_owners))
         raise NativeCodegenError(f"native 内存执行函数 {owner} 初始化 R11 global frame 但没有声明全局栈槽")

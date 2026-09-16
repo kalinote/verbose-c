@@ -91,8 +91,8 @@ def test_source_and_bytecode_native_errors_use_embedded_source_path(tmp_path, ca
     source_path = tmp_path / "native_unsupported_array.vbc"
     bytecode_path = tmp_path / "native_unsupported_array.vbb"
     source_path.write_text(
+        "int values[2] = {1, 2};\n"
         "int main() {\n"
-        "    int values[2] = {1, 2};\n"
         "    return values[0];\n"
         "}\n",
         encoding="utf-8",
@@ -297,7 +297,7 @@ def test_recorder_receives_compiled_output_once_for_each_input(tmp_path, monkeyp
     assert on_compiled.call_count == 1
 
 
-@pytest.mark.parametrize("stored_revision", [None, 0])
+@pytest.mark.parametrize("stored_revision", [None, 0, 3])
 def test_source_recompiles_old_compiler_cache(tmp_path, monkeypatch, stored_revision):
     """
     验证旧编译器缓存会被重建，而更新后的缓存仍可复用。

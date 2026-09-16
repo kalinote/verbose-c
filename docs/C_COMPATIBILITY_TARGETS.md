@@ -172,16 +172,16 @@
 - 当前现状：
   - 【已完成】grammar、`ArrayType`、`SubscriptNode`/`InitListNode`、类型检查、字节码（`ALLOC_ARRAY`/`LOAD_INDEX`/`STORE_INDEX`/`ARRAY_DECAY`）与 VM 连续堆布局已闭环
   - 【已完成】验收用例见 `tests/grammar/array_subscript_test.vbc`
-  - 【待完善】越界为运行时 `RuntimeError` 中文报错（见下方「发现问题」）
+  - 【已完成】VM 与 Native 均报告中文数组越界错误；Native 支持定长局部标量数组。
 - 验收标准：
   - 【已完成】`int arr[3]; arr[0] = 1; arr[1] = arr[0] + 1;` 可编译运行且结果正确
   - 【已完成】`int arr[] = {1, 2, 3};` 长度推导为 3，读写下标正确
   - 【已完成】`int arr[5] = {1, 2};` 其余元素为 0
   - 【已完成】数组实参传入 `void f(int *p)` 可编译（衰变语义）
-  - 【待完善】越界时有明确中文运行时错误（编译期：非整型下标、长度非法等已正常报错）
+  - 【已完成】越界时有明确中文运行时错误（编译期：非整型下标、长度非法等也正常报错）
   - 【已完成】现有 `pointer_test` 等回归不退化
-- 发现问题：
-  - 数组下标越界时 VM 会抛出 `RuntimeError("数组下标越界: ...")`，但 `engine.run_source_file` 传入 VM 的 `source_code` 取自空的 `processed_code`（token 化管线后未再生成源码文本）。生成 `VBCRuntimeError` 时按行号取源码上下文触发 `IndexError`，终端显示「意外的内部错误」而非中文运行时诊断。审计用例：`tests/compatibility_audit/p0_7_array_oob_runtime_test.vbc`。
+- 历史问题已修复：
+  - 数组越界已通过统一运行时诊断输出，不再因缺少源码上下文触发二次 `IndexError`。数组复合赋值和前后置自增减复用首次求得的基址与下标。验收用例：`tests/test_native_arrays.py`。
 
 
 
@@ -293,7 +293,7 @@
 
 - 【已完成】`object/numeric.py` 集中定义位宽、提升、转换、舍入、除法和余数；`compiler/constant_evaluation.py` 复用这些规则进行常量求值。
 - 【已完成】IR 保留算术类型。native 支持定宽整数、binary32/binary64 混算、转换、比较、寄存器及栈参数、返回值和全局标量；运行期错误通过状态通道传播，内存执行返回带行号的中文诊断。
-- 【边界】native 当前为 Windows x64 标量后端；数组、指针、结构体及 `unlimited int/float` 扩展尚不支持。无限整数在 VM 中保持任意精度；无限浮点是现有的 binary64 扩展，不是任意精度浮点。
+- 【边界】native 当前支持 Windows x64 标量及定长局部一维标量数组；全局数组、数组参数/返回及地址逃逸、指针、结构体和 `unlimited int/float` 扩展尚不支持。无限整数在 VM 中保持任意精度；无限浮点是现有的 binary64 扩展，不是任意精度浮点。
 - 【已完成】`tests/test_numeric_semantics.py` 对比 O0/O1、VM/native、常量/函数参数、缓存与 `.vbb` 重载，并覆盖精度、边界、短路与非法转换；`tests/test_native_codegen.py` 覆盖机器码、PE 执行及导出元数据校验。
 - 【已完成】字节码格式升为 version 2，拒绝旧算术语义的 version 1 文件；源码增量缓存失效后自动重编译。旧 `.vbb` 需要从源码重新生成。
 
@@ -703,7 +703,7 @@ verbose_c/error/
 
 ### 阶段 C（补齐 C 核心模型）
 
-- 【待完善】P0-7：一维数组（运行时越界错误展示未完成，见 P0-7 发现问题）
+- 【已完成】P0-7：一维数组及中文越界诊断；VLA 等扩展另列后续范围。
 - 【已完成】P0-8：`switch/case/default`
 - 【已完成】P0-9：`typedef` / `enum` / `struct`
 

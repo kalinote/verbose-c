@@ -1,6 +1,6 @@
 #include "../practical_console.inc"
 
-// VM 库存示例；数组尚不属于 Native 子集，正式 exe 编译应明确拒绝。
+// 定长局部数组库存示例，可通过 VM、Native 内存执行或独立 exe 运行。
 int main() {
     int stock[4] = {12, 5, 8, 3};
     int price_in_cents[4] = {250, 990, 350, 1299};

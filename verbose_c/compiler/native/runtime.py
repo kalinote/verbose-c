@@ -506,7 +506,8 @@ def append_runtime(code, functions, entry_name, *, detailed_numeric_errors=False
 
     a.begin("<native:diagnostic>")
     a.mem("89", "rcx", "rbp", -64)
-    diagnostics = {**(NATIVE_NUMERIC_ERRORS if detailed_numeric_errors else {2: "数值运算失败。"}), **IO_ERRORS}
+    diagnostics = {**(NATIVE_NUMERIC_ERRORS if detailed_numeric_errors else {2: "数值运算失败。"}),
+                   10: NATIVE_NUMERIC_ERRORS[10], **IO_ERRORS}
     for status in diagnostics:
         a.mov("rax", status)
         a.emit("48 39 c1")

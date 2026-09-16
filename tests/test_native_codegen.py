@@ -1071,8 +1071,8 @@ def test_machine_dump_keeps_machine_ir_when_native_codegen_fails(tmp_path):
 def test_machine_dump_records_machine_lowering_failure(tmp_path):
     source_path = tmp_path / "native_codegen_dump_machine_unsupported.vbc"
     source_path.write_text(
+        "int values[2] = {1, 2};\n"
         "int main() {\n"
-        "    int values[2] = {1, 2};\n"
         "    return values[0];\n"
         "}\n",
         encoding="utf-8",
@@ -1092,7 +1092,7 @@ def test_machine_dump_records_machine_lowering_failure(tmp_path):
     dump_text = dump_path.read_text(encoding="utf-8")
     assert "IR" in dump_text
     assert "Machine IR 生成跳过/失败原因" in dump_text
-    assert "native MVP 暂不支持特性 'array'" in dump_text
+    assert "native MVP 暂不支持特性 'global_array（全局数组）'" in dump_text
 
 
 def test_native_codegen_uses_module_entry_for_source_program(tmp_path):
@@ -4678,8 +4678,8 @@ def test_native_codegen_error_includes_function_op_and_source_location():
 def test_native_codegen_rejects_array_runtime_objects(tmp_path):
     source_path = tmp_path / "native_unsupported_array.vbc"
     source_path.write_text(
+        "int values[2] = {1, 2};\n"
         "int main() {\n"
-        "    int values[2] = {1, 2};\n"
         "    return values[0];\n"
         "}\n",
         encoding="utf-8",
@@ -4697,8 +4697,8 @@ def test_native_codegen_rejects_array_runtime_objects(tmp_path):
 def test_run_source_file_vm_ignores_native_codegen_failure_for_arrays(tmp_path):
     source_path = tmp_path / "native_unsupported_array_vm.vbc"
     source_path.write_text(
+        "int values[2] = {40, 2};\n"
         "int main() {\n"
-        "    int values[2] = {40, 2};\n"
         "    return values[0] + values[1];\n"
         "}\n",
         encoding="utf-8",
@@ -4719,7 +4719,7 @@ def test_run_source_file_vm_ignores_native_codegen_failure_for_arrays(tmp_path):
     assert result.compilation_output.machine_program is None
     assert result.compilation_output.machine_error is not None
     assert result.compilation_output.native_code_program is None
-    assert "native MVP 暂不支持特性 'array'" in str(result.compilation_output.machine_error)
+    assert "native MVP 暂不支持特性 'global_array（全局数组）'" in str(result.compilation_output.machine_error)
 
 
 def test_native_codegen_rejects_pointer_runtime_objects(tmp_path):
@@ -11326,8 +11326,8 @@ def test_cli_emit_asm_reports_native_codegen_failure(tmp_path, monkeypatch, caps
     export_dir = tmp_path / "native_cli_emit_asm_unsupported_exports"
     asm_path = export_dir / "native_cli_emit_asm_unsupported.native.md"
     source_path.write_text(
+        "int values[2] = {1, 2};\n"
         "int main() {\n"
-        "    int values[2] = {1, 2};\n"
         "    return values[0];\n"
         "}\n",
         encoding="utf-8",
@@ -11353,7 +11353,7 @@ def test_cli_emit_asm_reports_native_codegen_failure(tmp_path, monkeypatch, caps
     output = capsys.readouterr().err
     assert exc_info.value.code == 1
     assert f"编译错误: 文件 {source_path}" in output
-    assert "native MVP 暂不支持特性 'array'" in output
+    assert "native MVP 暂不支持特性 'global_array（全局数组）'" in output
     assert not asm_path.exists()
 
 
@@ -11364,8 +11364,8 @@ def test_cli_emit_native_bin_reports_native_codegen_failure(tmp_path, monkeypatc
     export_dir = tmp_path / "native_cli_emit_bin_unsupported_exports"
     bin_path = export_dir / "native_cli_emit_bin_unsupported.native.bin"
     source_path.write_text(
+        "int values[2] = {1, 2};\n"
         "int main() {\n"
-        "    int values[2] = {1, 2};\n"
         "    return values[0];\n"
         "}\n",
         encoding="utf-8",
@@ -11391,7 +11391,7 @@ def test_cli_emit_native_bin_reports_native_codegen_failure(tmp_path, monkeypatc
     output = capsys.readouterr().err
     assert exc_info.value.code == 1
     assert f"编译错误: 文件 {source_path}" in output
-    assert "native MVP 暂不支持特性 'array'" in output
+    assert "native MVP 暂不支持特性 'global_array（全局数组）'" in output
     assert not bin_path.exists()
 
 
@@ -11402,8 +11402,8 @@ def test_cli_emit_native_map_reports_native_codegen_failure(tmp_path, monkeypatc
     export_dir = tmp_path / "native_cli_emit_map_unsupported_exports"
     map_path = export_dir / "native_cli_emit_map_unsupported.native.map.json"
     source_path.write_text(
+        "int values[2] = {1, 2};\n"
         "int main() {\n"
-        "    int values[2] = {1, 2};\n"
         "    return values[0];\n"
         "}\n",
         encoding="utf-8",
@@ -11429,7 +11429,7 @@ def test_cli_emit_native_map_reports_native_codegen_failure(tmp_path, monkeypatc
     output = capsys.readouterr().err
     assert exc_info.value.code == 1
     assert f"编译错误: 文件 {source_path}" in output
-    assert "native MVP 暂不支持特性 'array'" in output
+    assert "native MVP 暂不支持特性 'global_array（全局数组）'" in output
     assert not map_path.exists()
 
 
@@ -11440,8 +11440,8 @@ def test_cli_emit_native_text_bin_reports_native_codegen_failure(tmp_path, monke
     export_dir = tmp_path / "native_cli_emit_text_bin_unsupported_exports"
     text_bin_path = export_dir / "native_cli_emit_text_bin_unsupported.text.bin"
     source_path.write_text(
+        "int values[2] = {1, 2};\n"
         "int main() {\n"
-        "    int values[2] = {1, 2};\n"
         "    return values[0];\n"
         "}\n",
         encoding="utf-8",
@@ -11467,7 +11467,7 @@ def test_cli_emit_native_text_bin_reports_native_codegen_failure(tmp_path, monke
     output = capsys.readouterr().err
     assert exc_info.value.code == 1
     assert f"编译错误: 文件 {source_path}" in output
-    assert "native MVP 暂不支持特性 'array'" in output
+    assert "native MVP 暂不支持特性 'global_array（全局数组）'" in output
     assert not text_bin_path.exists()
 
 

@@ -7,6 +7,7 @@ from verbose_c.compiler.native.formatter import format_machine_program
 from verbose_c.compiler.native.listing_formatter import format_native_code_program
 from verbose_c.compiler.native.lowering import lower_ir_program_to_machine
 from verbose_c.compiler.native.machine_ir import (
+    ArraySlot,
     MachineBlock,
     MachineFunction,
     MachineInstruction,
@@ -44,6 +45,7 @@ from verbose_c.compiler.native.runner import (
 from verbose_c.compiler.native.target import NativeTarget
 
 __all__ = [
+    "ArraySlot",
     "MachineBlock",
     "MachineFunction",
     "MachineInstruction",

@@ -5,6 +5,8 @@ from dataclasses import (
     field,
 )
 from verbose_c.compiler.native.abi import (
+    ARRAY_ELEMENT_TYPES,
+    MAX_ARRAY_FRAME_SIZE,
     WINDOWS_X64_ABI,
     WindowsX64ABI,
 )
@@ -32,6 +34,8 @@ class NativeStackSlotAllocation:
     name: str
     offset: int
     size: int
+    array_length: int | None = None
+    element_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +191,9 @@ def native_value_location(function_name: str, slot: NativeStackSlotAllocation) -
     elif slot.name.startswith("global[") and slot.name.endswith("]"):
         kind = "global"
         index = slot.name[7:-1]
+    elif slot.name.startswith("array[") and slot.name.endswith("]"):
+        kind = "array"
+        index = slot.name[6:-1]
     else:
         kind = "stack"
         index = slot.name
@@ -200,3 +207,74 @@ def native_value_location(function_name: str, slot: NativeStackSlotAllocation) -
         "offset": slot.offset,
         "size": slot.size,
     }
+
+
+def native_stack_slot_map(slot: NativeStackSlotAllocation) -> dict[str, object]:
+    """将栈槽及可选的数组来源信息写入产物元数据。"""
+    result = {"name": slot.name, "offset": slot.offset, "size": slot.size}
+    if slot.array_length is not None or slot.element_type is not None:
+        result.update(array_length=slot.array_length, element_type=slot.element_type)
+    return result
+
+
+def validate_native_array_layout(name: str, slots: list[dict], instructions: list[dict], frame_size: int) -> None:
+    """验证产物的数组布局、来源元数据与实际寻址字节一致。
+
+    Args:
+        name: 当前函数名称。
+        slots: 已经过基本结构验证的栈槽记录。
+        instructions: 包含机器码十六进制文本和来源属性的清单。
+        frame_size: 函数分配的栈帧大小。
+    """
+    from verbose_c.compiler.native.encoder import encode_mov_rax_imm64, encode_mov_rbp_offset_from_rax, encode_prologue
+
+    arrays = {}
+    ranges = []
+    owns_global_frame = any(item["source_op"] == "prologue" and bytes.fromhex(item["bytes"]) == b"\x49\x89\xEB"
+                            for item in instructions)
+    for slot in slots:
+        slot_name = slot["name"]
+        if slot_name.startswith("array["):
+            length = slot.get("array_length")
+            if (not slot_name.endswith("]") or not slot_name[6:-1].isdigit() or type(length) is not int
+                    or length <= 0 or length * 8 != slot["size"] or not isinstance(slot.get("element_type"), str)
+                    or slot["element_type"] not in ARRAY_ELEMENT_TYPES):
+                raise NativeCodegenError(f"函数 {name}: 数组栈槽 {slot_name} 的长度或元素类型无效")
+            arrays[slot_name] = slot
+        elif slot.get("array_length") is not None or slot.get("element_type") is not None:
+            raise NativeCodegenError(f"函数 {name}: 普通栈槽不能携带数组来源信息")
+        if not slot_name.startswith("global[") or owns_global_frame:
+            ranges.append((slot["offset"] - slot["size"], slot["offset"], slot_name))
+    array_instructions = [item for item in instructions if item["source_op"] in {"array_init", "array_load", "array_store", "array_bounds"}]
+    if not arrays and not array_instructions:
+        return
+    if name == "<module>" or frame_size + 32 > MAX_ARRAY_FRAME_SIZE:
+        raise NativeCodegenError(f"函数 {name}: 数组栈帧超过上限或数组不属于局部存储")
+    previous_end = 0
+    for start, end, slot_name in sorted(ranges):
+        if start < previous_end or start % 8 or end % 8 or end > frame_size:
+            raise NativeCodegenError(f"函数 {name}: 数组与栈槽 {slot_name} 重叠、未对齐或超出栈帧")
+        previous_end = end
+    prologues = [item for item in instructions if item["source_op"] == "prologue" and bytes.fromhex(item["bytes"]) != b"\x49\x89\xEB"]
+    if len(prologues) != 1 or bytes.fromhex(prologues[0]["bytes"]) != encode_prologue(frame_size):
+        raise NativeCodegenError(f"函数 {name}: 数组栈帧大小与函数序言不一致")
+    initialized = set()
+    for item in array_instructions:
+        attrs = item["source_attrs"]
+        slot = arrays.get(attrs.get("array_slot"))
+        if slot is None or any(attrs.get(key) != slot[field] for key, field in (("offset", "offset"), ("length", "array_length"), ("element_type", "element_type"))):
+            raise NativeCodegenError(f"函数 {name}: 数组指令来源与栈槽声明不一致")
+        offset = slot["offset"]
+        if item["source_op"] == "array_init":
+            if slot["name"] in initialized:
+                raise NativeCodegenError(f"函数 {name}: 数组存在重复分配指令")
+            initialized.add(slot["name"])
+            expected = encode_mov_rax_imm64(0) + b"".join(encode_mov_rbp_offset_from_rax(offset - index * 8) for index in range(slot["array_length"]))
+        elif item["source_op"] in {"array_load", "array_store"}:
+            expected = bytes([0x4A, 0x89 if item["source_op"] == "array_store" else 0x8B, 0x84, 0xD5]) + (-offset).to_bytes(4, "little", signed=True)
+        else:
+            continue
+        if bytes.fromhex(item["bytes"]) != expected:
+            raise NativeCodegenError(f"函数 {name}: 数组寻址字节与栈槽偏移不一致")
+    if initialized != set(arrays):
+        raise NativeCodegenError(f"函数 {name}: 数组存储缺少初始化来源")

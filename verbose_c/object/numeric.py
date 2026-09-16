@@ -35,6 +35,7 @@ NATIVE_NUMERIC_ERRORS = {
     7: "浮点溢出",
     8: "除零错误",
     9: "数值转换失败: 浮点数不能表示为目标整数",
+    10: "数组下标越界",
 }
 _BINARY_OPERATORS = {"+": operator.add, "-": operator.sub, "*": operator.mul, "/": operator.truediv}
 _COMPARISONS = {

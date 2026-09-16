@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from verbose_c.compiler.native.abi import (
+    MAX_ARRAY_FRAME_SIZE,
     FLOAT_VALUE_TYPES,
     SCALAR_VALUE_TYPES,
     SUPPORTED_ARGUMENT_REGISTERS,
@@ -79,6 +80,7 @@ from verbose_c.compiler.native.runtime import (
     append_runtime,
 )
 from verbose_c.compiler.native.target import NativeTarget
+from verbose_c.compiler.native.validator import validate_array_storage
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.numeric import (
     INTEGER_KIND_NAMES,
@@ -468,6 +470,7 @@ def _validate_operand_storage_shapes(function: MachineFunction) -> None:
     _validate_frame_slots(function, "local", function.frame.local_slots)
     _validate_frame_slots(function, "temp", function.frame.temp_slots)
     _validate_frame_slots(function, "spill", function.frame.spill_slots)
+    validate_array_storage(function, NativeCodegenError)
     for block in function.blocks:
         for instruction in block.instructions:
             if instruction.result is not None:
@@ -1305,6 +1308,18 @@ class _NativeCodegenContext:
         ) = _compute_static_known_states(function)
         self.slot_offsets = self._build_slot_offsets()
         self.frame_size = self._build_frame_size()
+        if function.frame.array_slots:
+            # 留出保存寄存器、返回地址和最大调用窗口，避免跨过 Windows 栈保护页。
+            call_sizes = [self.abi.shadow_space_size]
+            for block in function.blocks:
+                for node in block.instructions:
+                    if node.op == "call":
+                        stack_args = max(0, len(node.args) - 1 - len(self.abi.registers.argument_registers))
+                        call_sizes.append(self.abi.shadow_space_size + stack_args * 8)
+            call_size = ((max(call_sizes) + self.abi.stack_alignment - 1) // self.abi.stack_alignment) * self.abi.stack_alignment
+            if self.frame_size + call_size + 32 > MAX_ARRAY_FRAME_SIZE:
+                declaration = next(node for block in function.blocks for node in block.instructions if node.op == "alloc_array")
+                raise self._node_error(declaration, f"数组栈帧及调用空间超过 {MAX_ARRAY_FRAME_SIZE} 字节上限")
         if self.frame_size < 0 or self.frame_size > _INT32_MAX:
             raise self._function_error(f"native 机器码 MVP 栈帧大小超出 signed int32 编码范围: {self.frame_size}")
         for (kind, index), offset in self.slot_offsets.items():
@@ -1364,6 +1379,37 @@ class _NativeCodegenContext:
 
     def _lower_instruction(self, instruction: MachineInstruction) -> None:
         op = instruction.op
+        if op in {"alloc_array", "load_index", "store_index"}:
+            base = instruction.result if op == "alloc_array" else instruction.args[0]
+            slot = base.value
+            offset = self.slot_offsets[("array", slot.index)]
+            attrs = {"array_slot": f"array[{slot.index}]", "length": slot.length,
+                     "element_type": slot.element_type, "offset": offset}
+            if op == "alloc_array":
+                code = encode_mov_rax_imm64(0) + b"".join(encode_mov_rbp_offset_from_rax(offset - index * 8) for index in range(slot.length))
+                self._emit(code, f"清零 {attrs['array_slot']}: {slot.element_type}[{slot.length}]，基址 rbp-{offset}",
+                           "array_init", instruction.source_pc, instruction.source_line, attrs)
+                return
+            self._load_operand_to_rax(instruction.args[1], instruction)
+            for bound, condition in ((0, 0x7D), (slot.length, 0x7C)):
+                self._emit(encode_mov_r10_imm64(bound) + encode_cmp_rax_r10(), f"cmp rax, {bound} ; 数组边界",
+                           "array_bounds", instruction.source_pc, instruction.source_line, attrs)
+                self._emit_numeric_guard(condition, 10, instruction)
+            if op == "store_index":
+                self._load_operand_to_rax(instruction.args[2], instruction)
+                self._emit_integer_range_check(slot.element_type.lower(), instruction,
+                                               {"CHAR": 3, "SHORT": 4, "INT": 5}.get(slot.element_type, 6))
+            self._load_operand_to_r10(instruction.args[1], instruction)
+            code = bytes([0x4A, 0x89 if op == "store_index" else 0x8B, 0x84, 0xD5]) + (-offset).to_bytes(4, "little", signed=True)
+            asm = f"mov [rbp+r10*8-{offset}], rax" if op == "store_index" else f"mov rax, [rbp+r10*8-{offset}]"
+            self._emit(code, asm, "array_store" if op == "store_index" else "array_load",
+                       instruction.source_pc, instruction.source_line, attrs)
+            if op == "load_index":
+                result = self._result_slot_offset(instruction)
+                self.constant_vregs.pop(instruction.result.value.name, None)
+                self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", op,
+                           instruction.source_pc, instruction.source_line)
+            return
         if op == "load_string":
             result = self._result_slot_offset(instruction)
             self._emit(bytes.fromhex("48 8D 05 00 00 00 00"), "lea rax, [rip+字符串常量]", op,
@@ -2060,6 +2106,9 @@ class _NativeCodegenContext:
             if block.terminator:
                 for operand in block.terminator.args:
                     next_offset = self._collect_operand_slot(offsets, next_offset, operand)
+        for slot in self.function.frame.array_slots:
+            offsets[(slot.kind, slot.index)] = next_offset + slot.size - 8
+            next_offset += slot.size
         return offsets
 
     def _build_frame_size(self) -> int:
@@ -2075,9 +2124,13 @@ class _NativeCodegenContext:
     def _stack_slot_allocations(self) -> list[NativeStackSlotAllocation]:
         """生成可 dump 的栈槽分配结果。"""
         items = []
+        arrays = {slot.index: slot for slot in self.function.frame.array_slots}
         for (kind, index), offset in sorted(self.slot_offsets.items(), key=lambda item: item[1]):
             name = f"%v{index}" if kind == "temp" else f"{kind}[{index}]"
-            items.append(NativeStackSlotAllocation(name=name, offset=offset, size=8))
+            slot = arrays.get(index) if kind == "array" else None
+            items.append(NativeStackSlotAllocation(name=name, offset=offset, size=slot.size if slot else 8,
+                                                  array_length=slot.length if slot else None,
+                                                  element_type=slot.element_type if slot else None))
         return items
 
     def _build_phi_copies(self) -> dict[str, dict[str, list[tuple[MachineOperand, MachineOperand]]]]:
