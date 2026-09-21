@@ -2,6 +2,8 @@
 
 本文档只包含“兼容 C 语言本体”的目标，不包含类、继承、`new/super`、范围语法、关键字参数等扩展功能。
 
+状态核对日期：2026-09-21。除另行注明外，语言能力完成项以源码 → 字节码 → VM 闭环为准，不代表原生后端支持全部特性。Windows x64 的稳定子集见 [README](../README.md)，已知待修复行为见 [FIXME.md](./FIXME.md)。
+
 ## 1. 目标边界
 
 - 目标：优先把 `verbose-c` 提升到“可运行且行为接近 C 语言”的实现。
@@ -89,9 +91,10 @@
   - 【已完成】支持 `defined(MACRO)` / `defined MACRO` 基本判断
 - 当前现状：
   - 【已完成】`Preprocessor` 条件栈与指令状态机；假分支不输出 token、不注册 `#define`、不展开 `#include`
-  - 【已完成】`const_expr.py` MVP 表达式求值：`0`/`1` 字面量、`defined()`、`!`/`&&`/`||`、括号、对象宏展开为整数
+  - 【部分完成】`const_expr.py` 可求值整数字面量、`defined()`、`!`、括号及展开为整数的对象宏；`&&` / `||` 已有解析分支，但短路时未消费右侧 token，`#if 1 || 0` 和 `#if 0 && 1` 当前会错误地编译失败，见 [FIXME-010](./FIXME.md#fixme-010预处理条件的短路解析不完整)
   - 【已完成】非法条件块抛出 `VBCCompileError`（含文件路径与行号）
   - 【待完善】`#if` 完整 C17 常量表达式（算术/位运算/比较运算符）未实现
+  - 【待完善】宏展开后剩余的未定义标识符尚未按 `0` 求值；例如 `#if MISSING` 当前报错，可使用 `#ifdef` 或 `defined(MISSING)` 判断是否定义
   - 【已完成】无宏体的 `#define NAME`（include guard 常用）已支持
 - 验收标准：
   - 【已完成】带条件编译分支的示例代码可稳定编译且分支选择正确（`tests/grammar/preprocessor_conditional_test.vbc`）
@@ -132,7 +135,7 @@
   - 【已完成】复合赋值和自增减缓存首次求得的地址或对象；数组／指针下标、解引用、结构体／类成员中的副作用只执行一次，支持 `(*p)++` 等带括号左值。`tests/test_lvalue_semantics.py` 覆盖 O0/O1、源码缓存和字节码重载。
 - 验收标准：
   - 【已完成】每个运算符至少有独立用例覆盖（`tests/grammar/basic_operators_test.vbc`：11 种运算符形态 + `for (...; i++)`）
-  - 【已完成】运算优先级与结合性符合 C 常识（`%`/`*`/`/` 位于 `multiplicative`，`+`/`-` 位于 `additive`，复合赋值右结合，前缀 `++`/`--` 高于后缀）
+  - 【已完成】`%`/`*`/`/` 位于 `multiplicative`，`+`/`-` 位于 `additive`，复合赋值右结合；后缀表达式先于前缀一元运算结合
   - 【已完成】与赋值语句、循环更新表达式组合使用行为正确（同上；`return mod` 为 2，回归 `expressions_test`/`control_flow_test`/`pointer_test` 通过）
 
 
@@ -195,7 +198,8 @@
   - 【已完成】grammar、`SwitchNode`/`SwitchLabelNode`、类型检查、字节码（链式比较分发 + fallthrough + switch 内 break）已闭环
   - 【已完成】验收用例见 `tests/grammar/switch_test.vbc`；编译期错误见 `tests/error/switch_*.vbc`
   - 【已完成】`enum` 常量可作为 case 标签（随 P0-9 补齐，见 `tests/grammar/enum_test.vbc`）
-  - 【待完善】更复杂的编译期常量表达式、`char`/`unsigned`/`long` 扩展、jump table 优化 — 非本期
+  - 【已完成】控制表达式接受 `IntegerType`（包括 `char/short/int/long/long long`）；case 标签复用公共整型常量求值，支持 enum 和可求值的算术表达式
+  - 【待完善】`unsigned` 类型与 jump table 优化
 - 验收标准：
   - 可编译执行多分支 `switch` 示例
   - 无 `break` 时能够按 C 语义穿透
@@ -204,6 +208,8 @@
 
 
 ### P0-9 关键数据结构基础：`typedef` / `enum` / `struct`
+
+本节的结构体布局和拷贝语义针对 VM；原生后端尚不支持结构体。typedef 在前端消解，enum 按整型常量进入后端。
 
 - 目标能力：
   - 支持 `typedef` 类型别名
@@ -233,6 +239,8 @@
 
 ### 【依赖 C-P0-7】P1-1 指针语义增强
 
+本节完成项针对 VM 的模拟地址空间。原生后端仅支持带实际长度的一维标量数组借用引用，不支持一般指针运算和任意地址存储。
+
 - 目标能力：
   - 【已完成】指针算术：`ptr + n`、`ptr - n`、`ptr1 - ptr2`（MVP 以 VM 堆槽位为元素步长）
   - 【已完成】`&` 作用于更完整左值场景（数组元素、指针下标、`&*p`、结构体字段）
@@ -242,6 +250,7 @@
   - 【已完成】`pointer + int`、`int + pointer`、`pointer - int`、同类型 `pointer - pointer`，差值暂返回 `int` 作为 `ptrdiff_t` MVP 等价语义
   - 【已完成】`SubscriptNode` 同时支持数组和指针：数组下标保留边界检查，指针下标按 `*(p + i)` 生成
   - 【已完成】新增 `POINTER_ADD` / `POINTER_SUB` / `POINTER_DIFF` 字节码与 VM 运行时实现；`VBCPointer` 支持同类型指针大小比较
+  - 【已完成】当前编译器生成的数组衰变保留 `(起始地址, 末端地址)` 边界，指针加减继续携带原边界，解引用和下标访问检查该范围；普通指针及旧式无长度 `ARRAY_DECAY` 操作数不会自动获得数组边界
   - 【MVP 边界】`void*` 算术、`&arr`（指向数组的指针）、真实字节级步长、标准 `ptrdiff_t` typedef 不在本期
 - 验收标准：
   - 【已完成】数组与指针联动场景可运行（如 `for (p = arr; p < arr + n; p++)`，见 `tests/compatibility_audit/p1_1_pointer_loop_test.vbc`）
@@ -335,7 +344,7 @@
   - 【已完成】将 `verbose_c/vm/builtins_functions` 中现有函数迁移到底层平台适配层：`open/read/write/close/lseek/_exit` 首批迁移；后续新增的底层原语也必须经由该适配层或 VM 内存模型实现。
   - 【已完成】为后续 VBC 标准库层提供稳定、最小、可测试的底层原语契约；本节不规划 `printf/strlen/fopen/malloc` 等标准库函数的实现。
 - 设计要点（实施参考）：
-  - 底层平台适配类建议放在独立模块（如 `verbose_c/vm/builtins_functions/libc.py`），由 `builtins_functions` 调用；不要把平台判断散落在每个内置函数文件中。
+  - 底层平台适配类已放在 `verbose_c/vm/builtins_functions/system_runtime.py`，由 `builtins_functions` 调用；标准流处理还负责 Windows 控制台与重定向的差异。
   - 标准库实现应放在独立的 VBC 脚本/头文件层，依赖 `builtins_functions` 暴露的底层原语；`builtins_functions` 不承担 C 标准库缓冲、格式化、`FILE*`、字符串 API 等高层语义。
   - `printf/puts/fread/fwrite/fclose/strlen/strcmp/malloc/free` 等接口不应在 VM 层用 Python 实现；后续若要支持，应通过 VBC 标准库代码进一步封装底层原语和 VM 内存模型。
   - 使用 `ctypes.CDLL(..., use_errno=True)` / Windows 对应 CRT 加载能力作为 MVP；若后续需要更强 ABI 控制，可再评估 `cffi` 或专用原生扩展，但不应在 MVP 引入新依赖。
@@ -532,10 +541,9 @@ verbose_c/error/
 
 ### 【依赖 C-P0-6】【依赖 C-P1-5】P1-8 程序入口 `main` 与进程退出码
 
-- 背景与动机：
-  - 当前解释器采用类似 Python 的执行模型：无标准程序入口，入口文件从顶层语句起按源码顺序执行
-  - 函数定义仅完成注册，不会自动执行；即便定义了 `int main()`，若未在顶层显式写 `main();` 则不会进入 `main` 函数体
-  - 现有测试用例普遍在文件末尾手动调用 `main();`（如 `tests/grammar/functions_test.vbc`），与标准 C 程序习惯不符
+- 背景与动机（自动入口实现前）：
+  - 早期解释器只从顶层语句起按源码顺序执行，没有自动入口调用
+  - 早期样例需显式调用 `main();`；当前已实现自动入口，仍兼容这些样例
   - 标准 C 以 `int main(void)` / `int main(int argc, char *argv[])` 为进程入口；部分环境亦存在非标准的 `void main()`，迁移时应尽量兼容
 - 目标能力：
   - 【已完成】在入口模块中识别符合条件的 `main` 函数定义：`int main()`（MVP 先支持无参形式），并兼容非标准的 `void main()`
@@ -546,11 +554,14 @@ verbose_c/error/
   - 【已完成】若入口模块不存在 `main` 定义，行为与现在完全一致（纯顺序执行，退出码 `0`）
   - 【已完成】提供 C 风格内置函数 `_exit(int status)`，可在运行时立即终止程序并使用 `status` 作为进程退出码
 - 当前现状：
-  - 【已完成】`OpcodeGenerator.visit_ModuleNode` 在顶层语句生成后检测无参 `int main()` / `void main()`，若顶层没有显式 `main();`，则注入自动入口调用
+  - 【已完成】`OpcodeGenerator.visit_ModuleNode` 在顶层语句生成后检测无参 `int main()` / `void main()`；若没有直接位于模块顶层的独立 `main();` 表达式语句，则注入自动入口调用。嵌套块、条件或初始化表达式中的调用不参与去重
   - 【已完成】自动入口调用使用 `LOAD_GLOBAL_VAR "main"` + `CALL_FUNCTION 0` + `SET_EXIT_CODE`；专用 `SET_EXIT_CODE` 避免把普通顶层表达式残留值误当退出码
   - 【已完成】`VBCVirtualMachine.excute` 返回整型退出码，`run_source_file` 通过 `RunResult.exit_code` 暴露，`cli.main` 调用 `sys.exit(result.exit_code)`
   - 【已完成】`int main` 中的 `return;` 作为兼容特例映射为退出码 `0`，其他非 `void` 函数仍保持必须返回表达式的类型检查规则
   - 【已完成】`_exit` 实现在 `verbose_c/vm/builtins_functions/exit.py`，通过 `NativeExitSignal` 通知 VM 正常停止执行并设置退出码
+  - 【已完成】`exit(int)` 是 `_exit(int)` 的公开别名；无 main 的顶层代码执行至 `HALT` 默认返回 `0`，不合成函数也不注入 `exit(0)`，顶层 `return` 由类型检查拒绝
+  - 【边界】顶层显式 `main();` 的返回值按普通表达式丢弃，不自动成为进程退出码；需要传递返回值时使用自动入口或显式 `exit(main())`
+  - 【待修复】自动入口签名还接受其他整数类型及 `bool`。`bool main() { return true; }` 在 VM 返回 `0`、native 返回 `1`，尚未形成一致退出码约定；稳定入口使用 `int` 或 `void`，见 [FIXME-011](./FIXME.md#fixme-011bool-main-的-vmnative-退出码不一致)
   - 【已完成】新增 P1-8 回归用例：`tests/compatibility_audit/p1_8_auto_main_return_code_test.vbc`、`p1_8_top_level_before_main_test.vbc`、`p1_8_void_main_auto_entry_test.vbc`、`p1_8_explicit_main_no_double_call_test.vbc`、`p1_8_no_main_script_compat_test.vbc`、`p1_8_bad_main_signature_no_auto_test.vbc`、`p1_8_int_main_empty_return_test.vbc`、`p1_8_exit_test.vbc`
 - 与 C 标准差异（可接受/分阶段）：
 
@@ -560,14 +571,14 @@ verbose_c/error/
 | 程序入口 | 从 `main` 开始，全局对象初始化先于 `main` | 顶层语句先于 `main` 执行（保留脚本化顺序语义）；`main` 在顶层代码之后自动调用 |
 | `main` 形参 | `argc`/`argv`/`envp` 等 | MVP 仅无参 `int main()` / `void main()`；带参形式后续扩展 |
 | `void main()` | 非标准，部分编译器扩展 | 兼容调用，退出码视为 `0` |
-| 显式 `main();` | 标准 C 中顶层调用 `main()` 合法但少见 | 需避免与自动调用重复执行（见验收标准） |
+| 文件顶层 `main();` | 文件作用域不允许此类表达式语句 | 支持脚本式调用；直接顶层独立调用会阻止自动入口，返回值按普通表达式处理 |
 
 
 - 设计要点（实施参考）：
   - 【已完成】**检测时机**：代码生成阶段基于全局符号表与入口模块 AST 检测签名匹配的 `main`（名称 `main`，返回 `int` 或 `void`，MVP 形参为空）
   - 【已完成】**代码生成**：在 `visit_ModuleNode` 末尾，若存在 `main` 且策略允许，生成 `LOAD_GLOBAL_VAR "main"` + `CALL_FUNCTION 0` + `SET_EXIT_CODE`
   - 【已完成】**退出码通路**：`VBCVirtualMachine.excute` 返回整型退出码 → `run_source_file` 写入 `RunResult.exit_code` → `cli.main` 调用 `sys.exit(code)`
-  - 【已完成】**重复调用**：若源码顶层已显式调用 `main()`，自动入口跳过，避免重复执行
+  - 【已完成】**重复调用**：若模块顶层已有独立、无参的 `main();` 表达式语句，自动入口跳过；不分析嵌套控制流或其他表达式中的调用
   - 【已完成】**立即退出**：内置 `_exit(int)` 抛出 VM 内部信号，由 VM 捕获后设置退出码并停止执行，不直接调用 Python `sys.exit`
 - 验收标准：
   - 【已完成】仅含 `int main() { return 42; }`、无顶层 `main();` 的 `.vbc` 可编译运行，且 shell 退出码为 `42`
@@ -575,7 +586,7 @@ verbose_c/error/
   - 【已完成】`void main() { ... }` 可自动进入并正常结束，退出码为 `0`
   - 【已完成】无 `main` 定义的脚本式顶层代码行为与改动前一致
   - 【已完成】源码末尾已写 `main();` 时 `main` 只执行一次
-  - 【已完成】`return;`（无表达式）在 `int main` 中退出码为 `0`（与 C 一致）
+  - 【已完成】`return;`（无表达式）在 `int main` 中按项目兼容扩展返回 `0`
   - 【已完成】签名不匹配的带参 `main` 不会误触发自动入口
   - 【已完成】`_exit(7);` 可立即终止程序，shell 退出码为 `7`
 
@@ -690,7 +701,8 @@ verbose_c/error/
 
 ### 阶段 A（先打通主干）
 
-- 完成 P0-1 到 P0-3：Token 化预处理器与编译管线重构、Token 宏展开语义闭环、预处理条件编译
+- 【已完成基础管线】P0-1 / P0-2 Token 预处理及宏展开、P0-3 条件块状态机。
+- 【待完善】P0-3 逻辑条件短路解析和完整常量表达式；P0-2 可变参宏等扩展。
 
 
 
@@ -712,14 +724,15 @@ verbose_c/error/
 
 ### 阶段 D（提升迁移能力）
 
-- 推进 P1：指针语义、类型转换规则、`sizeof`、`const/static`、**底层平台适配层与运行时原语迁移（P1-5 步骤 1–2）**、**统一错误诊断与输出（P1-7 步骤 1–3）**、**程序入口 `main` 与进程退出码（P1-8）**、**断言 `assert` / `<assert.h>`（P1-9，依赖 P1-5 与 P1-7）**
+- 【已有实现】P1-1 VM 指针子集、P1-2 数值语义、P1-5 底层平台适配、P1-7 核心错误诊断、P1-8 int/void main 与退出码。
+- 【待推进】P1-3 `sizeof`、P1-4 `const/static`、P1-6 include 搜索与重复包含语义、P1-9 `assert`，以及上述已实现子集的明确限制。
 
 
 
 ### 阶段 D+（开发者体验，可与阶段 D 并行）
 
 - 推进 P1-7 步骤 4：警告输出统一
-- 推进 P1-7 步骤 5–7（可选）：结构化 Diagnostic、词法错误统一、dump 增强
+- 推进 P1-7 步骤 5：原生结构化类型诊断、severity 与稳定错误码；步骤 6–7 的词法错误统一和 dump 增强已完成
 
 
 

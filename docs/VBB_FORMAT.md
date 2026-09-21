@@ -215,7 +215,7 @@ repeat block_count times:
 
 `opcode_value` 对应 [`verbose_c/compiler/opcode.py`](../verbose_c/compiler/opcode.py) 中 `Opcode` 枚举值。加载后恢复为 `(Opcode,)` 或 `(Opcode, operand)` 元组。
 
-数组衰变指令 `ARRAY_DECAY` 新生成的操作数为 `(VBCObjectType, length)`，复用已有 `TUPLE` 编码，保留数组边界。当前 VM 和 IR lowering 仍接受旧版仅有 `VBCObjectType` 的操作数；旧字节码不会凭空补出边界信息。新增操作数和元数据需要使用当前运行时，源码缓存通过编译器修订号 `5` 自动失效并重新生成。
+数组衰变指令 `ARRAY_DECAY` 新生成的操作数为 `(VBCObjectType, length)`，复用已有 `TUPLE` 编码，保留数组边界。当前 VM 和 IR lowering 仍接受早期 version 2 中仅有 `VBCObjectType` 的操作数；这不表示支持 version 1 文件，且无长度操作数不会凭空补出边界信息。新增操作数和元数据需要使用当前运行时，源码缓存通过编译器修订号 `5` 失效并重新生成；直接输入旧 `.vbb` 不会自动寻找源码重编译。
 
 ### 5.5 `FUNCTIONS` (5)
 
@@ -364,7 +364,7 @@ metadata: {
 }
 ```
 
-该结构与 [`verbose_c/engine/engine.py`](../verbose_c/engine/engine.py) 中 `run_bytecode_file()` / `VBCVirtualMachine.excute()` 的输入一致。
+[`run_bytecode_file()`](../verbose_c/engine/engine.py) 将此结果恢复为 `CompilerOutput`，再交给 [`VBCVirtualMachine.excute()`](../verbose_c/vm/core.py) 执行。AST、IR、Machine IR 和机器码不存储在 `.vbb` 中；请求后端 dump、原生执行或导出时，从加载的字节码重新 lowering。
 
 ---
 
@@ -396,11 +396,17 @@ metadata: {
 
 | 场景 | 行为 |
 |------|------|
-| 编译 `.vbc` | 始终生成 `.vbb` |
+| CLI / `run_source_file()` 处理 `.vbc` | 新编译成功后写出 `.vbb`；缓存命中时复用已有产物 |
 | 未指定 `-o/--output` | 写入 `<source_dir>/__vbccache__/<stem>.vbb` |
 | 指定 `-o` | 写入用户指定路径 |
-| 输入 `.vbb` | 跳过编译，直接加载执行 |
-| `--compile-only` | 只生成 `.vbb`，不执行 |
+| 输入 `.vbb` | 跳过源码前端，默认加载并执行；不接受 `-o` 或 `--compile-only` |
+| `.vbc --compile-only` | 生成或复用字节码，关闭默认 VM 执行；可同时请求原生导出 |
+| `.vbc/.vbb --emit-exe PATH` | 从字节码构建原生后端并生成独立 exe，不执行目标程序；`-o` 仍只指定源码的 `.vbb` 路径 |
+| `-O0` / `-O1` | 仅影响源码编译；对已有 `.vbb` 不重新优化 |
+
+新编译源码时还写出 `<artifact_path>.deps.json`，由 [`IncrementalCompiler`](../verbose_c/fs/incremental_compile.py) 管理。它记录入口与实际 include 文件的 SHA-256，以及路径、优化等级、编译器修订号、格式版本和 ABI；这份侧车不是 `.vbb` 的 section，直接运行或分发 `.vbb` 不需要它。缓存只检查产物是否存在，内容完整性由加载器上述 CRC32/SHA-256 校验保证，不保存用于比较的产物摘要。
+
+独立编译 API `compile_module()` 只返回内存结果，不自行写出文件。需要手动持久化时调用 `ArtifactStore.save_bytecode()`，或使用 CLI / `run_source_file()`。
 
 ---
 

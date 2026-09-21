@@ -2,6 +2,15 @@
 
 本文档说明 Verbose-C 当前 `O1` 优化的功能范围、实现原理和主要算法。`O1` 的设计目标是：在不改变程序可见语义的前提下，利用类型检查后的 AST 信息和已解析的字节码信息，执行一组保守的局部优化。
 
+在项目根目录使用 `.venv`，可编译现有排序示例并查看优化报告：
+
+```powershell
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+.\.venv\Scripts\python.exe -m verbose_c.cli .\tests\grammar\practical_array_sort.vbc -O1 -rp --compile-only --dump optimize
+```
+
+CLI 仅接受 `-O0` / `-O1`，默认 O0。`--dump optimize` 将本次编译的 AST 与字节码优化统计写入 `dumps/`；这些统计不写入 `.vbb`，缓存命中时不会恢复。示例使用 `-rp` 强制刷新解析器和源码编译，确保报告包含统计。优化等级参与源码缓存失效判断；直接加载 `.vbb` 时使用产物已有的优化结果，`-O1` 不会重新优化字节码文件。
+
 ---
 
 ## 1. 总体设计
@@ -20,6 +29,8 @@ typed AST 优化负责需要类型、符号表、作用域和副作用判断的�
 字节码优化负责低层控制流清理，例如删除 `NOP`、删除不可达指令、删除无意义跳转和重定向跳转链。该层不再推断类型、变量作用域或表达式副作用。
 
 这种分层避免了在字节码层反推高级语义，也让 AST 层可以充分利用类型检查阶段已经建立的符号表和隐式转换信息。
+
+VM 执行和 IR / native lowering 消费同一份优化后的字节码；O1 不要求原生后端支持程序中的所有特性。IR / CFG 层的 O2/O3 和 JIT 优化仍是后续目标。
 
 ---
 
@@ -227,6 +238,8 @@ CSE 临时变量会同步加入当前符号表，确保后续字节码生成可�
 
 当前 `O1` 故意限制在局部、过程内和容易证明安全的范围内。
 
+复合赋值和前后置自增减的左值单次求值属于基础语言语义，O0/O1 都由代码生成器缓存地址、下标或对象后完成读改写。`p[i++] += 5` 等表达式不会因启用 O1 才获得正确行为。编译器临时槽信息通过 `.vbb` 的 `lvalue_slots` 元数据保存，原生后端据此区分内部左值缓存和用户地址存储；详见 [VBB 格式](./VBB_FORMAT.md)。
+
 不属于当前 `O1` 的内容：
 
 - 跨函数常量传播或拷贝传播。
@@ -239,3 +252,5 @@ CSE 临时变量会同步加入当前符号表，确保后续字节码生成可�
 - 对数组元素、结构体字段、对象属性和指针解引用的公共读取优化。
 
 这些能力需要更完整的 IR、控制流图、别名模型或副作用模型支撑，更适合放入后续 `O2/O3` 优化层。
+
+当前回归入口包括 `tests/test_ast_optimizer.py`、`tests/test_bytecode_optimizer.py`、`tests/test_numeric_semantics.py` 和 `tests/test_lvalue_semantics.py`；完整跨后端验收使用 `scripts/verify.ps1`。

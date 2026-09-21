@@ -2,6 +2,8 @@
 
 本文档描述 **C 语言兼容之外** 的扩展能力与编译器演进目标，涵盖脚本化语法糖、面向对象、字节码产物、原生编译后端与 JIT。C 语言本体兼容项见 [C_COMPATIBILITY_TARGETS.md](./C_COMPATIBILITY_TARGETS.md)。
 
+状态核对日期：2026-09-21。标注“已完成”指对应子集闭环；未实现目标和验收设想不表示 CLI 已提供这些能力。当前已知行为缺陷见 [FIXME.md](./FIXME.md)。
+
 ## 优化、编译与 JIT 主线实现路径
 
 与优化、编译、JIT 相关的目标编号及推荐顺序（不含 P1-1～P1-7 语法糖/OOP、P2-6 数组切片）：
@@ -9,7 +11,7 @@
 ```
 1.  F-P0-1  .vbb 格式与序列化          【已完成】稳定字节码产物
 2.  F-P0-2  .vbb 直接加载执行          【已完成】跳过前端直接运行
-3.  F-P0-3  O1 字节码级优化            【已完成】基础窥孔优化、常量折叠、常量传播、拷贝传播、简单分支优化、语句级 CSE 与简单内联
+3.  F-P0-3  O1 AST 与字节码优化        【已完成】基础窥孔优化、常量折叠、常量传播、拷贝传播、简单分支优化、语句级 CSE 与简单内联
 4.  F-P1-8  增量编译与依赖追踪         【已完成】源未变时复用 .vbb
 5.  F-P2-1  IR 与控制流图              【已完成】操作码 lowering 到三地址码 IR / CFG
 6.  F-P2-2  O2/O3 优化等级             【未完成】IR/CFG 层高级优化
@@ -23,7 +25,7 @@
 14. F-P3-6  OSR 栈上替换               【未完成】长循环中途切入 JIT，可选
 ```
 
-跨文档前置：F-P1-8 依赖 C-P1-6；F-P2-3 依赖 C-P1-8；F-P2-5 依赖 C-P1-5；F-P3-5 依赖 C-P1-7。
+跨文档关联：F-P1-8 已基于现有 include 子集完成缓存，不以 C-P1-6 的完整搜索路径能力为完成前提；F-P2-3 对齐 C-P1-8 入口规则，F-P2-5 复用 C-P1-5 的运行时语义，F-P3-5 将依赖 C-P1-7 诊断能力。
 
 ---
 
@@ -63,7 +65,7 @@
   - 【已完成】格式版本策略：版本不匹配、魔数错误、截断、section checksum/SHA 失败时抛出 `VBCBytecodeError`（含文件路径）；C-P1-2 使用 version 2 隔离旧算术语义，旧 `.vbb` 需从源码重编译，不提供跨版本自动迁移
 - 当前现状：
   - `ArtifactStore` 已实现紧凑二进制读写，section 化打包函数/类/常量池/字节码块/行号表/调试信息
-  - 编译 `.vbc` 时始终写出 `.vbb`（`run_source_file()` 在编译成功后调用 `save_bytecode()`）
+  - 通过 CLI / `run_source_file()` 新编译 `.vbc` 成功后写出 `.vbb`；缓存命中时复用已有产物。`compile_module()` 只返回内存中的 `CompilerOutput`
   - CLI 支持 `-o/--output` 指定产物路径；未指定时写入 `__vbccache__`
   - 回归测试：`tests/test_artifact_store.py`（round-trip、损坏文件、section 校验）、`tests/test_cli_bytecode.py`（默认缓存目录与 `-o` 输出）
 - 验收标准：
@@ -87,14 +89,14 @@
   - CLI 已支持 `-o/--output`、`.vbb` 输入分支；`.vbb` 输入不支持 `-o` 与 `--compile-only`
   - 回归测试：`tests/test_cli_bytecode.py` 覆盖 `.vbc → .vbb → 执行` 闭环
 - 验收标准：
-  - `verbose-c foo.vbb` 执行结果与 `verbose-c foo.vbc` 一致（同一源码 freshly 编译对比）
+  - 使用 `.\.venv\Scripts\python.exe -m verbose_c.cli` 分别运行 `foo.vbb` 和新编译的 `foo.vbc`，执行结果一致
   - `--compile-only -o foo.vbb foo.vbc` 生成文件后，单独执行 `.vbb` 成功
   - 运行时错误仍能输出 PC、操作码名；若行号表存在，应映射回合理行号
   - 反向：加载非 `.vbb` 或版本不兼容文件时失败并报错
 
 
 
-### P0-3 字节码级优化（解释器后端第一步）
+### P0-3 O1 AST 与字节码优化
 
 - 目标能力：
   - 【已完成】定义优化等级：`O0` 保持现有行为；`O1` 启用不改变语义的解释器后端优化；后续若优化边界扩大到跨基本块或全局语义级分析，归入 P2-2 的 `O2/O3`
@@ -139,35 +141,28 @@
 ### 【依赖 C-P1-5】【依赖 C-P1-8】P1-1 脚本化语法糖：隐式 `main` 入口（无显式 `main` 定义时）
 
 - 目标能力：
-  - 【部分完成】入口文件**未定义** `int main()` / `void main()` 时，将可执行顶层代码视为运行在隐式 `main` 内；语义上等价于编译器合成：
-    ```c
-    int main() {
-        // 入口文件中所有顶层可执行语句（含全局变量声明与初始化）
-        // 函数/类定义仅完成注册，不自动执行
-        return 0;   // 这里虽然写了return，但想表达的实际上是类似于C语言中main的return，也就是将执行结果返回给命令行，实际return应该必须在函数中使用，这里不带返回功能，类似exit(0)
-    }
-    ```
-  - 【未完成】顶层（函数体外）出现 `return` / `return expr;` **必须报编译错误**；`return` 仅用于从函数返回，脚本隐式入口不提供顶层 `return` 语法糖
-  - 【部分完成】典型脚本式入口：`tests/stdio_test.vbc` 无 `main`，顶层 `write`/`read` 直接执行即属此模式
-  - 【未完成】隐式入口正常结束时，编译器在可执行顶层代码末尾自动注入 `exit(0)`，进程退出码为 `0`（需 `cli` / `engine` / VM 退出码通路闭环）
-  - 【部分完成】内置函数 `exit(int code)`：在隐式或显式 `main` 内调用可立即终止 VM 进程并返回指定退出码；native 调试路径中作为 `_exit(int)` 的公开别名走同一受限退出传播机制
+  - 【已完成】无可自动调用的 `main` 时，入口模块按源码顺序执行顶层代码，函数和类型定义只完成注册
+  - 【已完成】顶层（函数体外）`return` / `return expr;` 报编译错误；脚本入口不提供顶层 return 语法糖
+  - 【已完成】`tests/stdio_test.vbc` 的顶层 `write/read` 可直接执行
+  - 【已完成】顶层执行至 `HALT` 时默认退出码为 `0`；已有 CLI / engine / VM 退出码通路，不需要额外注入 `exit(0)`
+  - 【已完成】`exit(int code)` / `_exit(int code)` 可提前终止执行，VM、native 内存执行及正式 AOT 均有对应实现
   - 【明确不在此项】显式 `main` 定义时的自动调用、返回值、与顶层语句的执行顺序 — 见 C 兼容 **P1-8**，本文不重复
 - 当前现状：
-  - 解释器已支持「无 `main` 则顶层顺序执行」，行为接近脚本模式，但**未形式化**为隐式 `main`，也无统一退出码约定
-  - `OpcodeGenerator.visit_ModuleNode` 平铺执行模块语句，无入口模式标记
-  - `exit(int)` 已作为 `_exit(int)` 的公开别名注册；CLI 已读取 VM 退出码
+  - “隐式 main”是脚本入口行为的简称；当前不合成 `FunctionNode`，顶层变量仍处于模块作用域
+  - `OpcodeGenerator.visit_ModuleNode` 顺序生成模块语句，根节点生成 `HALT`；VM 初始退出码为 `0`
+  - `TypeChecker.visit_ReturnNode` 拒绝函数外 return；CLI 读取 `RunResult.exit_code`
 - 与 C 兼容 P1-8 的分工：
 
 
 | 条件                                 | 负责文档        | 行为概要                                                                   |
 | ---------------------------------- | ----------- | ---------------------------------------------------------------------- |
 | 存在 `int main()` / `void main()` 定义 | C 兼容 P1-8   | 顶层注册 + 自动调用 `main`；`int main` 的 `return` 为退出码                          |
-| **不存在** `main` 定义                  | **本文 P1-1** | 可执行顶层代码等价于隐式 `main` 体；末尾自动 `exit(0)`；`exit(code)` 可提前终止；顶层 `return` 非法 |
+| **不存在** `main` 定义                  | **本文 P1-1** | 顺序执行模块代码，HALT 默认返回 0；`exit(code)` 可提前终止；顶层 `return` 非法 |
 
 
 - 验收标准：
   - `tests/stdio_test.vbc` 在无修改下可编译运行，I/O 行为与现在一致，正常结束后 shell 退出码为 `0`
-  - 【已完成】隐式入口文件中 `exit(3);` 实现后，进程以退出码 `3` 结束（不必执行到末尾自动注入的 `exit(0)`）
+  - 【已完成】脚本中 `exit(3);` 提前结束执行，进程退出码为 `3`
   - 同一文件**不能**既无 `main` 定义又期望 C 兼容 P1-8 的自动 `main` 行为；一旦定义 `main`，仅 P1-8 生效
   - 反向：隐式入口模式下，顶层 `return;` 或 `return expr;` 必须编译失败，并提示 `return` 只能出现在函数内
 
@@ -210,8 +205,8 @@
 ### 【依赖 C-P1-5】【依赖 C-P1-8】P1-4 脚本化语法糖：内置类型与反射增强
 
 - 目标能力：
-  - 【部分完成】`true`/`false`/`null` 字面量；`string` 类型
-  - 【部分完成】`exit(int code)` 内置函数（进程终止与退出码，与 **P1-1** 联调）：已作为 `_exit(int)` 的公开别名注册，支持 VM 与 P2-4 native 调试路径
+  - 【已完成】`true`/`false`/`null` 字面量；`string` 类型，VM 与 native 的字符串操作范围不同
+  - 【已完成】`exit(int code)` 是 `_exit(int)` 的公开别名，支持 VM、native 调试与正式 AOT
   - 【待完善】字符串与数值互操作规则文档化（隐式转换边界与 C 模式切换策略）
   - 【未完成】可选：字符串插值或格式化糖（如 `"%d".format(x)` 或 f-string 风格，语法待定）
 - 当前现状：
@@ -230,10 +225,11 @@
   - 【已完成】字段默认 `null`、显式初始化、`__init__` 自动生成（无用户定义时）
   - 【已完成】MRO 计算（`ClassType._compute_mro`）、父类字段/方法合并
   - 【待完善】`super` 语义仅绑定第一个父类（`visit_SuperNode` 取 `super_class[0]`），多继承下需明确规则
-  - 【未完成】显式 `this` 关键字（当前方法内隐式 `this` 为局部槽 0）
+  - 【已完成】方法内可显式使用 `this.field` / `this.method()`；`this` 是编译器注入局部槽 0 的标识符，不是词法保留关键字
 - 当前现状：
   - `tests/grammar/classes_and_members_test.vbc` 覆盖基本类场景
   - 类对象在编译期写入常量池为 `VBCClass`，方法为 `VBCFunction`
+  - 类型层合并继承成员不代表所有实例初始化路径已闭环；继承字段和父类构造链仍按 P1-7 跟踪，native 不支持类对象
 - 验收标准：
   - 多继承方法解析符合 MRO 顺序（钻石继承基础场景有测试）
   - `super` 在多层继承链上调用正确父类实现
@@ -260,11 +256,12 @@
 
 - 目标能力：
   - 【部分完成】用户定义 `__init__` 与用户字段初始化语句合并进合成构造逻辑
-  - 【未完成】父类 `__init__` 链式调用（`super.__init__(...)` 或自动默认）
+  - 【待完善】`super.__init__(...)` 可经普通 super 方法路径解析和调用，但继承字段初始化与多层构造链尚未闭环；父类字段写入后仍可能在子类实例读取时报“没有属性”，不能标记完整支持
   - 【未完成】析构函数 `__del__` 或 `~ClassName()` 与 GC 协作（确定性与 GC 触发时机需文档化）
-  - 【未完成】类实例向上/向下转型（`TypeChecker` 规则 7 待实现）、与 `CastNode` 打通
+  - 【部分完成】类型检查已允许有继承关系的类显式转换；VM `CAST` 尚未实现实例转换，相关表达式仍会运行时失败
 - 当前现状：
-  - `type_checker_visitor`：`# TODO 规则 7: 允许对象类型之间的向上和向下转型`
+  - `_is_castable()` 已检查 `is_subclass_of()`，但代码中的 TODO 注释不能视为功能状态；需同时核对 generator 和 VM `CAST`
+  - 类、继承和成员访问可用于 VM，完整构造链、转型检查和析构仍待完成
 - 验收标准：
   - 子类实例可赋给父类类型变量（向上转型）
   - 向下转型失败时运行时或编译期报错（策略需明确）
@@ -272,14 +269,14 @@
 
 
 
-### 【依赖 C-P1-6】【依赖 F-P0-1】【依赖 F-P0-2】P1-8 增量编译与依赖追踪
+### 【关联 C-P1-6】【依赖 F-P0-1】【依赖 F-P0-2】P1-8 增量编译与依赖追踪
 
 - 目标能力：
   - 【已完成】实现 `IncrementalCompiler`（`verbose_c/fs/incremental_compile.py`），定位为**依赖感知的入口翻译单元缓存复用**，而非 include 文件级独立编译
   - 【已完成】记录入口 `.vbc` 在预处理阶段实际读入的 `#include` 依赖文件，包含暂定头文件 `.inc` 以及被直接 include 的 `.vbc`
-  - 【已完成】源文件、任一 include 依赖、编译参数或编译器/字节码格式版本变更时，`needs_recompile()` 为真，并重新编译整个入口翻译单元
+  - 【已完成】源文件、实际 include 依赖、优化等级、显式编译器修订号、字节码格式版本或 ABI 变更时，`needs_recompile()` 为真，重新编译整个入口翻译单元
   - 【已完成】未变更时跳过 tokenize / preprocess / parse / type check / codegen，直接复用入口文件对应的 `.vbb`
-  - 【已完成】与 `.vbb` 产物存在性和内容哈希联动，MVP 使用 SHA-256 内容哈希，不依赖文件时间戳
+  - 【已完成】检查 `.vbb` 存在性及源码/include 的 SHA-256，不依赖文件时间戳；侧车不记录 `.vbb` 内容摘要，产物自身的 CRC32/SHA-256 校验由加载器完成
   - 【已完成】依赖图持久化为侧车 `<artifact_path>.deps.json`；未修改 `.vbb` 二进制格式
 - 当前现状：
   - `IncrementalCompiler` 已支持 manifest 写入、SHA-256 校验、缓存失效判断、依赖读取与 `invalidate(path)`
@@ -287,6 +284,8 @@
   - `Preprocessor.dependencies` 已暴露“本次实际依赖文件集合”，仅记录生效条件分支中成功读入的 include 文件
   - `.vbc` 被 include 时与 `.inc` 一样参与预处理拼接，不产生独立模块产物，也不单独缓存编译结果
   - `run_source_file()` 默认启用增量缓存；命中时直接加载入口 `.vbb`，未命中时重新编译并刷新侧车依赖清单
+  - 当前 `COMPILER_REVISION=5`、`.vbb FORMAT_VERSION=2`；缓存不会扫描编译器 Python 源码或语法文件。开发编译器时需维护修订号；语法更新使用 `-rp` 强制重新生成解析器和编译
+  - 原生运行/导出、`--dump ir` / `machine` / `all` 会强制源码重新编译；普通缓存命中不恢复 AST、优化统计，也不重建未请求的后端产物。需要完整前端或优化报告时可使用 `-rp`
 - 验收标准：
   - 【已完成】修改入口文件、被 include 的 `.inc` 或被 include 的 `.vbc` 后，再次编译入口文件会触发整个入口翻译单元重编译
   - 【已完成】未变更时跳过完整前端编译，直接加载入口文件对应的 `.vbb`（与 P0-2 联调）
@@ -337,7 +336,7 @@
   - 【未完成】优化输入为 P2-1 生成的 IR / CFG；不新增从 AST 直接生成优化 IR 的旁路，typed AST 优化仍归入 P0-3 的 O1 范围
   - 【未完成】优化后必须保持 IR 的 def-use、基本块终结指令、源码行号映射和类型信息一致
 - 当前现状：
-  - 仅保留 `optimize_level` 参数；O1 已在 typed AST 与字节码层实现，尚无 IR / CFG 优化管线
+  - CLI `-O` 仅接受 `0` 和 `1`；O1 已在 typed AST 与字节码层实现，尚无 IR / CFG 优化管线
 - 验收标准：
   - `O0`、`O1`、`O2`、`O3` 对同一程序的执行结果一致
   - 常量表达式、死分支、简单循环样例在优化后三地址码 IR 或 CFG 规模下降
@@ -353,9 +352,9 @@
   - 【已完成】定义面向机器码生成的后端 IR / 机器级 IR（Machine IR）：指令选择前后的表示、虚拟寄存器、栈槽、基本块标签、跳转边和调用边
   - 【已完成】定义最小 ABI：整数/布尔值表示、函数参数与返回值传递、栈帧布局、调用者/被调用者保存寄存器、栈对齐、退出码传递
   - 【已完成】定义 IR 到 Machine IR 的 lowering 规则：临时变量、局部变量槽位、基本块标签、条件跳转、返回值、函数调用、`SET_EXIT_CODE`
-  - 【已完成】明确第一版 native 子集：整数、布尔、局部变量、全局函数引用、函数调用、`if`、`while`、`for`、`int main()` / `bool main()` 退出码闭环；`void main()` 已通过函数返回类型元数据进入 native 入口校验与返回 `0` 闭环
+  - 【已完成】第一版 native 整数、布尔、变量、函数调用及控制流闭环；当前还支持定宽浮点、标准流字符串与有界数组引用，范围见 P2-4 / P2-5。入口以 `int main()` / `void main()` 为稳定约定；`bool main()` 的跨后端退出码差异见 FIXME-011
   - 【已完成】不支持的 IR 指令、类型或语言能力（如类、GC 对象、复杂指针、动态内置函数、完整字符串运行时）在 native 模式下明确报错
-  - 【已完成】保留可选 `--emit-c` 的定位说明：只作为参考后端、调试输出或行为对照，不作为 AOT 主线和完成判定
+  - 【定位已明确，尚未实现】C 参考后端只作为可选调试或行为对照，不作为 AOT 主线；当前 CLI 不提供 `--emit-c`
 - 当前现状：
   - 已新增 `verbose_c/compiler/native/`：包含目标平台、Windows x64 ABI、Machine IR 数据结构、IR 到 Machine IR lowering、校验器、formatter 与 `NativeLoweringError`
   - `CompilerOutput` 已新增 `machine_program` / `machine_error`；源码编译后可尝试生成 Machine IR，未显式请求时失败不影响 VM 执行
@@ -380,7 +379,7 @@
 - 支持边界：
   - 当前只面向 Windows x64；支持标量、定长局部／全局标量数组及借用传参、字符串常量及值传递、标准流 `read/write`、`_exit(int)` / `exit(int)`。数组返回及地址逃逸、其他内置函数、字符串拼接、结构体、一般指针操作和 GC 对象仍明确报错。
   - 当前采用 `RAX` / `R10` 临时寄存器与全量栈槽的保守策略；线性扫描寄存器分配属于后续优化，不影响 P2-4 完成判定。
-  - P2-4 完成的是机器码后端与调试执行闭环，不包含正式 native runtime、导入表、基址重定位或完整独立 AOT。
+  - P2-4 的验收范围是机器码后端与调试执行；正式 native runtime、导入表、基址重定位和独立 AOT 已由后续 P2-5 的稳定子集实现。
 - 验收入口：
   - CLI：`--dump machine`、`--emit <kinds> [--emit-dir <dir>]`、`--run-native-memory`、`--native-result`、`--native-zero-exit-code`；导出类型包括 `native-listing`、`native-bin`、`native-text-bin`、`native-map` 和 `native-bundle`。
   - 综合样例：`tests/grammar/native_mvp_smoke_test.vbc`，Windows x64 native 内存执行期望返回完整值 `99`。
@@ -462,7 +461,7 @@
   - 【未完成】定义 **Tier 2**（可选）：优化 JIT，复用 IR 优化和 native 后端能力
   - 【未完成】支持解释器回退：JIT 不支持或守卫失败时回到字节码解释执行
 - 当前现状：
-  - 仅 Tier 0；`VBCVirtualMachine` 主循环解释执行
+  - VM 仅有 Tier 0 解释执行；已有的原生内存运行和独立 AOT 由显式 CLI 选项触发，不是热点驱动的 JIT
 - 验收标准：
   - 可配置阈值，超过后受支持函数或循环执行路径切换为 JIT
   - JIT 关闭、JIT 开启、JIT 回退三种模式的执行结果一致
@@ -487,11 +486,11 @@
 ### 【依赖 F-P3-1】P3-3 JIT 代码缓存与可执行内存
 
 - 目标能力：
-  - 【未完成】按平台分配 RWX/RX 内存页（Windows `VirtualAlloc` 等）
+  - 【待接入 JIT】Windows `VirtualAlloc` 执行内存及运行后释放已由 native runner 实现；JIT 仍需代码页生命周期和缓存管理，其他平台尚未支持
   - 【未完成】JIT 桩（trampoline）：解释器 `CALL_FUNCTION` 可跳转到 JIT 入口
   - 【未完成】代码缓存失效：源码/字节码变更时丢弃旧 JIT 块
 - 当前现状：
-  - 未开始
+  - `compiler/native/runner.py` 已具备 Windows x64 内存执行基础；VM 到机器码的热调用入口、代码缓存和失效机制尚未实现
 - 验收标准：
   - 同一函数第二次热调用走 JIT 路径，结果正确
   - 内存泄漏检测：反复 JIT/失效不无限增长（压力测试）
@@ -556,7 +555,7 @@
 
 ## 8. 主线目标关系（非实现步骤）
 
-- 字节码主线：**P0-1** `.vbb` **格式**、**P0-2** `.vbb` **直接执行**、**P0-3** `O1` **字节码优化**共同构成解释器后端闭环
+- 字节码主线：**P0-1** `.vbb` **格式**、**P0-2** `.vbb` **直接执行**、**P0-3** `O1` **AST 与字节码优化**共同构成解释器后端闭环
 - 优化主线：**P0-3** `O1` 是解释器后端第一阶段的语义保持优化；**P2-2** `O2/O3` 是三地址码 IR / CFG 层更系统的高级优化；两者验收时均必须保持 VM 行为一致
 - AOT / Native 主线：**P2-1 三地址码 IR**、**P2-3 Native 后端设计与目标 ABI**、**P2-4 x64 机器码后端 MVP**、**P2-5 PE/COFF 可执行文件与运行时**共同构成第一版独立二进制能力
 - C 参考后端：`emit-c` 若后续实现，只用于调试、教学对照或交叉验证，不计入 native AOT 主线完成判定
@@ -644,13 +643,13 @@ flowchart LR
 | 字节码文件 `.vbb` 序列化/加载         | 【已完成】         | `verbose_c/fs/artifact_store.py`、[VBB_FORMAT.md](./VBB_FORMAT.md)     |
 | `.vbb` 直接执行                 | 【已完成】         | `run_bytecode_file()`、`cli.py`                                        |
 | 类 / 继承 / new / super        | 【部分完成】        | `opcode_generator_visitor`、`VBCClass`                                 |
-| 隐式 `main` 脚本入口（无 `main` 定义） | 【部分完成】        | 顶层顺序执行已有，未形式化；`exit(int)` 已可提前终止并设置退出码                                  |
+| 隐式 `main` 脚本入口（无 `main` 定义） | 【行为已完成】        | 模块顺序执行、HALT 默认 0、顶层 return 拒绝、exit 提前退出；不合成函数字节码                                  |
 | 显式 `main` 自动调用与退出码          | 【见 C 兼容 P1-8】 | 不在本文重复                                                                |
 | Range / 关键字参数               | 【未实现】         | AST 占位，generator 抛 `NotImplementedError`                              |
 | 数组切片 `[start:end:step]`     | 【未实现，见 P2-6】  | 依赖 C 兼容 P0-7                                                          |
-| `exit()` 内置函数               | 【部分完成】        | 已作为 `_exit(int)` 的公开别名支持 VM 与 P2-4 native 调试路径                                |
+| `exit(int)` 内置函数               | 【已完成】        | `_exit(int)` 的公开别名；VM、native 调试及正式 AOT                                |
 | 增量编译                        | 【已完成】         | `IncrementalCompiler`、`Preprocessor.dependencies`、`run_source_file()` |
-| 字节码优化                       | 【已完成】         | `-O1` 已启用基础字节码优化、typed AST 常量折叠、常量传播、拷贝传播、简单分支优化、语句级 CSE 与简单内联        |
+| AST 与字节码优化                 | 【已完成】         | `-O1` 已启用基础字节码优化、typed AST 常量折叠、常量传播、拷贝传播、简单分支优化、语句级 CSE 与简单内联        |
 | IR / CFG                    | 【已完成】         | `verbose_c/compiler/ir`、`CompilerOutput.ir_program`、`--dump ir`       |
 | Machine IR / Native 前端       | 【已完成】         | `verbose_c/compiler/native`、`CompilerOutput.machine_program`、`--dump machine`       |
 | x64 机器码 / AOT               | 【P2-4 及稳定 AOT 子集已完成】 | 正式 `--emit-exe`、字符串与标准 I/O 运行时、数值错误、ASLR/DEP 和 DIR64 重定位；对象模型仍待扩展 |
