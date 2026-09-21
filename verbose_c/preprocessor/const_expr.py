@@ -64,7 +64,9 @@ def _evaluate_expr_tokens(tokens: list[Token]) -> bool:
         value = parse_and()
         while pos < len(significant) and significant[pos].type == TokenType.OR:
             pos += 1
-            value = value or parse_and()
+            # 先消费右侧语法，再合并真值，避免宿主短路跳过解析。
+            right = parse_and()
+            value = value or right
         return value
 
     def parse_and() -> bool:
@@ -72,7 +74,8 @@ def _evaluate_expr_tokens(tokens: list[Token]) -> bool:
         value = parse_unary()
         while pos < len(significant) and significant[pos].type == TokenType.AND:
             pos += 1
-            value = value and parse_unary()
+            right = parse_unary()
+            value = value and right
         return value
 
     def parse_unary() -> bool:

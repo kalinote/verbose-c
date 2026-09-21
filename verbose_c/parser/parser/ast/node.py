@@ -155,6 +155,16 @@ class ModuleNode(ASTNode):
     def __init__(self, body: list[ASTNode], start_line = None, start_column = None, end_line = None, end_column = None):
         super().__init__(start_line, start_column, end_line, end_column)
         self.body: list[ASTNode] = body
+        # 按原始语法保留入口选择，避免内联移除 main() 后重复补调用。
+        self.has_explicit_main_call = any(
+            isinstance(statement, ExprStmtNode)
+            and isinstance(statement.expr, CallNode)
+            and isinstance(statement.expr.name, NameNode)
+            and statement.expr.name.name == "main"
+            and not statement.expr.args
+            and not statement.expr.kwargs
+            for statement in body
+        )
 
 class LabelNode(ASTNode):
     """

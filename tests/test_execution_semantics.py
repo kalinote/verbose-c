@@ -11,6 +11,25 @@ from verbose_c.vm.core import VBCVirtualMachine
 @pytest.mark.parametrize(
     "source, expected, supports_native",
     [
+        pytest.param("bool main() { return true; }", 1, True, id="main-bool-true"),
+        pytest.param("bool main() { return false; }", 0, True, id="main-bool-false"),
+        pytest.param(
+            "int calls = 0; bool next() { calls++; return calls == 1; }"
+            "bool main() { return next(); }",
+            1, True, id="main-bool-function-return",
+        ),
+        pytest.param("bool main() { return true; } main();", 0, True, id="main-bool-explicit-call"),
+        pytest.param("int main() { return 42; } main();", 0, True, id="main-int-explicit-call"),
+        pytest.param(
+            "bool main() { return true; } if (false) { main(); }",
+            1, True, id="main-bool-nested-call",
+        ),
+        pytest.param(
+            "bool main() { return true; } bool result = main();",
+            1, True, id="main-bool-initializer-call",
+        ),
+        pytest.param("bool main() { exit(7); return true; }", 7, True, id="main-bool-explicit-exit"),
+        pytest.param("void main() {}", 0, True, id="main-void-default-exit"),
         pytest.param(
             "int main() { int a[3] = {10,20,30}; int *p = a; int old = (*p++)++;"
             "if (old == 10 && a[0] == 11 && a[1] == 20 && p - a == 1) { return 0; } return 99; }",
@@ -159,6 +178,7 @@ def test_execution_preserves_expression_semantics(tmp_path, optimize_level, sour
             output_path=str(bytecode_path), optimize_level=optimize_level,
         )
         assert result.success, result.error
+        assert type(result.exit_code) is int
         assert result.exit_code == expected
 
     result = run_bytecode_file(str(bytecode_path), log_modules=set(), dump_modules=set())
@@ -174,6 +194,12 @@ def test_execution_preserves_expression_semantics(tmp_path, optimize_level, sour
     assert vm._stack.is_empty(), "执行结束后不应残留赋值语句或初始化器的值"
 
     if supports_native and can_run_native_memory():
+        native_result = run_source_file(
+            str(source_path), log_modules=set(), dump_modules=set(), run_native_memory=True,
+            output_path=str(bytecode_path), optimize_level=optimize_level,
+        )
+        assert native_result.success, native_result.error
+        assert native_result.exit_code == expected
         native_result = run_bytecode_file(
             str(bytecode_path), log_modules=set(), dump_modules=set(), run_native_memory=True,
         )

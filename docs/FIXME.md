@@ -79,8 +79,8 @@ $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 | FIXME-007 | 低 | 待处理 | native exporter 对 `.text` 和 PE 做重复校验 |
 | FIXME-008 | 低 | 部分处理 | map 等测试已有独立模块，native codegen 剩余测试仍较集中 |
 | FIXME-009 | 低 | 部分处理 | P2-4 状态正文已精简，独立 native 设计文档仍待补充 |
-| FIXME-010 | 高 | 待处理 | 预处理逻辑条件短路时未消费右侧 token，合法条件会编译失败 |
-| FIXME-011 | 中 | 待处理 | `bool main()` 的 VM/native 退出码不一致 |
+| FIXME-010 | 高 | 已处理 | 预处理逻辑条件完整消费右侧语法，再合并真值；残缺条件正常报错 |
+| FIXME-011 | 中 | 已处理 | `bool main()` 统一按 true→1、false→0 返回退出码 |
 
 ## 3. 详细问题
 
@@ -520,33 +520,32 @@ docs/NATIVE_PE_MVP.md
 
 ### FIXME-010：预处理条件的短路解析不完整
 
-**优先级：高；状态：待处理（2026-09-21 复现）。**
+**优先级：高；状态：已处理（2026-09-21）。**
 
 **涉及文件：** `verbose_c/preprocessor/const_expr.py` 的 `_evaluate_expr_tokens()`。
 
-`parse_or()` / `parse_and()` 直接用 Python 的 `or` / `and` 连接递归解析调用。左侧已决定真值时，右侧解析被跳过，游标停留在尚未消费的 token；`#if 1 || 0`、`#if 0 && 1` 均报“无法解析的 token”，而不是选择正确分支。
+**原有问题：** `parse_or()` / `parse_and()` 直接用 Python 的 `or` / `and` 连接递归解析调用，导致短路时不消费右侧 token。`#if 1 || 0`、`#if 0 && 1` 错误报错，`#if 1 ||` 等残缺条件又可能被接受。
 
-**待修复与验收：** 区分语法消费与短路求值，保证表达式完整解析；覆盖真值组合、嵌套括号、`defined()` 和宏展开后的条件。完整预处理常量表达式和未定义标识符转为 `0` 仍按 C-P0-3 跟踪。
+**处理结果：** 当前 MVP 仅含整数与逻辑表达式；先完整解析右侧，再合并左右真值，保留优先级并检查残缺语法。`tests/test_preprocessor_conditions.py` 覆盖 if/elif 真值组合、嵌套括号、defined、对象/函数宏、错误位置和生效 include 依赖。缓存修订号升为 6，旧源码缓存重新编译。完整预处理常量表达式和未定义标识符归零仍按 C-P0-3 跟踪。
 
 ### FIXME-011：`bool main()` 的 VM/native 退出码不一致
 
-**优先级：中；状态：待处理（2026-09-21 复现）。**
+**优先级：中；状态：已处理（2026-09-21）。**
 
-**涉及文件：** `verbose_c/compiler/opcode_generator_visitor.py`、`verbose_c/vm/core.py` 和原生入口返回路径。
+**涉及文件：** `verbose_c/parser/parser/ast/node.py`、`verbose_c/compiler/opcode_generator_visitor.py`、`verbose_c/vm/core.py`。
 
-自动入口允许 `BoolType`，但 VM 的 `SET_EXIT_CODE` 仅提取 `VBCInteger`，其他对象设为 `0`。`bool main() { return true; }` 在 VM 返回 `0`，Windows x64 native 内存执行返回 `1`，两条路径均正常执行成功。
+**原有问题：** 自动入口允许 BoolType，但 VM 的 SET_EXIT_CODE 仅提取整数值，布尔值总是返回 0，与 native 的 0/1 不一致。
 
-**待修复与验收：** 统一布尔入口是否支持及其退出码语义，并覆盖 O0/O1、源码/字节码和 VM/native/AOT。当前文档将稳定入口限定为 `int main()` / `void main()`。
+**处理结果：** VM 显式将 VBCBool 转为整数 0/1，不改变整数、void、普通显式 main 调用及 exit 的规则。同时修复回归发现的 O1 入口误判：在模块 AST 构造时保留直接顶层独立 main 调用标记，避免内联后误补自动调用；整数 main 同样受此修复覆盖。`tests/test_execution_semantics.py` 覆盖 O0/O1、源码/缓存/字节码、VM/native 内存执行，`tests/test_native_aot.py` 覆盖源码与字节码生成独立 exe 的布尔退出码及显式 main 调用。缓存修订号 6 使旧源码缓存按新入口规则重编译，直接加载旧字节码仍执行其中既有的指令。
 
 ## 4. 剩余工作的推荐顺序
 
-1. 修复 FIXME-010 的预处理逻辑条件解析，统一 FIXME-011 的布尔入口语义。
-2. 处理 FIXME-005：收敛 CLI 模式冲突检查、分发和返回值文件写入。
-3. 处理 FIXME-007：删除相同输入上的重复 exporter 校验，保留写后读回与结构校验。
-4. 按实际维护需要推进 FIXME-003 的剩余拆分及 FIXME-008 的测试整理。
-5. 补充 FIXME-009 的字段级 native 设计说明。
+1. 处理 FIXME-005：收敛 CLI 模式冲突检查、分发和返回值文件写入。
+2. 处理 FIXME-007：删除相同输入上的重复 exporter 校验，保留写后读回与结构校验。
+3. 按实际维护需要推进 FIXME-003 的剩余拆分及 FIXME-008 的测试整理。
+4. 补充 FIXME-009 的字段级 native 设计说明。
 
-FIXME-001、002、004、006 和 FIXME-003 的首阶段已完成，不再列入待办。类构造链、实例转型和其他语言扩展继续由功能目标清单跟踪。
+FIXME-001、002、004、006、010、011 和 FIXME-003 的首阶段已完成，不再列入待办。类构造链、实例转型和其他语言扩展继续由功能目标清单跟踪。
 
 ## 5. 重构约束
 

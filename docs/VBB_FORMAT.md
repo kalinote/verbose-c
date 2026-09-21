@@ -215,7 +215,7 @@ repeat block_count times:
 
 `opcode_value` 对应 [`verbose_c/compiler/opcode.py`](../verbose_c/compiler/opcode.py) 中 `Opcode` 枚举值。加载后恢复为 `(Opcode,)` 或 `(Opcode, operand)` 元组。
 
-数组衰变指令 `ARRAY_DECAY` 新生成的操作数为 `(VBCObjectType, length)`，复用已有 `TUPLE` 编码，保留数组边界。当前 VM 和 IR lowering 仍接受早期 version 2 中仅有 `VBCObjectType` 的操作数；这不表示支持 version 1 文件，且无长度操作数不会凭空补出边界信息。新增操作数和元数据需要使用当前运行时，源码缓存通过编译器修订号 `5` 失效并重新生成；直接输入旧 `.vbb` 不会自动寻找源码重编译。
+数组衰变指令 `ARRAY_DECAY` 新生成的操作数为 `(VBCObjectType, length)`，复用已有 `TUPLE` 编码，保留数组边界。当前 VM 和 IR lowering 仍接受早期 version 2 中仅有 `VBCObjectType` 的操作数；这不表示支持 version 1 文件，且无长度操作数不会凭空补出边界信息。新增操作数和元数据需要使用当前运行时，该变化从编译器修订号 `5` 起使旧源码缓存失效。当前修订号为 `6`，进一步按修复后的预处理条件与 O1 入口识别规则重新编译；直接输入旧 `.vbb` 不会自动寻找源码重编译。
 
 ### 5.5 `FUNCTIONS` (5)
 

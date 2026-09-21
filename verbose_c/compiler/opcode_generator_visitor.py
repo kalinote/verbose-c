@@ -563,15 +563,6 @@ class OpcodeGenerator(VisitorBase):
 
         main_symbol = self.symbol_table.lookup_value("main")
         main_type = main_symbol.type_ if main_symbol else None
-        has_explicit_main_call = any(
-            isinstance(statement, ExprStmtNode)
-            and isinstance(statement.expr, CallNode)
-            and isinstance(statement.expr.name, NameNode)
-            and statement.expr.name.name == "main"
-            and not statement.expr.args
-            and not statement.expr.kwargs
-            for statement in node.body
-        )
         if (
             main_symbol is not None
             and main_symbol.kind == SymbolKind.FUNCTION
@@ -579,7 +570,7 @@ class OpcodeGenerator(VisitorBase):
             and isinstance(main_type, FunctionType)
             and not main_type.param_types
             and isinstance(main_type.return_type, (IntegerType, BoolType, VoidType))
-            and not has_explicit_main_call
+            and not node.has_explicit_main_call
         ):
             self._emit(Opcode.LOAD_GLOBAL_VAR, "main")
             self._emit(Opcode.CALL_FUNCTION, 0)

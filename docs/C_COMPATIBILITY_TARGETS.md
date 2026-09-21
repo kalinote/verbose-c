@@ -91,7 +91,7 @@
   - 【已完成】支持 `defined(MACRO)` / `defined MACRO` 基本判断
 - 当前现状：
   - 【已完成】`Preprocessor` 条件栈与指令状态机；假分支不输出 token、不注册 `#define`、不展开 `#include`
-  - 【部分完成】`const_expr.py` 可求值整数字面量、`defined()`、`!`、括号及展开为整数的对象宏；`&&` / `||` 已有解析分支，但短路时未消费右侧 token，`#if 1 || 0` 和 `#if 0 && 1` 当前会错误地编译失败，见 [FIXME-010](./FIXME.md#fixme-010预处理条件的短路解析不完整)
+  - 【已完成 MVP】`const_expr.py` 支持整数字面量、`defined()`、`!`、`&&` / `||`、括号及宏展开。右侧语法始终完整解析后再合并真值，`#if 1 || 0` 和 `#if 0 && 1` 均正确选择分支；短路不能掩盖缺失操作数或括号错误
   - 【已完成】非法条件块抛出 `VBCCompileError`（含文件路径与行号）
   - 【待完善】`#if` 完整 C17 常量表达式（算术/位运算/比较运算符）未实现
   - 【待完善】宏展开后剩余的未定义标识符尚未按 `0` 求值；例如 `#if MISSING` 当前报错，可使用 `#ifdef` 或 `defined(MISSING)` 判断是否定义
@@ -101,6 +101,7 @@
   - 【已完成】嵌套条件编译可正常解析（同上）
   - 【已完成】非法宏块能给出明确错误信息（`tests/error/preprocessor_*.vbc`）
   - 【已完成】include guard 场景（`tests/preprocessor_guarded.inc` + 双次 `#include`）
+  - 【已完成】`tests/test_preprocessor_conditions.py` 覆盖 O0/O1、if/elif 全部逻辑真值组合、优先级、括号、defined、对象/函数宏展开、残缺条件诊断和嵌套条件的实际 include 依赖
 
 
 
@@ -561,7 +562,8 @@ verbose_c/error/
   - 【已完成】`_exit` 实现在 `verbose_c/vm/builtins_functions/exit.py`，通过 `NativeExitSignal` 通知 VM 正常停止执行并设置退出码
   - 【已完成】`exit(int)` 是 `_exit(int)` 的公开别名；无 main 的顶层代码执行至 `HALT` 默认返回 `0`，不合成函数也不注入 `exit(0)`，顶层 `return` 由类型检查拒绝
   - 【边界】顶层显式 `main();` 的返回值按普通表达式丢弃，不自动成为进程退出码；需要传递返回值时使用自动入口或显式 `exit(main())`
-  - 【待修复】自动入口签名还接受其他整数类型及 `bool`。`bool main() { return true; }` 在 VM 返回 `0`、native 返回 `1`，尚未形成一致退出码约定；稳定入口使用 `int` 或 `void`，见 [FIXME-011](./FIXME.md#fixme-011bool-main-的-vmnative-退出码不一致)
+  - 【已完成】是否存在直接顶层独立 `main();` 在构造模块 AST 时记录，O1 内联不会改变入口选择；嵌套块或变量初始化器中的调用不抑制自动入口
+  - 【已完成】自动入口签名还接受其他整数类型及 `bool`。`bool main()` 是项目扩展，返回 `true` 时退出码为 `1`、`false` 时为 `0`；O0/O1、VM、源码缓存、字节码重载、native 内存执行和正式 AOT 保持一致。正常返回 `1` 不等于 engine 报告执行失败
   - 【已完成】新增 P1-8 回归用例：`tests/compatibility_audit/p1_8_auto_main_return_code_test.vbc`、`p1_8_top_level_before_main_test.vbc`、`p1_8_void_main_auto_entry_test.vbc`、`p1_8_explicit_main_no_double_call_test.vbc`、`p1_8_no_main_script_compat_test.vbc`、`p1_8_bad_main_signature_no_auto_test.vbc`、`p1_8_int_main_empty_return_test.vbc`、`p1_8_exit_test.vbc`
 - 与 C 标准差异（可接受/分阶段）：
 
@@ -569,7 +571,7 @@ verbose_c/error/
 | 行为 | C17 / 常见实现 | 目标实现 |
 | ---- | -------------- | -------- |
 | 程序入口 | 从 `main` 开始，全局对象初始化先于 `main` | 顶层语句先于 `main` 执行（保留脚本化顺序语义）；`main` 在顶层代码之后自动调用 |
-| `main` 形参 | `argc`/`argv`/`envp` 等 | MVP 仅无参 `int main()` / `void main()`；带参形式后续扩展 |
+| `main` 形参 | `argc`/`argv`/`envp` 等 | 自动入口仅接受无参函数；带参形式后续扩展，另支持 `bool` 等扩展返回类型 |
 | `void main()` | 非标准，部分编译器扩展 | 兼容调用，退出码视为 `0` |
 | 文件顶层 `main();` | 文件作用域不允许此类表达式语句 | 支持脚本式调用；直接顶层独立调用会阻止自动入口，返回值按普通表达式处理 |
 
@@ -589,6 +591,7 @@ verbose_c/error/
   - 【已完成】`return;`（无表达式）在 `int main` 中按项目兼容扩展返回 `0`
   - 【已完成】签名不匹配的带参 `main` 不会误触发自动入口
   - 【已完成】`_exit(7);` 可立即终止程序，shell 退出码为 `7`
+  - 【已完成】`tests/test_execution_semantics.py` 和 `tests/test_native_aot.py` 验证布尔入口 0/1、普通显式调用不接管退出码、显式 exit 优先，以及现有整数/void 入口行为
 
 
 
@@ -702,7 +705,8 @@ verbose_c/error/
 ### 阶段 A（先打通主干）
 
 - 【已完成基础管线】P0-1 / P0-2 Token 预处理及宏展开、P0-3 条件块状态机。
-- 【待完善】P0-3 逻辑条件短路解析和完整常量表达式；P0-2 可变参宏等扩展。
+- 【已完成】P0-3 逻辑条件完整解析与真值选择。
+- 【待完善】P0-3 完整常量表达式及未定义标识符归零；P0-2 可变参宏等扩展。
 
 
 

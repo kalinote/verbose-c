@@ -215,6 +215,8 @@ CSE 临时变量会同步加入当前符号表，确保后续字节码生成可�
 
 内联后的表达式会继续参与 AST 优化。因此，小函数内联常常会触发进一步的常量折叠、常量传播或 CSE。
 
+入口选择依据原始模块语法：`ModuleNode` 构造时记录是否存在直接顶层独立 `main();`，字节码生成使用该标记决定是否补自动调用。即使 O1 将显式调用内联为常量，也不会再补一次调用或把其返回值设为退出码。例如 `int main() { return 42; } main();` 在 O0/O1 下均正常退出并返回 `0`；嵌套块和变量初始化器中的 main 调用不属于该标记的识别范围。
+
 ---
 
 ## 9. 字节码窥孔优化
@@ -253,4 +255,4 @@ CSE 临时变量会同步加入当前符号表，确保后续字节码生成可�
 
 这些能力需要更完整的 IR、控制流图、别名模型或副作用模型支撑，更适合放入后续 `O2/O3` 优化层。
 
-当前回归入口包括 `tests/test_ast_optimizer.py`、`tests/test_bytecode_optimizer.py`、`tests/test_numeric_semantics.py` 和 `tests/test_lvalue_semantics.py`；完整跨后端验收使用 `scripts/verify.ps1`。
+当前回归入口包括 `tests/test_ast_optimizer.py`、`tests/test_bytecode_optimizer.py`、`tests/test_numeric_semantics.py` 和 `tests/test_lvalue_semantics.py`；`tests/test_execution_semantics.py` 与 `tests/test_native_aot.py` 还验证入口选择和退出码在各执行路径上保持一致。完整跨后端验收使用 `scripts/verify.ps1`。

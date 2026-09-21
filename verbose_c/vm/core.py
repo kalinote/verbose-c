@@ -1005,5 +1005,7 @@ class VBCVirtualMachine:
         exit_value = self._stack.pop()
         if isinstance(exit_value, VBCInteger):
             self._exit_code = exit_value.value
+        elif isinstance(exit_value, VBCBool):
+            self._exit_code = int(exit_value.value)
         else:
             self._exit_code = 0

@@ -145,6 +145,10 @@ def test_windows_loader_relocates_real_entry_address(aot_program, tmp_path):
 @pytest.mark.parametrize("input_kind", ["source", "bytecode"])
 @pytest.mark.parametrize("source,data,expected,status", [
     ("int main() { return 42; }", b"", "", 42),
+    ("bool main() { return true; }", b"", "", 1),
+    ("bool main() { return false; }", b"", "", 0),
+    ("bool main() { return true; } main();", b"", "", 0),
+    ("int main() { return 42; } main();", b"", "", 0),
     ('int main() { string s = read(STDIN, 64); write(STDOUT, "回显："); write(STDOUT, s); return 3; }',
      "中文😀".encode("utf-8"), "回显：中文😀", 3),
     ('void stop() { write(STDOUT, "退出"); exit(7); } int main() { stop(); return 0; }', b"", "退出", 7),

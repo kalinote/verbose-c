@@ -297,7 +297,7 @@ def test_recorder_receives_compiled_output_once_for_each_input(tmp_path, monkeyp
     assert on_compiled.call_count == 1
 
 
-@pytest.mark.parametrize("stored_revision", [None, 0, 3])
+@pytest.mark.parametrize("stored_revision", [None, 0, 3, 5])
 def test_source_recompiles_old_compiler_cache(tmp_path, monkeypatch, stored_revision):
     """
     验证旧编译器缓存会被重建，而更新后的缓存仍可复用。
