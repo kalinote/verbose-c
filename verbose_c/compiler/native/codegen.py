@@ -51,6 +51,7 @@ from verbose_c.compiler.native.encoder import (
 from verbose_c.compiler.native.errors import NativeCodegenError
 from verbose_c.compiler.native.listing_formatter import format_native_code_program
 from verbose_c.compiler.native.machine_ir import (
+    ArraySlot,
     MachineBlock,
     MachineFunction,
     MachineInstruction,
@@ -156,7 +157,7 @@ _INT64_MAX = 2**63 - 1
 _INT32_MAX = 2**31 - 1
 
 
-_SUPPORTED_VREG_TYPES = SCALAR_VALUE_TYPES
+_SUPPORTED_VREG_TYPES = SUPPORTED_VALUE_TYPES
 
 
 def _function_param_types(function: MachineFunction) -> list[str]:
@@ -270,6 +271,11 @@ def generate_native_code(program: MachineProgram, *, aot: bool = False) -> Nativ
         global_frame_owner_name = "<module>"
     if entry_name == "<module>" and entry_function.frame.global_slots:
         global_frame_owner_name = "<module>"
+    if global_frame_owner_name is not None:
+        global_storage = {slot.index: slot for slot in entry_function.frame.global_slots}
+        for function in ordered_functions:
+            if any(global_storage.get(slot.index) != slot for slot in function.frame.global_slots):
+                raise NativeCodegenError(f"函数 {function.name}: 全局存储布局与入口声明不一致")
     function_names = set(program.functions.keys())
     function_return_types = {name: function.return_type for name, function in program.functions.items()}
     function_return_types[entry_function.name] = entry_function.return_type
@@ -578,6 +584,8 @@ def _validate_stack_slot_shape(
     kind = getattr(slot, "kind", None)
     index = getattr(slot, "index", None)
     size = getattr(slot, "size", None)
+    if isinstance(slot, ArraySlot) and kind == "global":
+        return
     if kind not in {"global", "local", "temp"}:
         message = f"native 机器码 MVP 栈槽类型暂不支持 {kind}"
     elif index is None or index == "":
@@ -1308,7 +1316,7 @@ class _NativeCodegenContext:
         ) = _compute_static_known_states(function)
         self.slot_offsets = self._build_slot_offsets()
         self.frame_size = self._build_frame_size()
-        if function.frame.array_slots:
+        if function.frame.array_slots or (global_frame_owner and any(isinstance(slot, ArraySlot) for slot in function.frame.global_slots)):
             # 留出保存寄存器、返回地址和最大调用窗口，避免跨过 Windows 栈保护页。
             call_sizes = [self.abi.shadow_space_size]
             for block in function.blocks:
@@ -1379,14 +1387,53 @@ class _NativeCodegenContext:
 
     def _lower_instruction(self, instruction: MachineInstruction) -> None:
         op = instruction.op
+        if op == "array_address":
+            slot = instruction.args[0].value
+            offset = self.slot_offsets[(slot.kind, slot.index)]
+            result = self._result_slot_offset(instruction)
+            prefix = b"\x49\x8D\x83" if slot.kind == "global" else b"\x48\x8D\x85"
+            self._emit(prefix + (8 - offset).to_bytes(4, "little", signed=True), "取得带长度的数组地址", "array_address",
+                       instruction.source_pc, instruction.source_line,
+                       {"array_slot": f"{slot.kind}[{slot.index}]", "offset": offset,
+                        "length": slot.length, "element_type": slot.element_type})
+            self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", "array_reference_save",
+                       instruction.source_pc, instruction.source_line)
+            return
+        if op in {"load_array_ref", "store_array_ref"}:
+            element_type = instruction.attrs["element_type"]
+            attrs = dict(instruction.attrs)
+            self._load_operand_to_rax(instruction.args[0], instruction)
+            self._load_operand_to_r10(instruction.args[1], instruction)
+            self._emit(b"\x48\x89\xC2\x4D\x85\xD2", "保存数组基址并检查负下标", "array_ref_lower_bound",
+                       instruction.source_pc, instruction.source_line, attrs)
+            self._emit_numeric_guard(0x79, 10, instruction)
+            self._emit(b"\x4C\x3B\x52\xF8", "比较下标与数组实际长度", "array_ref_upper_bound",
+                       instruction.source_pc, instruction.source_line, attrs)
+            self._emit_numeric_guard(0x7C, 10, instruction)
+            if op == "store_array_ref":
+                self._load_operand_to_rax(instruction.args[2], instruction)
+                self._emit_integer_range_check(element_type.lower(), instruction,
+                                               {"CHAR": 3, "SHORT": 4, "INT": 5}.get(element_type, 6))
+                self._load_operand_to_r10(instruction.args[1], instruction)
+            self._emit(bytes([0x4A, 0x89 if op == "store_array_ref" else 0x8B, 0x04, 0xD2]),
+                       "通过数组引用读写元素", "array_ref_store" if op == "store_array_ref" else "array_ref_load",
+                       instruction.source_pc, instruction.source_line, attrs)
+            if op == "load_array_ref":
+                result = self._result_slot_offset(instruction)
+                self._emit(encode_mov_rbp_offset_from_rax(result), f"mov [rbp-{result}], rax", op,
+                           instruction.source_pc, instruction.source_line)
+            return
         if op in {"alloc_array", "load_index", "store_index"}:
             base = instruction.result if op == "alloc_array" else instruction.args[0]
             slot = base.value
-            offset = self.slot_offsets[("array", slot.index)]
-            attrs = {"array_slot": f"array[{slot.index}]", "length": slot.length,
+            offset = self.slot_offsets[(slot.kind, slot.index)]
+            data_offset = offset - 8
+            attrs = {"array_slot": f"{slot.kind}[{slot.index}]", "length": slot.length,
                      "element_type": slot.element_type, "offset": offset}
             if op == "alloc_array":
-                code = encode_mov_rax_imm64(0) + b"".join(encode_mov_rbp_offset_from_rax(offset - index * 8) for index in range(slot.length))
+                store = encode_mov_r11_offset_from_rax if slot.kind == "global" else encode_mov_rbp_offset_from_rax
+                code = (encode_mov_rax_imm64(slot.length) + store(offset) + encode_mov_rax_imm64(0)
+                        + b"".join(store(data_offset - index * 8) for index in range(slot.length)))
                 self._emit(code, f"清零 {attrs['array_slot']}: {slot.element_type}[{slot.length}]，基址 rbp-{offset}",
                            "array_init", instruction.source_pc, instruction.source_line, attrs)
                 return
@@ -1400,8 +1447,10 @@ class _NativeCodegenContext:
                 self._emit_integer_range_check(slot.element_type.lower(), instruction,
                                                {"CHAR": 3, "SHORT": 4, "INT": 5}.get(slot.element_type, 6))
             self._load_operand_to_r10(instruction.args[1], instruction)
-            code = bytes([0x4A, 0x89 if op == "store_index" else 0x8B, 0x84, 0xD5]) + (-offset).to_bytes(4, "little", signed=True)
-            asm = f"mov [rbp+r10*8-{offset}], rax" if op == "store_index" else f"mov rax, [rbp+r10*8-{offset}]"
+            register = "r11" if slot.kind == "global" else "rbp"
+            code = bytes([0x4B if slot.kind == "global" else 0x4A, 0x89 if op == "store_index" else 0x8B, 0x84,
+                          0xD3 if slot.kind == "global" else 0xD5]) + (-data_offset).to_bytes(4, "little", signed=True)
+            asm = f"mov [{register}+r10*8-{data_offset}], rax" if op == "store_index" else f"mov rax, [{register}+r10*8-{data_offset}]"
             self._emit(code, asm, "array_store" if op == "store_index" else "array_load",
                        instruction.source_pc, instruction.source_line, attrs)
             if op == "load_index":
@@ -2089,7 +2138,7 @@ class _NativeCodegenContext:
         next_offset = 8
         global_next_offset = 8
         for slot in self.function.frame.global_slots:
-            offsets[(slot.kind, slot.index)] = global_next_offset
+            offsets[(slot.kind, slot.index)] = global_next_offset + slot.size - 8
             global_next_offset += slot.size
             if self.global_frame_owner:
                 next_offset = global_next_offset
@@ -2124,10 +2173,10 @@ class _NativeCodegenContext:
     def _stack_slot_allocations(self) -> list[NativeStackSlotAllocation]:
         """生成可 dump 的栈槽分配结果。"""
         items = []
-        arrays = {slot.index: slot for slot in self.function.frame.array_slots}
+        arrays = {(slot.kind, slot.index): slot for slot in [*self.function.frame.array_slots, *self.function.frame.global_slots] if isinstance(slot, ArraySlot)}
         for (kind, index), offset in sorted(self.slot_offsets.items(), key=lambda item: item[1]):
             name = f"%v{index}" if kind == "temp" else f"{kind}[{index}]"
-            slot = arrays.get(index) if kind == "array" else None
+            slot = arrays.get((kind, index))
             items.append(NativeStackSlotAllocation(name=name, offset=offset, size=slot.size if slot else 8,
                                                   array_length=slot.length if slot else None,
                                                   element_type=slot.element_type if slot else None))

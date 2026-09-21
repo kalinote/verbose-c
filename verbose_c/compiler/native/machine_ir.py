@@ -24,13 +24,13 @@ class StackSlot:
 
 @dataclass(frozen=True)
 class ArraySlot:
-    """函数内数组的独立存储声明，地址不能作为标量使用。"""
+    """数组的独立存储声明，包含长度头和连续元素槽。"""
 
-    index: int
+    index: int | str
     length: int
     element_type: str
     size: int
-    kind: str = field(default="array", init=False)
+    kind: str = "array"
 
 
 @dataclass(frozen=True)

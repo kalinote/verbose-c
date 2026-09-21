@@ -129,6 +129,7 @@
   - 【已完成】`Grammar/verbose_c.gram` 表达式层级已纳入 `%`、复合赋值与前后缀 `++`/`--`；`Operator` 枚举与 `CompoundAssignmentNode`/`UpdateExprNode` AST 节点已对齐
   - 【已完成】`TypeChecker` 支持取模（整数操作数）、复合赋值（复用二元运算 + 赋值检查）、自增自减（可修改左值 + 整数/浮点）
   - 【已完成】`OpcodeGenerator` 生成 `MODULO` 及复合赋值/自增自减字节码；`VBCInteger.__mod__` 与 VM `MODULO` 指令闭环
+  - 【已完成】复合赋值和自增减缓存首次求得的地址或对象；数组／指针下标、解引用、结构体／类成员中的副作用只执行一次，支持 `(*p)++` 等带括号左值。`tests/test_lvalue_semantics.py` 覆盖 O0/O1、源码缓存和字节码重载。
 - 验收标准：
   - 【已完成】每个运算符至少有独立用例覆盖（`tests/grammar/basic_operators_test.vbc`：11 种运算符形态 + `for (...; i++)`）
   - 【已完成】运算优先级与结合性符合 C 常识（`%`/`*`/`/` 位于 `multiplicative`，`+`/`-` 位于 `additive`，复合赋值右结合，前缀 `++`/`--` 高于后缀）
@@ -172,12 +173,12 @@
 - 当前现状：
   - 【已完成】grammar、`ArrayType`、`SubscriptNode`/`InitListNode`、类型检查、字节码（`ALLOC_ARRAY`/`LOAD_INDEX`/`STORE_INDEX`/`ARRAY_DECAY`）与 VM 连续堆布局已闭环
   - 【已完成】验收用例见 `tests/grammar/array_subscript_test.vbc`
-  - 【已完成】VM 与 Native 均报告中文数组越界错误；Native 支持定长局部标量数组。
+  - 【已完成】VM 与 Native 均报告中文数组越界错误；Native 支持定长局部／全局标量数组及带边界的借用形参。VM 的数组衰变和指针运算保留原数组边界，跨函数读写仍检查实际长度。
 - 验收标准：
   - 【已完成】`int arr[3]; arr[0] = 1; arr[1] = arr[0] + 1;` 可编译运行且结果正确
   - 【已完成】`int arr[] = {1, 2, 3};` 长度推导为 3，读写下标正确
   - 【已完成】`int arr[5] = {1, 2};` 其余元素为 0
-  - 【已完成】数组实参传入 `void f(int *p)` 可编译（衰变语义）
+  - 【已完成】数组实参可传入 `void f(int *p)`、`void f(int p[])` 或 `void f(int p[10])`；支持原型与定义形式互换、修改调用方数据、递归转传及栈参数。形参中的字面量长度不改变实际边界；VLA 形参另列后续范围。
   - 【已完成】越界时有明确中文运行时错误（编译期：非整型下标、长度非法等也正常报错）
   - 【已完成】现有 `pointer_test` 等回归不退化
 - 历史问题已修复：
@@ -293,7 +294,7 @@
 
 - 【已完成】`object/numeric.py` 集中定义位宽、提升、转换、舍入、除法和余数；`compiler/constant_evaluation.py` 复用这些规则进行常量求值。
 - 【已完成】IR 保留算术类型。native 支持定宽整数、binary32/binary64 混算、转换、比较、寄存器及栈参数、返回值和全局标量；运行期错误通过状态通道传播，内存执行返回带行号的中文诊断。
-- 【边界】native 当前支持 Windows x64 标量及定长局部一维标量数组；全局数组、数组参数/返回及地址逃逸、指针、结构体和 `unlimited int/float` 扩展尚不支持。无限整数在 VM 中保持任意精度；无限浮点是现有的 binary64 扩展，不是任意精度浮点。
+- 【边界】native 当前支持 Windows x64 标量、定长局部／全局一维标量数组及完整数组的借用传参；数组返回、偏移地址保存、引用写入全局指针、一般指针操作、结构体和 `unlimited int/float` 扩展尚不支持。无限整数在 VM 中保持任意精度；无限浮点是现有的 binary64 扩展，不是任意精度浮点。
 - 【已完成】`tests/test_numeric_semantics.py` 对比 O0/O1、VM/native、常量/函数参数、缓存与 `.vbb` 重载，并覆盖精度、边界、短路与非法转换；`tests/test_native_codegen.py` 覆盖机器码、PE 执行及导出元数据校验。
 - 【已完成】字节码格式升为 version 2，拒绝旧算术语义的 version 1 文件；源码增量缓存失效后自动重编译。旧 `.vbb` 需要从源码重新生成。
 

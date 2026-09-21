@@ -1,7 +1,7 @@
 from typing import Any
 
 from verbose_c.compiler.ir.model import IRFunction, IRInstruction, IRProgram, IRTerminator, IRValue
-from verbose_c.compiler.native.abi import ARRAY_ELEMENT_TYPES, MAX_ARRAY_FRAME_SIZE, StackFrameLayout, WINDOWS_X64_ABI, FLOAT_VALUE_TYPES, SCALAR_VALUE_TYPES
+from verbose_c.compiler.native.abi import ARRAY_ELEMENT_TYPES, ARRAY_REFERENCE_TYPES, SUPPORTED_VALUE_TYPES, MAX_ARRAY_FRAME_SIZE, StackFrameLayout, WINDOWS_X64_ABI, FLOAT_VALUE_TYPES, SCALAR_VALUE_TYPES
 from verbose_c.compiler.native.errors import NativeLoweringError
 from verbose_c.compiler.native.machine_ir import (
     MachineBlock,
@@ -57,15 +57,11 @@ _NATIVE_INTEGER_CAST_TARGETS = {
 _NATIVE_BOOL_CAST_TARGETS = {"bool", "bool64"}
 
 _UNSUPPORTED_FEATURES = {
-    "array_decay": "array_decay",
     "alloc_struct": "struct",
     "load_field": "struct",
     "store_field": "struct",
     "copy_struct": "struct",
     "address_of": "address_escape",
-    "load_pointer": "pointer_deref",
-    "store_pointer": "pointer_deref",
-    "pointer_add": "pointer_arithmetic",
     "pointer_sub": "pointer_arithmetic",
     "pointer_diff": "pointer_arithmetic",
     "pointer_address": "pointer_address",
@@ -86,9 +82,10 @@ def lower_ir_program_to_machine(program: IRProgram) -> MachineProgram:
     function_return_types[program.module.name] = program.module.return_type
     global_slots: dict[str, StackSlot] = {}
     global_value_types: dict[str, str] = {}
-    module = _MachineLoweringContext(program.module, function_names, function_return_types, global_slots, global_value_types).lower()
+    global_arrays: dict[str, MachineOperand] = {}
+    module = _MachineLoweringContext(program.module, function_names, function_return_types, global_slots, global_value_types, global_arrays).lower()
     functions = {
-        name: _MachineLoweringContext(function, function_names, function_return_types, global_slots, global_value_types).lower()
+        name: _MachineLoweringContext(function, function_names, function_return_types, global_slots, global_value_types, global_arrays).lower()
         for name, function in program.functions.items()
     }
     shared_global_slots = list(global_slots.values())
@@ -111,6 +108,7 @@ class _MachineLoweringContext:
         function_return_types: dict[str, str],
         global_slots: dict[str, StackSlot] | None = None,
         global_value_types: dict[str, str] | None = None,
+        global_arrays: dict[str, MachineOperand] | None = None,
     ):
         self.function = function
         self.function_names = function_names
@@ -118,15 +116,23 @@ class _MachineLoweringContext:
         self.value_operands: dict[IRValue, MachineOperand] = {}
         self.global_slots = global_slots if global_slots is not None else {}
         self.global_value_types = global_value_types if global_value_types is not None else {}
+        self.global_arrays = global_arrays if global_arrays is not None else {}
         self.local_slots: dict[int, StackSlot] = {}
         self.local_value_types: dict[int, str] = {
             index: value_type
             for index, value_type in enumerate(function.param_types[:function.param_count])
-            if value_type in SCALAR_VALUE_TYPES
+            if value_type in SUPPORTED_VALUE_TYPES
         }
         self.temp_slots: list[StackSlot] = []
         self.array_slots: list[ArraySlot] = []
         self.local_arrays: dict[int, MachineOperand] = {}
+        self.indexed_lvalues: dict[int, MachineOperand] = {}
+        self.zero_values = {
+            node.result for block in function.blocks for node in block.instructions
+            if node.op == "const" and node.args and node.args[0].kind == "constant"
+            and isinstance(function.constants[node.args[0].name], VBCInteger)
+            and function.constants[node.args[0].name].value == 0
+        }
         self.vreg_id = 0
         self.exit_code_value: MachineOperand | None = None
         self.registered_function_symbols: set[str] = set()
@@ -171,19 +177,54 @@ class _MachineLoweringContext:
         if op == "const":
             self._lower_const(block, instruction)
             return
+        if op == "array_decay":
+            base = self._operand(instruction.args[0], instruction)
+            if base.kind != "array" or instruction.attrs.get("element_type") != base.value.element_type:
+                self._unsupported_feature(instruction, "array_decay（仅支持完整标量数组引用）")
+            result = self._define_result(instruction, type_hint=f"array_ref:{base.value.element_type}")
+            block.instructions.append(MachineInstruction("array_address", result=result, args=[base],
+                                      attrs={"length": base.value.length, "element_type": base.value.element_type},
+                                      source_pc=instruction.source_pc, source_line=instruction.source_line))
+            return
+        if op == "pointer_add":
+            base, index = [self._operand(value, instruction) for value in instruction.args]
+            if base.type_hint not in ARRAY_REFERENCE_TYPES or base.kind not in {"slot", "vreg"} or index.type_hint != "int64":
+                self._unsupported_feature(instruction, "pointer_arithmetic（仅支持数组引用的下标寻址）")
+            self.value_operands[instruction.result] = (base if instruction.args[1] in self.zero_values
+                                                       else MachineOperand("indexed_array", (base, index), base.type_hint))
+            return
+        if op in {"load_pointer", "store_pointer"}:
+            pointer = self._operand(instruction.args[0], instruction)
+            base, index = pointer.value if pointer.kind == "indexed_array" else (pointer, MachineOperand.imm(0))
+            if base.type_hint not in ARRAY_REFERENCE_TYPES or base.kind not in {"slot", "vreg"}:
+                self._unsupported_feature(instruction, "pointer_deref（需要带长度的数组引用）")
+            element_type = base.type_hint.split(":", 1)[1]
+            args = [base, index]
+            result = None
+            if op == "load_pointer":
+                result = self._define_result(instruction, type_hint=ARRAY_ELEMENT_TYPES[element_type])
+            else:
+                args.append(self._operand(instruction.args[1], instruction))
+            block.instructions.append(MachineInstruction("load_array_ref" if op == "load_pointer" else "store_array_ref",
+                                      result=result, args=args, attrs={"element_type": element_type},
+                                      source_pc=instruction.source_pc, source_line=instruction.source_line))
+            return
         if op == "alloc_array":
-            if self.function.name == "<module>":
-                self._unsupported_feature(instruction, "global_array（全局数组）")
             length = instruction.attrs.get("length")
             element_type = instruction.attrs.get("element_type")
             if not isinstance(element_type, str) or element_type not in ARRAY_ELEMENT_TYPES:
                 self._unsupported_type(instruction, f"数组元素 {element_type}")
             if type(length) is not int or length <= 0:
                 self._unsupported_feature(instruction, "数组长度必须为正整数")
-            if length * 8 > MAX_ARRAY_FRAME_SIZE:
+            if (length + 1) * 8 > MAX_ARRAY_FRAME_SIZE:
                 self._unsupported_feature(instruction, f"数组栈帧超过 {MAX_ARRAY_FRAME_SIZE} 字节上限")
-            slot = ArraySlot(len(self.array_slots), length, element_type, length * 8)
-            self.array_slots.append(slot)
+            if self.function.name == "<module>":
+                key = f"<array:{len(self.global_slots)}>"
+                slot = ArraySlot(key, length, element_type, (length + 1) * 8, kind="global")
+                self.global_slots[key] = slot
+            else:
+                slot = ArraySlot(len(self.array_slots), length, element_type, (length + 1) * 8)
+                self.array_slots.append(slot)
             result = MachineOperand("array", slot, "array_address")
             self.value_operands[instruction.result] = result
             block.instructions.append(MachineInstruction(
@@ -206,6 +247,9 @@ class _MachineLoweringContext:
             return
         if op == "load_local":
             local_index = int(instruction.args[0].name)
+            if local_index in self.indexed_lvalues:
+                self.value_operands[instruction.result] = self.indexed_lvalues[local_index]
+                return
             if local_index in self.local_arrays:
                 self.value_operands[instruction.result] = self.local_arrays[local_index]
                 return
@@ -223,6 +267,12 @@ class _MachineLoweringContext:
         if op == "store_local":
             target = instruction.args[0]
             value = self._operand(instruction.args[1], instruction)
+            if value.kind == "indexed_array":
+                index = int(target.name)
+                if index not in self.function.lvalue_slots or index in self.indexed_lvalues or index < self.function.param_count:
+                    self._unsupported_feature(instruction, "数组偏移地址只允许用于下标读写，不能保存或逃逸")
+                self.indexed_lvalues[index] = value
+                return
             if value.kind == "array":
                 self.local_arrays[int(target.name)] = value
                 return
@@ -241,6 +291,9 @@ class _MachineLoweringContext:
             symbol = instruction.args[0]
             if symbol.kind != "global":
                 self._unsupported_feature(instruction, "non_global_symbol")
+            if str(symbol.name) in self.global_arrays:
+                self.value_operands[instruction.result] = self.global_arrays[str(symbol.name)]
+                return
             if str(symbol.name) in BUILTIN_CONSTANTS:
                 result = self._define_result(instruction)
                 block.instructions.append(MachineInstruction(
@@ -271,6 +324,8 @@ class _MachineLoweringContext:
             machine_op = _BINARY_OPS[op]
             result_type = "bool64" if machine_op in _COMPARE_MACHINE_OPS else "int64"
             operand_type = self._operand(instruction.args[0], instruction).type_hint
+            if operand_type in ARRAY_REFERENCE_TYPES:
+                self._unsupported_feature(instruction, "数组引用不能参与标量运算")
             if operand_type == "string":
                 if op not in {"binary eq", "binary ne"}:
                     self._unsupported_feature(instruction, f"string_operation:{op}")
@@ -304,6 +359,8 @@ class _MachineLoweringContext:
             self._lower_value_instruction(block, instruction, "not_bool", type_hint="bool64")
             return
         if op == "cast":
+            if self._operand(instruction.args[0], instruction).type_hint in ARRAY_REFERENCE_TYPES:
+                self._unsupported_feature(instruction, "数组引用不能转换为标量")
             raw_target_type = str(instruction.attrs.get("target_type", ""))
             target_type = raw_target_type.lower()
             if target_type in _NATIVE_BOOL_CAST_TARGETS:
@@ -322,7 +379,7 @@ class _MachineLoweringContext:
         if op == "phi":
             args = [self._operand(value, instruction) for value in instruction.args]
             incoming_types = {operand.type_hint for operand in args}
-            result_type = next(iter(incoming_types)) if len(incoming_types) == 1 and incoming_types <= SCALAR_VALUE_TYPES else "int64"
+            result_type = next(iter(incoming_types)) if len(incoming_types) == 1 and incoming_types <= SUPPORTED_VALUE_TYPES else "int64"
             result = self._define_result(instruction, type_hint=result_type)
             block.instructions.append(
                 MachineInstruction(
@@ -425,6 +482,13 @@ class _MachineLoweringContext:
     def _lower_store_global(self, block: MachineBlock, instruction: IRInstruction) -> None:
         target = instruction.args[0]
         value = self._operand(instruction.args[1], instruction)
+        if value.kind == "array":
+            if self.function.name != "<module>" or value.value.kind != "global":
+                self._unsupported_feature(instruction, "局部数组地址不能保存到全局变量")
+            self.global_arrays[str(target.name)] = value
+            return
+        if value.type_hint in ARRAY_REFERENCE_TYPES:
+            self._unsupported_feature(instruction, "数组地址不能保存到全局指针")
         if value.kind == "symbol":
             self.registered_function_symbols.add(str(target.name))
             block.instructions.append(
@@ -481,7 +545,7 @@ class _MachineLoweringContext:
             ):
                 self._unsupported_feature(instruction, f"builtin_function:{callee_name[8:-1]}_argument_types")
         for arg in args:
-            if arg.type_hint not in SCALAR_VALUE_TYPES:
+            if arg.type_hint not in SUPPORTED_VALUE_TYPES or arg.kind == "indexed_array":
                 self._unsupported_feature(instruction, f"call_arg_type:{arg.type_hint}")
         arg_locations = [
             WINDOWS_X64_ABI.argument_location(index, args[index].type_hint).__dict__
@@ -564,6 +628,8 @@ class _MachineLoweringContext:
                 args = [self._operand(terminator.args[0], terminator)]
             else:
                 args = [MachineOperand.imm(0)]
+            if any(arg.kind == "array" or arg.type_hint in ARRAY_REFERENCE_TYPES for arg in args):
+                self._unsupported_feature(terminator, "数组地址不能作为返回值逃逸")
             return MachineTerminator("ret", args=args, source_pc=terminator.source_pc, source_line=terminator.source_line)
         if terminator.op == "halt":
             args = [] if self.function.return_type == "void" else [self.exit_code_value or MachineOperand.imm(0)]
@@ -589,6 +655,9 @@ class _MachineLoweringContext:
                 self._unsupported_feature(node, f"undefined_temp:{value.name}")
             return operand
         if value.kind == "local":
+            type_hint = self.local_value_types.get(int(value.name))
+            if type_hint in ARRAY_REFERENCE_TYPES:
+                return MachineOperand("slot", self._local_slot(int(value.name)), type_hint)
             return MachineOperand.slot(self._local_slot(int(value.name)))
         if value.kind == "global":
             return MachineOperand.symbol(str(value.name))

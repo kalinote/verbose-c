@@ -13,6 +13,7 @@ from verbose_c.compiler.native import (
     validate_native_code_map_bytes,
 )
 from verbose_c.compiler.native.machine_ir import MachineOperand
+from verbose_c.compiler.native.machine_ir import StackSlot, VirtualRegister
 from verbose_c.compiler.native.runner import (
     can_run_native_memory, run_native_bytes_in_memory, run_native_program_in_memory,
 )
@@ -209,12 +210,10 @@ def test_array_element_conversion_and_overflow(tmp_path, level, body):
 
 
 @pytest.mark.parametrize("source,reason", [
-    ("int a[2]; int main() { return a[0]; }", "全局数组"),
     ("int main() { string a[2]; return 0; }", "数组元素"),
     ("int main() { unlimited int a[2]; return 0; }", "数组元素"),
-    ("int get(int *p) { return 0; } int main() { int a[2]; return get(a); }", "array_decay"),
     ("int *get() { int a[2]; return a; } int main() { return 0; }", "数组地址"),
-    ("int main() { int a[2]; int *p = &a[0]; return 0; }", "array_decay"),
+    ("int main() { int a[2]; int *p = &a[1]; return 0; }", "数组偏移地址"),
     ("int main() { int a[1000000000]; return 0; }", "栈帧"),
     ("int main() { int a[250]; int b[250]; int c[250]; return a[0]+b[0]+c[0]; }", "栈帧"),
 ])
@@ -346,8 +345,8 @@ int main() {
 
 
 @pytest.mark.parametrize("level", [0, 1])
-def test_vm_global_array_update_still_evaluates_index_once(tmp_path, level):
-    """VM 全局数组也复用更新目标，Native 限制不影响已有执行路径。"""
+def test_global_array_updates_evaluate_index_once(tmp_path, level):
+    """VM、Native 与独立程序的全局数组更新均只计算一次下标。"""
     _check_paths(tmp_path, """
 int a[3] = {10, 20, 30};
 int i = 0;
@@ -358,4 +357,160 @@ int main() {
     if (i == 3 && a[0] == 15 && a[1] == 21 && a[2] == 31) { return 0; }
     return 99;
 }
-""", level, native=False)
+""", level, standalone=True)
+
+
+@pytest.mark.parametrize("level", [0, 1])
+def test_global_arrays_are_shared_across_calls_and_recursion(tmp_path, level):
+    """顶层初始化及函数调用共享全局数组，递归局部数组保持独立。"""
+    _check_paths(tmp_path, """
+int values[4] = {1, 2};
+double weights[2] = {1.5, 2.5};
+int accumulate(int n) {
+    int saved[1] = {n};
+    if (n == 0) { return values[0]; }
+    values[n] += n;
+    return saved[0] + accumulate(n - 1);
+}
+int main() {
+    if (values[2] != 0 || values[3] != 0) { return 98; }
+    int total = accumulate(3);
+    weights[1] += weights[0];
+    if (total == 7 && values[0] == 1 && values[1] == 3 && values[2] == 2 && values[3] == 3 && weights[1] == 4.0) { return 0; }
+    return 99;
+}
+""", level, standalone=True)
+
+
+@pytest.mark.parametrize("level", [0, 1])
+def test_array_parameters_modify_and_forward_local_and_global_storage(tmp_path, level):
+    """同一函数接收不同长度数组，支持转传、别名、递归和栈参数。"""
+    _check_paths(tmp_path, """
+int shared[4] = {1, 2, 3, 4};
+int sum(int *values, int n) {
+    if (n == 0) { return 0; }
+    return values[n - 1] + sum(values, n - 1);
+}
+void change(int a, int b, int c, int d, int *values, int *alias) {
+    int i = 0;
+    values[i++] += 5;
+    alias[1]++;
+    if (i != 1) { exit(98); }
+}
+int forward(int *values, int n) {
+    change(0, 0, 0, 0, values, values);
+    return sum(values, n);
+}
+int main() {
+    int local[2] = {10, 20};
+    int one[1] = {8};
+    if (forward(local, 2) != 36 || local[0] != 15 || local[1] != 21) { return 96; }
+    if (forward(shared, 4) != 16 || shared[0] != 6 || shared[1] != 3) { return 97; }
+    if (sum(one, 1) != 8) { return 99; }
+    return 0;
+}
+""", level, standalone=True)
+
+
+@pytest.mark.parametrize("level", [0, 1])
+@pytest.mark.parametrize("type_name,value", [
+    ("char", "120"), ("short", "32000"), ("int", "2000000000"), ("long", "2147483648"),
+    ("long long", "2147483649"), ("bool", "true"), ("float", "1.25"), ("double", "2.5"),
+])
+def test_array_parameter_element_types(tmp_path, level, type_name, value):
+    """数组参数保留元素类型，跨函数读写遵守数值转换语义。"""
+    _check_paths(tmp_path, f"""
+void put({type_name} *values, {type_name} value) {{ values[1] = value; }}
+{type_name} get({type_name} *values) {{ return values[1]; }}
+int main() {{
+    {type_name} values[3];
+    put(values, {value});
+    if (get(values) == {value} && values[0] == ({type_name})0 && values[2] == ({type_name})0) {{ return 0; }}
+    return 99;
+}}
+""", level, standalone=True)
+
+
+@pytest.mark.parametrize("level", [0, 1])
+@pytest.mark.parametrize("index", ["-1", "2", "9223372036854775807"])
+@pytest.mark.parametrize("operation", ["return values[index];", "values[index] = 3; return 0;"])
+def test_array_parameter_bounds_use_actual_length(tmp_path, level, index, operation):
+    """跨函数和再次转传后仍按实际数组长度检查读写边界。"""
+    _check_paths(tmp_path, f"""
+int access(int *values, long index) {{ {operation} }}
+int forward(int *values) {{ return access(values, {index}); }}
+int main() {{ int values[2] = {{1, 2}}; return forward(values); }}
+""", level, error="数组下标越界", standalone=True)
+
+
+@pytest.mark.parametrize("level", [0, 1])
+def test_array_parameter_declarations_use_caller_storage(tmp_path, level):
+    """数组形参声明调整为引用，长度检查始终使用调用方的实际数组。"""
+    _check_paths(tmp_path, """
+void change(int values[10]);
+void change(int *values) { values[1] = 42; }
+int sum(int values[], int count) {
+    int total = 0;
+    for (int i = 0; i < count; i++) { total += values[i]; }
+    return total;
+}
+int main() {
+    int values[2] = {1, 2};
+    change(&values[0]);
+    if (sum(values, 2) == 43 && values[1] == 42) { return 0; }
+    return 99;
+}
+""", level, standalone=True)
+
+
+@pytest.fixture
+def array_reference_program(tmp_path):
+    """编译数组转传程序供引用来源和产物校验复用。"""
+    path = tmp_path / "reference.vbc"
+    path.write_text("int read_item(int *values, int i) { return values[i]; } "
+                    "int main() { int a[2] = {3, 4}; return read_item(a, 1); }", encoding="utf-8")
+    return compile_module(str(path), require_native_code=True)
+
+
+@pytest.mark.parametrize("damage", ["integer", "undefined", "uninitialized", "element", "escape"])
+def test_array_reference_machine_provenance(array_reference_program, damage):
+    """拒绝整数伪造、缺失定义、未初始化引用和跨类型或返回值逃逸。"""
+    machine = copy.deepcopy(array_reference_program.machine_program)
+    function = machine.functions["read_item"]
+    nodes = [node for block in function.blocks for node in block.instructions]
+    access = next(node for node in nodes if node.op == "load_array_ref")
+    if damage == "integer":
+        access.args[0] = MachineOperand("imm", 123, "array_ref:INT")
+    elif damage == "undefined":
+        access.args[0] = MachineOperand.vreg(VirtualRegister("v999", "array_ref:INT"))
+    elif damage == "uninitialized":
+        reference = next(node for node in nodes if node.op == "load_stack" and node.result.type_hint == "array_ref:INT")
+        slot = StackSlot("local", 999)
+        function.frame.local_slots.append(slot)
+        reference.args[0] = MachineOperand("slot", slot, "array_ref:INT")
+    elif damage == "element":
+        access.attrs["element_type"] = "DOUBLE"
+    else:
+        function.blocks[-1].terminator.args = [access.args[0]]
+    with pytest.raises(NativeCodegenError, match="数组引用"):
+        generate_native_code(machine)
+
+
+@pytest.mark.parametrize("damage", ["lower", "upper", "error", "address"])
+def test_array_reference_map_rejects_inconsistent_guards(array_reference_program, damage):
+    """map 必须保留真实长度寻址和完整的两侧越界检查。"""
+    program = array_reference_program.native_code_program
+    metadata = native_code_program_map(program)
+    function = next(item for item in metadata["functions"] if item["name"] == "read_item")
+    instructions = function["instructions"]
+    if damage == "lower":
+        next(item for item in instructions if item["source_op"] == "array_ref_lower_bound")["source_op"] = "unknown"
+    elif damage == "upper":
+        next(item for item in instructions if item["source_op"] == "array_ref_upper_bound")["source_attrs"]["element_type"] = "CHAR"
+    elif damage == "error":
+        next(item for item in instructions if item["source_op"] == "numeric_error")["source_attrs"]["error_code"] = 2
+    else:
+        caller = next(item for item in metadata["functions"] if item["name"] == "main")
+        next(item for item in caller["instructions"] if item["source_op"] == "array_address")["source_attrs"]["offset"] += 8
+    with pytest.raises(NativeCodegenError, match="数组"):
+        validate_native_code_map_bytes(program.code, metadata)

@@ -663,6 +663,8 @@ class VBCVirtualMachine:
         pointer = self._stack.pop()
         if not isinstance(pointer, VBCPointer):
             raise TypeError(f"解引用操作的目标必须是指针，而不是 {type(pointer).__name__}")
+        if pointer.bounds is not None and not pointer.bounds[0] <= pointer.address < pointer.bounds[1]:
+            raise RuntimeError("数组下标越界")
         
         value = self.memory.read(pointer.address)
         self._stack.push(value)
@@ -677,6 +679,8 @@ class VBCVirtualMachine:
 
         if not isinstance(pointer, VBCPointer):
             raise TypeError(f"解引用赋值的目标必须是指针，而不是 {type(pointer).__name__}")
+        if pointer.bounds is not None and not pointer.bounds[0] <= pointer.address < pointer.bounds[1]:
+            raise RuntimeError("数组下标越界")
             
         self.memory.write(pointer.address, value)
         # 赋值表达式本身也有值，C语言中是赋的那个值
@@ -740,9 +744,11 @@ class VBCVirtualMachine:
     def __handle_array_decay(self, operand):
         if operand is None:
             raise RuntimeError("ARRAY_DECAY 指令缺少操作数")
-        element_type_enum = operand
+        element_type_enum, length = operand if isinstance(operand, tuple) else (operand, None)
         base = self._pop_array_base_address()
-        pointer = self._allocate(VBCPointer(base, element_type_enum))
+        if length is not None and (type(length) is not int or length <= 0):
+            raise RuntimeError("数组引用长度必须是正整数")
+        pointer = self._allocate(VBCPointer(base, element_type_enum, (base, base + length) if length is not None else None))
         self._stack.push(pointer)
 
     @register_instruction(Opcode.ALLOC_STRUCT)
@@ -815,12 +821,12 @@ class VBCVirtualMachine:
     @register_instruction(Opcode.POINTER_ADD)
     def __handle_pointer_add(self):
         pointer, offset = self._pop_pointer_offset_operands("指针加法")
-        self._stack.push(VBCPointer(pointer.address + offset, pointer.target_type))
+        self._stack.push(VBCPointer(pointer.address + offset, pointer.target_type, pointer.bounds))
 
     @register_instruction(Opcode.POINTER_SUB)
     def __handle_pointer_sub(self):
         pointer, offset = self._pop_pointer_offset_operands("指针减法")
-        self._stack.push(VBCPointer(pointer.address - offset, pointer.target_type))
+        self._stack.push(VBCPointer(pointer.address - offset, pointer.target_type, pointer.bounds))
 
     @register_instruction(Opcode.POINTER_DIFF)
     def __handle_pointer_diff(self):

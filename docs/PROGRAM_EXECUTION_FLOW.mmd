@@ -1,0 +1,48 @@
+%% Verbose-C 主执行流程，依据当前工作区代码整理。
+%% 入口：verbose_c/cli.py::main；编排：verbose_c/engine/engine.py::_run_file_pipeline。
+%% 本图覆盖源码、字节码和解析器生成；已有 native bin、PE、map 的校验入口单独由 CLI 分发。
+%% 缓存复用要求入口及 include 依赖摘要、编译器修订、字节码版本、ABI、优化等级等一致。
+%% 请求 native 运行或导出、dump all/ir/machine、刷新解析器会使源码重新编译。
+%% --emit 本身不关闭 VM；--compile-only、--emit-exe 和 native 调试执行会关闭默认 VM 执行。
+flowchart TD
+    cliStart(["启动 verbose_c.cli"]) --> arguments["解析并校验命令行参数"]
+    arguments --> inputMode{"入口模式"}
+    inputMode -->|"--compile-parser"| parserGeneration["语法文件经 PPG 生成 parser.py"]
+    parserGeneration --> cliEnd(["整理结果与日志，返回进程退出码"])
+
+    inputMode -->|"源码 .vbc"| cacheCheck{"编译缓存可复用？"}
+    cacheCheck -->|"是"| cacheLoad["从缓存 .vbb 恢复字节码与元数据"]
+    cacheCheck -->|"否"| sourceCompile[["完整源码编译子流程"]]
+    sourceCompile --> saveArtifact["保存 .vbb 和依赖清单"]
+    cacheLoad --> compiledOutput["取得 CompilerOutput"]
+    saveArtifact --> compiledOutput
+
+    inputMode -->|"字节码 .vbb"| bytecodeLoad["校验并读取字节码产物"]
+    bytecodeLoad --> backendRestore["按 dump 或 native 请求补齐后端产物"]
+    backendRestore --> compiledOutput
+
+    compiledOutput --> nativeMode{"请求原生调试执行？"}
+    nativeMode -->|"是"| nativeRun["内存执行机器码，或运行临时 PE"]
+    nativeMode -->|"否"| nativeExport["按需导出 EXE、机器码、map 等产物"]
+    nativeRun --> nativeExport
+    nativeExport --> vmMode{"需要执行 VM？"}
+    vmMode -->|"是"| vmRun[["虚拟机执行字节码"]]
+    vmMode -->|"否"| cliEnd
+    vmRun --> cliEnd
+
+    sourceCompile -.->|"失败"| errorReport["报告诊断，设置失败退出码"]
+    backendRestore -.->|"失败"| errorReport
+    bytecodeLoad -.->|"失败"| errorReport
+    nativeRun -.->|"失败"| errorReport
+    nativeExport -.->|"失败"| errorReport
+    vmRun -.->|"失败"| errorReport
+    errorReport --> cliEnd
+
+    classDef decision fill:#FFF4D6,stroke:#BE8D22
+    classDef compile fill:#E8F1FF,stroke:#4A78B8
+    classDef execution fill:#E6F4EA,stroke:#45835A
+    classDef failure fill:#FCE8E6,stroke:#B6534B
+    class inputMode,cacheCheck,nativeMode,vmMode decision
+    class sourceCompile,bytecodeLoad,backendRestore,compiledOutput compile
+    class nativeRun,vmRun,cliEnd execution
+    class errorReport failure

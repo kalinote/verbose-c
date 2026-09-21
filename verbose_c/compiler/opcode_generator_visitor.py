@@ -17,7 +17,13 @@ from verbose_c.typing.types import *
 
 
 def _native_type_name(type_: Type) -> str:
-    """返回 native/IR 后端使用的标量类型名。"""
+    """返回 native/IR 后端的标量或受限数组引用类型名。"""
+    if isinstance(type_, PointerType):
+        base = type_.base_type
+        kind = VBCObjectType.BOOL if isinstance(base, BoolType) else getattr(base, "kind", None)
+        if kind in {VBCObjectType.CHAR, VBCObjectType.SHORT, VBCObjectType.INT, VBCObjectType.LONG,
+                    VBCObjectType.LONGLONG, VBCObjectType.BOOL, VBCObjectType.FLOAT, VBCObjectType.DOUBLE}:
+            return f"array_ref:{kind.name}"
     if isinstance(type_, VoidType):
         return "void"
     if isinstance(type_, BoolType):
@@ -80,6 +86,7 @@ class OpcodeGenerator(VisitorBase):
         self.loop_stack: list[LoopContext] = []  # 循环标签栈，后续支持嵌套循环和多层跳出
         self.switch_stack: list[str] = []  # switch 结束标签栈
         self.function_compilation_results = {} # 存储函数编译结果
+        self.lvalue_slots: list[int] = []
         self._nested_scope_indices: dict[SymbolTable, int] = {} # 跟踪每个父作用域下嵌套作用域的访问索引
 
     def visit(self, node: ASTNode):
@@ -202,7 +209,7 @@ class OpcodeGenerator(VisitorBase):
             elem_enum = self._element_type_enum_from_type(symbol.type_.element_type)
             if elem_enum is None:
                 raise RuntimeError("内部错误: 不支持的数组元素类型衰变")
-            self._emit(Opcode.ARRAY_DECAY, elem_enum)
+            self._emit(Opcode.ARRAY_DECAY, (elem_enum, symbol.type_.size))
 
     def _emit_load_array_base(self, symbol) -> None:
         if symbol.address is not None:
@@ -305,11 +312,11 @@ class OpcodeGenerator(VisitorBase):
                 raise RuntimeError("内部错误: 下标表达式缺少指针基址类型")
             operand = self._subscript_operand(target)
             if operand is not None:
-                _size, elem_enum = operand
+                size, elem_enum = operand
                 self._emit_subscript_base(target.base)
+                self._emit(Opcode.ARRAY_DECAY, (elem_enum, size))
                 self.visit(target.index)
-                self._emit(Opcode.ADD)
-                self._emit(Opcode.ARRAY_DECAY, elem_enum)
+                self._emit(Opcode.POINTER_ADD)
             else:
                 self._emit_pointer_index_address(target.base, target.index)
             return
@@ -333,17 +340,18 @@ class OpcodeGenerator(VisitorBase):
 
         raise RuntimeError(f"不支持取地址的左值: {type(target).__name__}")
 
-    def _prepare_array_lvalue(self, target: ASTNode) -> tuple[int, int] | None:
-        """保存数组更新目标的基址与下标，供读取和写回共同使用。
+    def _prepare_lvalue(self, target: ASTNode) -> tuple[int, ...] | None:
+        """保存更新目标的地址或对象，供读取和写回共同使用。
 
         Args:
             target: 复合赋值或自增减的左值。
 
         Returns:
-            不与现有局部变量重叠的基址、下标临时槽；其他左值返回 None。
+            不与现有局部变量重叠的操作数临时槽；普通变量返回 None。
         """
-        if not isinstance(target, SubscriptNode) or self._subscript_operand(target) is None:
+        if isinstance(target, NameNode):
             return None
+        count = 2 if isinstance(target, SubscriptNode) and self._subscript_operand(target) is not None else 1
         root = self.symbol_table
         while root._parent is not None and root._scope_type != ScopeType.FUNCTION:
             root = root._parent
@@ -353,24 +361,39 @@ class OpcodeGenerator(VisitorBase):
         address = max(scope._next_local_address for scope in scopes)
         # 临时槽位于所有块作用域变量之后，也为后续 switch 临时槽预留空间。
         for scope in scopes:
-            scope._next_local_address = address + 2
-        self._emit_subscript_base(target.base)
-        self._emit(Opcode.STORE_LOCAL_VAR, address)
-        self.visit(target.index)
-        self._emit(Opcode.STORE_LOCAL_VAR, address + 1)
-        return address, address + 1
+            scope._next_local_address = address + count
+        slots = tuple(range(address, address + count))
+        self.lvalue_slots.extend(slots)
+        self._emit_lvalue_operands(target, None)
+        for slot in reversed(slots):
+            self._emit(Opcode.STORE_LOCAL_VAR, slot)
+        return slots
 
-    def _emit_array_operands(self, target: SubscriptNode, prepared: tuple[int, int] | None) -> None:
-        """压入数组基址与下标，更新表达式优先使用已保存的目标。"""
-        if prepared is None:
-            self._emit_subscript_base(target.base)
-            self.visit(target.index)
-        else:
+    def _emit_lvalue_operands(self, target: ASTNode, prepared: tuple[int, ...] | None) -> None:
+        """压入左值操作数，更新表达式复用已经求值的地址或对象。"""
+        if prepared is not None:
             for address in prepared:
                 self._emit(Opcode.LOAD_LOCAL_VAR, address)
+        elif isinstance(target, SubscriptNode):
+            if self._subscript_operand(target) is not None:
+                self._emit_subscript_base(target.base)
+                self.visit(target.index)
+            else:
+                self._emit_lvalue_address(target)
+        elif isinstance(target, UnaryOpNode) and target.op == Operator.DEREFERENCE:
+            self.visit(target.expr)
+        elif isinstance(target, GetPropertyNode):
+            if getattr(target, "_struct_type", None) is not None:
+                self._emit_struct_base(target.obj, target.via_pointer)
+            else:
+                self.visit(target.obj)
+        else:
+            raise RuntimeError(f"不支持的左值操作数: {type(target).__name__}")
 
-    def _emit_load_lvalue(self, target: ASTNode, prepared: tuple[int, int] | None = None) -> None:
+    def _emit_load_lvalue(self, target: ASTNode, prepared: tuple[int, ...] | None = None) -> None:
         """将左值当前值压栈：NameNode / *p / obj.field"""
+        if not isinstance(target, NameNode):
+            self._emit_lvalue_operands(target, prepared)
         if isinstance(target, NameNode):
             symbol = self.symbol_table.lookup_value(target.name)
             if symbol is None:
@@ -380,16 +403,13 @@ class OpcodeGenerator(VisitorBase):
             else:
                 self._emit(Opcode.LOAD_GLOBAL_VAR, target.name)
         elif isinstance(target, UnaryOpNode) and target.op == Operator.DEREFERENCE:
-            self.visit(target.expr)
             self._emit(Opcode.LOAD_BY_POINTER)
         elif isinstance(target, GetPropertyNode):
             struct_type = getattr(target, "_struct_type", None)
             if struct_type is not None:
                 slot_count, offset = self._struct_field_operand(target, struct_type)
-                self._emit_struct_base(target.obj, target.via_pointer)
                 self._emit(Opcode.LOAD_FIELD, (slot_count, offset))
             else:
-                self.visit(target.obj)
                 property_name = self._add_constant(VBCString(target.property_name.name))
                 self._emit(Opcode.LOAD_CONSTANT, property_name)
                 self._emit(Opcode.GET_PROPERTY)
@@ -397,16 +417,16 @@ class OpcodeGenerator(VisitorBase):
             operand = self._subscript_operand(target)
             if operand is not None:
                 size, elem_enum = operand
-                self._emit_array_operands(target, prepared)
                 self._emit(Opcode.LOAD_INDEX, (size, elem_enum))
             else:
-                self._emit_lvalue_address(target)
                 self._emit(Opcode.LOAD_BY_POINTER)
         else:
             raise RuntimeError(f"不支持的左值读取目标: {type(target).__name__}")
 
-    def _emit_store_lvalue(self, target: ASTNode, prepared: tuple[int, int] | None = None) -> None:
+    def _emit_store_lvalue(self, target: ASTNode, prepared: tuple[int, ...] | None = None) -> None:
         """弹出栈顶值写入左值，不保留表达式结果。"""
+        if not isinstance(target, NameNode):
+            self._emit_lvalue_operands(target, prepared)
         if isinstance(target, NameNode):
             symbol = self.symbol_table.lookup_value(target.name)
             if symbol is None:
@@ -416,18 +436,15 @@ class OpcodeGenerator(VisitorBase):
             else:
                 self._emit(Opcode.STORE_GLOBAL_VAR, target.name)
         elif isinstance(target, UnaryOpNode) and target.op == Operator.DEREFERENCE:
-            self.visit(target.expr)
             self._emit(Opcode.STORE_BY_POINTER)
             self._emit(Opcode.POP)
         elif isinstance(target, GetPropertyNode):
             struct_type = getattr(target, "_struct_type", None)
             if struct_type is not None:
                 slot_count, offset = self._struct_field_operand(target, struct_type)
-                self._emit_struct_base(target.obj, target.via_pointer)
                 self._emit(Opcode.STORE_FIELD, (slot_count, offset))
                 self._emit(Opcode.POP)
             else:
-                self.visit(target.obj)
                 property_name = self._add_constant(VBCString(target.property_name.name))
                 self._emit(Opcode.LOAD_CONSTANT, property_name)
                 self._emit(Opcode.SET_PROPERTY)
@@ -436,18 +453,18 @@ class OpcodeGenerator(VisitorBase):
             operand = self._subscript_operand(target)
             if operand is not None:
                 size, elem_enum = operand
-                self._emit_array_operands(target, prepared)
                 self._emit(Opcode.STORE_INDEX, (size, elem_enum))
                 self._emit(Opcode.POP)
             else:
-                self._emit_lvalue_address(target)
                 self._emit(Opcode.STORE_BY_POINTER)
                 self._emit(Opcode.POP)
         else:
             raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
 
-    def _emit_store_lvalue_keep(self, target: ASTNode, prepared: tuple[int, int] | None = None) -> None:
+    def _emit_store_lvalue_keep(self, target: ASTNode, prepared: tuple[int, ...] | None = None) -> None:
         """写入左值并保留刚写入的值在栈顶。"""
+        if not isinstance(target, NameNode):
+            self._emit_lvalue_operands(target, prepared)
         if isinstance(target, NameNode):
             self._emit(Opcode.DUP)
             symbol = self.symbol_table.lookup_value(target.name)
@@ -458,16 +475,13 @@ class OpcodeGenerator(VisitorBase):
             else:
                 self._emit(Opcode.STORE_GLOBAL_VAR, target.name)
         elif isinstance(target, UnaryOpNode) and target.op == Operator.DEREFERENCE:
-            self.visit(target.expr)
             self._emit(Opcode.STORE_BY_POINTER)
         elif isinstance(target, GetPropertyNode):
             struct_type = getattr(target, "_struct_type", None)
             if struct_type is not None:
                 slot_count, offset = self._struct_field_operand(target, struct_type)
-                self._emit_struct_base(target.obj, target.via_pointer)
                 self._emit(Opcode.STORE_FIELD, (slot_count, offset))
             else:
-                self.visit(target.obj)
                 property_name = self._add_constant(VBCString(target.property_name.name))
                 self._emit(Opcode.LOAD_CONSTANT, property_name)
                 self._emit(Opcode.SET_PROPERTY)
@@ -475,10 +489,8 @@ class OpcodeGenerator(VisitorBase):
             operand = self._subscript_operand(target)
             if operand is not None:
                 size, elem_enum = operand
-                self._emit_array_operands(target, prepared)
                 self._emit(Opcode.STORE_INDEX, (size, elem_enum))
             else:
-                self._emit_lvalue_address(target)
                 self._emit(Opcode.STORE_BY_POINTER)
         else:
             raise RuntimeError(f"不支持的左值写入目标: {type(target).__name__}")
@@ -845,7 +857,7 @@ class OpcodeGenerator(VisitorBase):
         if node.op not in op_to_opcode:
             raise RuntimeError(f"不支持的复合赋值运算符: {node.op}")
 
-        prepared = self._prepare_array_lvalue(node.left)
+        prepared = self._prepare_lvalue(node.left)
         self._emit_load_lvalue(node.left, prepared)
         self._emit_implicit_cast_if_needed(node.left)
         self.visit(node.right)
@@ -874,7 +886,7 @@ class OpcodeGenerator(VisitorBase):
             )
         )
 
-        prepared = self._prepare_array_lvalue(base)
+        prepared = self._prepare_lvalue(base)
         self._emit_load_lvalue(base, prepared)
         if not node.is_prefix:
             self._emit(Opcode.DUP)
@@ -1220,6 +1232,7 @@ class OpcodeGenerator(VisitorBase):
             'param_count': param_count,
             'param_types': function_param_types,
             'local_count': local_count,
+            'lvalue_slots': function_op_generator.lvalue_slots,
             'return_type': function_return_type,
             'optimization_result': function_op_generator.optimization_result,
             'ast_optimization_result': function_compiler.ast_optimization_result,

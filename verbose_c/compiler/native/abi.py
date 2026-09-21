@@ -5,12 +5,13 @@ from verbose_c.compiler.native.target import NativeTarget, WINDOWS_X64_REGISTERS
 FLOAT_VALUE_TYPES = {"float32", "float64"}
 SCALAR_VALUE_TYPES = {"int64", "bool64", "string", *FLOAT_VALUE_TYPES}
 SUPPORTED_RETURN_TYPES = SCALAR_VALUE_TYPES | {"void"}
-SUPPORTED_VALUE_TYPES = SCALAR_VALUE_TYPES
 SUPPORTED_ARGUMENT_REGISTERS = {"RCX", "RDX", "R8", "R9"}
 ARRAY_ELEMENT_TYPES = {
     "CHAR": "int64", "SHORT": "int64", "INT": "int64", "LONG": "int64", "LONGLONG": "int64",
     "BOOL": "bool64", "FLOAT": "float32", "DOUBLE": "float64",
 }
+ARRAY_REFERENCE_TYPES = {f"array_ref:{name}" for name in ARRAY_ELEMENT_TYPES}
+SUPPORTED_VALUE_TYPES = SCALAR_VALUE_TYPES | ARRAY_REFERENCE_TYPES
 MAX_ARRAY_FRAME_SIZE = 4096
 
 @dataclass(frozen=True)
@@ -58,7 +59,7 @@ class StackFrameLayout:
     @property
     def frame_size(self) -> int:
         """返回栈帧大小。"""
-        return (len(self.global_slots) + len(self.local_slots) + len(self.temp_slots) + len(self.spill_slots)) * self.word_size + sum(slot.size for slot in self.array_slots)
+        return sum(slot.size for slot in self.global_slots) + (len(self.local_slots) + len(self.temp_slots) + len(self.spill_slots)) * self.word_size + sum(slot.size for slot in self.array_slots)
 
 
 WINDOWS_X64_ABI = WindowsX64ABI()

@@ -218,9 +218,9 @@ def test_cli_aot_rejects_conflicting_modes(tmp_path, options, reason):
 
 
 def test_cli_aot_rejects_unsupported_native_feature(tmp_path):
-    """不支持的全局数组应产生含源码位置的编译诊断，并保留已有 exe。"""
+    """不支持的无限整数数组应产生含源码位置的编译诊断，并保留已有 exe。"""
     source = tmp_path / "array.vbc"
-    source.write_text("int values[2] = {1, 2}; int main() { return values[0]; }", encoding="utf-8")
+    source.write_text("unlimited int values[2] = {1, 2}; int main() { return values[0]; }", encoding="utf-8")
     output = tmp_path / "array.exe"
     output.write_bytes(b"existing executable")
     completed = subprocess.run([sys.executable, "-m", "verbose_c.cli", str(source), "--emit-exe", str(output)],

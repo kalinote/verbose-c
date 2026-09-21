@@ -91,7 +91,7 @@ def test_source_and_bytecode_native_errors_use_embedded_source_path(tmp_path, ca
     source_path = tmp_path / "native_unsupported_array.vbc"
     bytecode_path = tmp_path / "native_unsupported_array.vbb"
     source_path.write_text(
-        "int values[2] = {1, 2};\n"
+        "unlimited int values[2] = {1, 2};\n"
         "int main() {\n"
         "    return values[0];\n"
         "}\n",

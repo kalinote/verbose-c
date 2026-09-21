@@ -55,6 +55,10 @@ def lower_compiler_output_to_ir(output: Any) -> IRProgram:
             local_count=result.get("local_count", _function_local_count(result)),
             return_type=result.get("return_type", "int64"),
         )
+        lvalue_slots = result.get("lvalue_slots", [])
+        if not isinstance(lvalue_slots, list) or any(type(index) is not int or not function_ir.param_count <= index < function_ir.local_count for index in lvalue_slots):
+            raise IRLoweringError(f"函数 {name}: 左值临时槽元数据无效")
+        function_ir.lvalue_slots = list(lvalue_slots)
         result["ir"] = function_ir
         functions[name] = function_ir
     return IRProgram(module=module_ir, functions=functions)
@@ -426,8 +430,12 @@ class _LoweringContext:
             self._require_operand(opcode, operand, pc)
             base = self._pop(stack, pc, opcode.name)
             result = self._temp("POINTER")
+            element_type, length = operand if isinstance(operand, tuple) else (operand, None)
+            attrs = {"element_type": _enum_name(element_type)}
+            if length is not None:
+                attrs["length"] = length
             block.instructions.append(
-                IRInstruction("array_decay", result=result, args=[base], attrs={"element_type": _enum_name(operand)}, source_pc=pc, source_line=line)
+                IRInstruction("array_decay", result=result, args=[base], attrs=attrs, source_pc=pc, source_line=line)
             )
             stack.append(result)
             return

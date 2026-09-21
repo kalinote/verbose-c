@@ -10,7 +10,7 @@ class IncrementalCompiler:
     """依赖感知的入口翻译单元缓存复用。"""
 
     SCHEMA_VERSION = 1
-    COMPILER_REVISION = 4  # 数组更新目标只求值一次，避免复用旧字节码。
+    COMPILER_REVISION = 5  # 左值缓存及带边界的数组引用需要重新生成字节码和函数元数据。
 
     def __init__(self, artifact_store: ArtifactStore | None = None) -> None:
         self.artifact_store = artifact_store or ArtifactStore()

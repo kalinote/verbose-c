@@ -311,6 +311,7 @@ class _ArtifactGraph:
                     "param_count": result.get("param_count", 0),
                     "param_types": result.get("param_types", []),
                     "local_count": result.get("local_count", 0),
+                    "lvalue_slots": result.get("lvalue_slots", []),
                     "return_type": result.get("return_type", "int64"),
                     "lineno_table": result.get("lineno_table", []),
                 },

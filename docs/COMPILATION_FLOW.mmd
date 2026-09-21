@@ -1,0 +1,39 @@
+%% Verbose-C 首次编译或缓存失效后的编译流程。
+%% 来源：engine.py::compile_module、Compiler.compile、engine.py::_populate_backend_outputs。
+%% 新编译总会尝试补齐 IR、Machine IR 和 native 机器码，不以默认是否运行 VM 为条件。
+%% 已知后端能力限制：仅在对应阶段不是必需时记录错误并保留字节码；内部异常始终失败。
+%% .vbb 输入需要后端产物时，直接从 IR 转换步骤进入，不恢复源码 AST。
+flowchart TD
+    compileStart(["compile_module"]) --> ensureParser["检查 parser.py，缺失或刷新时重新生成"]
+    ensureParser --> readTokens["SourceManager 读取源码，Lexer 生成原始 Token"]
+    readTokens --> preprocess["在 Token 上展开宏、include 和条件编译"]
+    preprocess --> parseAst["GeneratedParser.start 生成 AST"]
+    parseAst --> typeCheck["类型检查、符号表与作用域分析"]
+    typeCheck --> optimization{"启用 O1？"}
+    optimization -->|"是"| optimizeAst["优化带类型的 AST"]
+    optimization -->|"否"| generateBytecode["生成模块及函数字节码、常量池与行号表"]
+    optimizeAst --> generateBytecode
+    generateBytecode --> finishBytecode["解析跳转标签，按 O1 优化字节码"]
+
+    finishBytecode --> lowerIr["字节码转换为 IR、基本块与控制流图"]
+    lowerIr --> lowerMachine["IR 转换为 Windows x64 Machine IR"]
+    lowerMachine --> emitNative["生成并校验 x64 机器码"]
+    emitNative --> compileOutput(["返回 CompilerOutput"])
+
+    lowerIr -.->|"已知能力限制"| backendRequired{"该后端阶段为必需？"}
+    lowerMachine -.->|"已知能力限制"| backendRequired
+    emitNative -.->|"已知能力限制"| backendRequired
+    backendRequired -->|"否"| preserveBytecode["记录后端限制，保留字节码结果"]
+    preserveBytecode --> compileOutput
+    backendRequired -->|"是"| compileFailure(["编译失败并报告诊断"])
+    parseAst -.->|"语法错误"| compileFailure
+    typeCheck -.->|"语义错误"| compileFailure
+
+    classDef frontend fill:#E8F1FF,stroke:#4A78B8
+    classDef backend fill:#EEE8FA,stroke:#8567AB
+    classDef decision fill:#FFF4D6,stroke:#BE8D22
+    classDef failure fill:#FCE8E6,stroke:#B6534B
+    class readTokens,preprocess,parseAst,typeCheck frontend
+    class lowerIr,lowerMachine,emitNative backend
+    class optimization,backendRequired decision
+    class compileFailure failure

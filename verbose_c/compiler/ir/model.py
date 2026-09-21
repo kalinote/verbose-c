@@ -81,6 +81,7 @@ class IRFunction:
     return_type: str = "int64"
     source_path: str | None = None
     lineno_table: list[tuple[int, int]] = field(default_factory=list)
+    lvalue_slots: list[int] = field(default_factory=list)
 
 
 @dataclass

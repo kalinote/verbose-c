@@ -12,6 +12,18 @@ from verbose_c.vm.core import VBCVirtualMachine
     "source, expected, supports_native",
     [
         pytest.param(
+            "int main() { int a[3] = {10,20,30}; int *p = a; int old = (*p++)++;"
+            "if (old == 10 && a[0] == 11 && a[1] == 20 && p - a == 1) { return 0; } return 99; }",
+            0, False, id="dereference-postfix-target-once",
+        ),
+        pytest.param(
+            "int calls = 0; int *pick(int *p) { calls++; return p; }"
+            "int main() { int a[1] = {10}; int b[1] = {3};"
+            "int value = (*pick(a) += (*pick(b) += 2));"
+            "if (calls == 2 && value == 15 && a[0] == 15 && b[0] == 5) { return 0; } return 99; }",
+            0, False, id="nested-lvalue-temporaries",
+        ),
+        pytest.param(
             "int f() { int x = 0; x = 9; return x; }"
             "int main() { return 1 + f(); }",
             10, True, id="assignment-return",

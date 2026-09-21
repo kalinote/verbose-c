@@ -1829,7 +1829,7 @@ def validate_native_code_map_bytes(code: bytes, metadata: dict[str, object]) -> 
                 raise NativeCodegenError(f"native 机器码 map 函数 {name} 栈槽 {slot_name} size 必须是整数")
             if slot_offset <= 0:
                 raise NativeCodegenError(f"native 机器码 map 函数 {name} 栈槽 {slot_name} offset 必须为正数")
-            if slot_size != 8 and not slot_name.startswith("array["):
+            if slot_size != 8 and not slot_name.startswith("array[") and slot.get("array_length") is None:
                 raise NativeCodegenError(f"native 机器码 map 函数 {name} 栈槽 {slot_name} size 必须为 8，实际 {slot_size}")
             if slot_name.startswith("global[") and not owns_global_frame:
                 has_global_slots = True

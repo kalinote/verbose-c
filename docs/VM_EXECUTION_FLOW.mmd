@@ -1,0 +1,33 @@
+%% Verbose-C VM 指令循环，来源：verbose_c/vm/core.py::VBCVirtualMachine.excute。
+%% excute 是当前代码中的实际方法名。
+%% 模块字节码先执行顶层语句，再执行编译器按条件插入的 main 调用，最后 HALT。
+%% PC 在每条指令后统一加一：跳转处理器设为目标减一，函数调用处理器设为负一。
+%% GC 在受管理对象分配超过阈值时触发，并非执行结束后固定进行的步骤。
+flowchart TD
+    vmStart(["创建 VBCVirtualMachine"]) --> initialize["初始化操作数栈、调用栈、内存与内置函数"]
+    initialize --> loadModule["加载模块字节码与常量池，设置 PC 为 0"]
+    loadModule --> keepRunning{"仍在运行且 PC 有效？"}
+    keepRunning -->|"否"| vmEnd(["返回程序退出码"])
+    keepRunning -->|"是"| fetchInstruction["取出指令，按需记录执行日志"]
+    fetchInstruction --> dispatch{"按 Opcode 分发"}
+
+    dispatch -->|"普通或跳转指令"| ordinaryInstruction["更新栈、内存、退出码或 PC"]
+    dispatch -->|"调用语言函数"| callInstruction["保存调用帧并切换函数上下文"]
+    dispatch -->|"RETURN"| returnInstruction["恢复调用帧并压入返回值，或停止"]
+    dispatch -->|"内置调用或 HALT"| builtinInstruction["执行内置函数或处理退出、停机"]
+
+    ordinaryInstruction --> advancePc["PC 加一"]
+    callInstruction --> advancePc
+    builtinInstruction --> advancePc
+    returnInstruction --> advancePc
+    advancePc --> keepRunning
+
+    dispatch -.->|"指令执行异常"| runtimeFailure["生成含源码位置和调用栈的运行时错误"]
+    runtimeFailure --> engineFailure(["交由 Engine 输出诊断并返回失败"])
+
+    classDef decision fill:#FFF4D6,stroke:#BE8D22
+    classDef execution fill:#E6F4EA,stroke:#45835A
+    classDef failure fill:#FCE8E6,stroke:#B6534B
+    class keepRunning,dispatch decision
+    class initialize,loadModule,advancePc,vmEnd execution
+    class runtimeFailure,engineFailure failure

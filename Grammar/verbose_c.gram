@@ -29,7 +29,9 @@ statement:
 function_decl[FunctionDeclNode]: t=type_name n=NAME '(' p=params? ')' ';' { FunctionDeclNode(t, NameNode(n.string, LOCATIONS), p or [], {}, LOCATIONS) }
 function[FunctionNode]: t=type_name n=NAME '(' p=params? ')' '{' b=func_block '}' { FunctionNode(t, NameNode(n.string, LOCATIONS), p or [], {}, b, LOCATIONS) }
 params[list[ParamNode]]: head=param_item tail=(',' param_item)* { [head] + [t[1] for t in tail] }
-param_item[ParamNode]: t=type_name n=NAME? { ParamNode(t, NameNode(n.string, LOCATIONS) if n else None, LOCATIONS) }
+param_item[ParamNode]:
+    | t=type_name n=NAME '[' size=NUMBER? ']' { ParamNode(TypeNode(t.type_name, t.pointer_level + 1, LOCATIONS), NameNode(n.string, LOCATIONS), LOCATIONS) }
+    | t=type_name n=NAME? { ParamNode(t, NameNode(n.string, LOCATIONS) if n else None, LOCATIONS) }
 
 # 代码块
 independent_block[BlockNode]: "{" b=func_block "}" { b }
@@ -102,7 +104,6 @@ multiplicative:
 # 语义阶段消除类型名歧义，普通括号的边界标记用于恢复中缀优先级。
 factor:
     | '(' type_name ')' factor { ParenOrCastNode(type_name, factor, LOCATIONS) }
-    | '(' expr ')' { (setattr(expr, '_parenthesized', True), expr)[1] }
     | unary
     | new_instance
 unary:
@@ -128,6 +129,7 @@ member_expr:
 func_call_param[list[ASTNode]]: head=expr tail=(',' expr)* { [head] + [t[1] for t in tail] }
 
 atom:
+    | '(' expr ')' { (setattr(expr, '_parenthesized', True), expr)[1] }
     | b=('true' | 'false') { BoolNode(b.string, LOCATIONS) }
     | 'null' { NullNode(LOCATIONS) }
     | 'super' { SuperNode(LOCATIONS) }

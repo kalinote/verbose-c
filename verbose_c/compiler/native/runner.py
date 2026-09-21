@@ -4,6 +4,7 @@ import sys
 from verbose_c.compiler.native.abi import (
     FLOAT_VALUE_TYPES,
     SCALAR_VALUE_TYPES,
+    SUPPORTED_VALUE_TYPES,
     is_argument_type_compatible as _is_argument_type_compatible,
 )
 from verbose_c.compiler.native.errors import NativeCodegenError
@@ -251,7 +252,7 @@ def run_native_program_in_memory(program: NativeCodeProgram) -> int:
         if not isinstance(function.param_types, tuple) or any(not isinstance(item, str) for item in function.param_types):
             raise NativeCodegenError(f"native 内存执行函数 {table_name} param_types 必须是字符串元组")
         for index, param_type in enumerate(function.param_types):
-            if param_type not in SCALAR_VALUE_TYPES:
+            if param_type not in SUPPORTED_VALUE_TYPES:
                 raise NativeCodegenError(f"native 内存执行函数 {table_name} 第 {index} 个参数暂不支持类型: {param_type!r}")
     if program.entry_offset < 0:
         raise NativeCodegenError(f"native 内存执行入口偏移不能为负数: {program.entry_offset}")
@@ -367,7 +368,7 @@ def _validate_symbols(program: NativeCodeProgram) -> None:
         if not isinstance(symbol.param_types, tuple) or any(not isinstance(item, str) for item in symbol.param_types):
             raise NativeCodegenError(f"native 内存执行符号 {symbol.name} param_types 必须是字符串元组")
         for index, param_type in enumerate(symbol.param_types):
-            if param_type not in SCALAR_VALUE_TYPES:
+            if param_type not in SUPPORTED_VALUE_TYPES:
                 raise NativeCodegenError(f"native 内存执行符号 {symbol.name} 第 {index} 个参数暂不支持类型: {param_type!r}")
         if symbol.return_type != function.return_type:
             raise NativeCodegenError(
@@ -475,7 +476,7 @@ def _validate_stack_frame_layout(program: NativeCodeProgram) -> None:
                     raise NativeCodegenError(f"native 内存执行函数 {name} 栈槽 {slot.name} {field} 必须是整数")
             if slot.offset <= 0:
                 raise NativeCodegenError(f"native 内存执行函数 {name} 栈槽 {slot.name} offset 必须为正数")
-            if slot.size != 8 and not slot.name.startswith("array["):
+            if slot.size != 8 and not slot.name.startswith("array[") and slot.array_length is None:
                 raise NativeCodegenError(f"native 内存执行函数 {name} 栈槽 {slot.name} size 必须为 8，实际 {slot.size}")
             if slot.name.startswith("global[") and not owns_global_frame:
                 if slot.offset in global_slot_offsets:

@@ -6,11 +6,12 @@ class VBCPointer(VBCObject):
     """
     指针对象类
     """
-    def __init__(self, address: int, target_type: VBCObjectType):
+    def __init__(self, address: int, target_type: VBCObjectType, bounds: tuple[int, int] | None = None):
         """
         Args:
             address (int): 指针指向的内存地址。
             target_type (VBCObjectType): 指针的目标类型枚举。
+            bounds: 数组来源的左闭右开地址范围；普通指针保持 None。
         """
         # 指针本身的类型是 POINTER
         super().__init__(VBCObjectType.POINTER)
@@ -22,6 +23,7 @@ class VBCPointer(VBCObject):
 
         self.address = address
         self.target_type = target_type
+        self.bounds = bounds
 
     def __repr__(self):
         return super().__repr__() + f"({self.target_type.name}* -> 0x{self.address:08x})"

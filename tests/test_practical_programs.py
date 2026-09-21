@@ -47,6 +47,7 @@ def compiled_programs(request, tmp_path_factory):
 
 
 @pytest.mark.parametrize("filename,data,expected,error,status", [
+    pytest.param("array_sort", "", "排序结果：1 2 3 5 9\n合计：20\n", "", 0, id="array_sort"),
     pytest.param("calculator", "1 17 25\n", CALCULATOR_INPUT + "结果：42\n", "", 0, id="calculator_add"),
     pytest.param("calculator", "2 17 25\n", CALCULATOR_INPUT + "结果：-8\n", "", 0, id="calculator_subtract"),
     pytest.param("calculator", "3 -2147483648 -1\n", CALCULATOR_INPUT + "结果：2147483648\n", "", 0, id="calculator_wide_result"),

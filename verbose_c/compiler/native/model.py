@@ -226,7 +226,7 @@ def validate_native_array_layout(name: str, slots: list[dict], instructions: lis
         instructions: 包含机器码十六进制文本和来源属性的清单。
         frame_size: 函数分配的栈帧大小。
     """
-    from verbose_c.compiler.native.encoder import encode_mov_rax_imm64, encode_mov_rbp_offset_from_rax, encode_prologue
+    from verbose_c.compiler.native.encoder import encode_mov_rax_imm64, encode_mov_rdx_imm64, encode_mov_rbp_offset_from_rax, encode_mov_r11_offset_from_rax, encode_prologue, encode_epilogue
 
     arrays = {}
     ranges = []
@@ -234,10 +234,10 @@ def validate_native_array_layout(name: str, slots: list[dict], instructions: lis
                             for item in instructions)
     for slot in slots:
         slot_name = slot["name"]
-        if slot_name.startswith("array["):
+        if slot_name.startswith("array[") or (slot_name.startswith("global[") and slot.get("array_length") is not None):
             length = slot.get("array_length")
-            if (not slot_name.endswith("]") or not slot_name[6:-1].isdigit() or type(length) is not int
-                    or length <= 0 or length * 8 != slot["size"] or not isinstance(slot.get("element_type"), str)
+            if (not slot_name.endswith("]") or (slot_name.startswith("array[") and not slot_name[6:-1].isdigit()) or type(length) is not int
+                    or length <= 0 or slot["size"] not in {length * 8, (length + 1) * 8} or not isinstance(slot.get("element_type"), str)
                     or slot["element_type"] not in ARRAY_ELEMENT_TYPES):
                 raise NativeCodegenError(f"函数 {name}: 数组栈槽 {slot_name} 的长度或元素类型无效")
             arrays[slot_name] = slot
@@ -245,11 +245,51 @@ def validate_native_array_layout(name: str, slots: list[dict], instructions: lis
             raise NativeCodegenError(f"函数 {name}: 普通栈槽不能携带数组来源信息")
         if not slot_name.startswith("global[") or owns_global_frame:
             ranges.append((slot["offset"] - slot["size"], slot["offset"], slot_name))
-    array_instructions = [item for item in instructions if item["source_op"] in {"array_init", "array_load", "array_store", "array_bounds"}]
+    reference_checks = {
+        "array_ref_lower_bound": b"\x48\x89\xC2\x4D\x85\xD2",
+        "array_ref_upper_bound": b"\x4C\x3B\x52\xF8",
+        "array_ref_load": b"\x4A\x8B\x04\xD2",
+        "array_ref_store": b"\x4A\x89\x04\xD2",
+    }
+    reference_state = None
+    for index, item in enumerate(instructions):
+        op = item["source_op"]
+        if op not in reference_checks:
+            continue
+        element_type = item["source_attrs"].get("element_type")
+        if not isinstance(element_type, str) or element_type not in ARRAY_ELEMENT_TYPES or bytes.fromhex(item["bytes"]) != reference_checks[op]:
+            raise NativeCodegenError(f"函数 {name}: 数组引用类型或寻址字节无效")
+        if op in {"array_ref_lower_bound", "array_ref_upper_bound"}:
+            if index + 2 >= len(instructions):
+                raise NativeCodegenError(f"函数 {name}: 数组引用缺少越界错误分支")
+            guard, failure = instructions[index + 1:index + 3]
+            failure_bytes = bytes.fromhex(failure["bytes"])
+            condition = 0x79 if op == "array_ref_lower_bound" else 0x7C
+            if (len(failure_bytes) != 20 + len(encode_epilogue())
+                    or guard["source_op"] != "numeric_guard" or bytes.fromhex(guard["bytes"]) != bytes([condition, len(failure_bytes)])
+                    or failure["source_op"] != "numeric_error" or failure["source_attrs"].get("error_code") != 10
+                    or not failure_bytes.startswith(encode_mov_rdx_imm64(10)) or not failure_bytes.endswith(encode_epilogue())):
+                raise NativeCodegenError(f"函数 {name}: 数组引用越界检查与错误分支不一致")
+            if op == "array_ref_lower_bound":
+                if reference_state is not None:
+                    raise NativeCodegenError(f"函数 {name}: 数组引用边界检查未闭合")
+                reference_state = (element_type, "lower")
+            else:
+                if reference_state != (element_type, "lower"):
+                    raise NativeCodegenError(f"函数 {name}: 数组引用缺少负下标检查")
+                reference_state = (element_type, "upper")
+        else:
+            if reference_state != (element_type, "upper"):
+                raise NativeCodegenError(f"函数 {name}: 数组引用读写前缺少完整边界检查")
+            reference_state = None
+    if reference_state is not None:
+        raise NativeCodegenError(f"函数 {name}: 数组引用边界检查缺少对应读写")
+    array_instructions = [item for item in instructions if item["source_op"] in {"array_init", "array_load", "array_store", "array_bounds", "array_address"}]
     if not arrays and not array_instructions:
         return
-    if name == "<module>" or frame_size + 32 > MAX_ARRAY_FRAME_SIZE:
-        raise NativeCodegenError(f"函数 {name}: 数组栈帧超过上限或数组不属于局部存储")
+    owned_arrays = {slot_name for slot_name in arrays if not slot_name.startswith("global[") or owns_global_frame}
+    if owned_arrays and frame_size + 32 > MAX_ARRAY_FRAME_SIZE:
+        raise NativeCodegenError(f"函数 {name}: 数组栈帧超过上限")
     previous_end = 0
     for start, end, slot_name in sorted(ranges):
         if start < previous_end or start % 8 or end % 8 or end > frame_size:
@@ -265,16 +305,28 @@ def validate_native_array_layout(name: str, slots: list[dict], instructions: lis
         if slot is None or any(attrs.get(key) != slot[field] for key, field in (("offset", "offset"), ("length", "array_length"), ("element_type", "element_type"))):
             raise NativeCodegenError(f"函数 {name}: 数组指令来源与栈槽声明不一致")
         offset = slot["offset"]
+        global_array = slot["name"].startswith("global[")
+        has_header = slot["size"] == (slot["array_length"] + 1) * 8
+        data_offset = offset - 8 if has_header else offset
         if item["source_op"] == "array_init":
+            if slot["name"] not in owned_arrays:
+                raise NativeCodegenError(f"函数 {name}: 不能重新分配借用的全局数组")
             if slot["name"] in initialized:
                 raise NativeCodegenError(f"函数 {name}: 数组存在重复分配指令")
             initialized.add(slot["name"])
-            expected = encode_mov_rax_imm64(0) + b"".join(encode_mov_rbp_offset_from_rax(offset - index * 8) for index in range(slot["array_length"]))
+            store = encode_mov_r11_offset_from_rax if global_array else encode_mov_rbp_offset_from_rax
+            expected = (encode_mov_rax_imm64(slot["array_length"]) + store(offset)) if has_header else b""
+            expected += encode_mov_rax_imm64(0) + b"".join(store(data_offset - index * 8) for index in range(slot["array_length"]))
         elif item["source_op"] in {"array_load", "array_store"}:
-            expected = bytes([0x4A, 0x89 if item["source_op"] == "array_store" else 0x8B, 0x84, 0xD5]) + (-offset).to_bytes(4, "little", signed=True)
+            expected = bytes([0x4B if global_array else 0x4A, 0x89 if item["source_op"] == "array_store" else 0x8B,
+                              0x84, 0xD3 if global_array else 0xD5]) + (-data_offset).to_bytes(4, "little", signed=True)
+        elif item["source_op"] == "array_address":
+            if not has_header:
+                raise NativeCodegenError(f"函数 {name}: 可传参的数组必须包含长度头")
+            expected = (b"\x49\x8D\x83" if global_array else b"\x48\x8D\x85") + (-data_offset).to_bytes(4, "little", signed=True)
         else:
             continue
         if bytes.fromhex(item["bytes"]) != expected:
             raise NativeCodegenError(f"函数 {name}: 数组寻址字节与栈槽偏移不一致")
-    if initialized != set(arrays):
+    if initialized != owned_arrays:
         raise NativeCodegenError(f"函数 {name}: 数组存储缺少初始化来源")

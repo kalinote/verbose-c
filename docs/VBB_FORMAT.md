@@ -215,6 +215,8 @@ repeat block_count times:
 
 `opcode_value` 对应 [`verbose_c/compiler/opcode.py`](../verbose_c/compiler/opcode.py) 中 `Opcode` 枚举值。加载后恢复为 `(Opcode,)` 或 `(Opcode, operand)` 元组。
 
+数组衰变指令 `ARRAY_DECAY` 新生成的操作数为 `(VBCObjectType, length)`，复用已有 `TUPLE` 编码，保留数组边界。当前 VM 和 IR lowering 仍接受旧版仅有 `VBCObjectType` 的操作数；旧字节码不会凭空补出边界信息。新增操作数和元数据需要使用当前运行时，源码缓存通过编译器修订号 `5` 自动失效并重新生成。
+
 ### 5.5 `FUNCTIONS` (5)
 
 ```text
@@ -285,7 +287,7 @@ repeat function_result_count times:
     value labels
 ```
 
-用于恢复 `metadata["labels"]` 与 `metadata["function_compilation_results"]`，供 `PipelineRecorder` dump 使用；不影响 VM 执行语义。
+用于恢复 `metadata["labels"]` 与 `metadata["function_compilation_results"]`。函数的 `value labels` 使用 `__verbose_c_labels__` 与 `__verbose_c_metadata__` 包装，后者保存参数／返回类型、局部槽数量、行号和可选 `lvalue_slots` 列表。`lvalue_slots` 标记编译器为左值单次求值分配的临时槽，供 Native lowering 区分内部地址缓存与用户指针存储；缺省为空。VM 直接执行字节码，Native 从这些元数据恢复函数签名及临时槽来源。
 
 ---
 
@@ -404,7 +406,7 @@ metadata: {
 
 ## 11. 版本策略
 
-- 当前仅定义 **version 1** 紧凑二进制格式
+- 当前使用 **version 2** 紧凑二进制格式；通用 tuple 和元数据扩展沿用已有 section 编码
 - 读写双方使用同一 `FORMAT_VERSION`
 - 未来若升级格式，应递增 `version` 并在 loader 中显式拒绝不支持的版本
 - 旧版 JSON `.vbb` 不在支持范围内
