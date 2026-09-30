@@ -258,21 +258,16 @@ class OpcodeGenerator(VisitorBase):
         return struct_type.slot_count, offset
 
     def _emit_struct_base(self, obj_node: ASTNode, via_pointer: bool) -> None:
-        """压入结构体基址：'.' 直接读取变量槽中的基址，'->' 先取出指针对象再还原基址"""
+        """求值结构体表达式或指针，压入字段访问所需的基址。"""
+        self.visit(obj_node)
         if via_pointer:
-            self.visit(obj_node)
             self._emit(Opcode.POINTER_ADDRESS)
-            return
-        if isinstance(obj_node, NameNode):
-            symbol = self.symbol_table.lookup_value(obj_node.name)
-            if symbol is None:
-                raise RuntimeError(f"未定义的标识符: {obj_node.name}")
-            self._emit_load_array_base(symbol)
-            return
-        raise RuntimeError(f"不支持的结构体字段基址来源: {type(obj_node).__name__}")
 
     def _emit_implicit_cast_if_needed(self, expr_node: ASTNode):
-        """根据类型检查阶段标记，为表达式补发隐式 CAST 指令。"""
+        """根据类型检查标记，在值传递边界执行拷贝和隐式转换。"""
+        copy_slots = getattr(expr_node, "_struct_copy_slots", None)
+        if copy_slots is not None:
+            self._emit(Opcode.COPY_STRUCT, copy_slots)
         target_type = getattr(expr_node, "_implicit_cast_target", None)
         target_enum = self._runtime_type_enum_from_type(target_type)
         if target_enum is not None:
@@ -289,6 +284,7 @@ class OpcodeGenerator(VisitorBase):
 
     def _emit_lvalue_address(self, target: ASTNode) -> None:
         """生成左值地址，栈顶结果为 VBCPointer。"""
+        target = getattr(target, "_implicit_member", target)
         if isinstance(target, NameNode):
             symbol = self.symbol_table.lookup_value(target.name)
             if symbol is None:
@@ -349,6 +345,7 @@ class OpcodeGenerator(VisitorBase):
         Returns:
             不与现有局部变量重叠的操作数临时槽；普通变量返回 None。
         """
+        target = getattr(target, "_implicit_member", target)
         if isinstance(target, NameNode):
             return None
         count = 2 if isinstance(target, SubscriptNode) and self._subscript_operand(target) is not None else 1
@@ -392,6 +389,7 @@ class OpcodeGenerator(VisitorBase):
 
     def _emit_load_lvalue(self, target: ASTNode, prepared: tuple[int, ...] | None = None) -> None:
         """将左值当前值压栈：NameNode / *p / obj.field"""
+        target = getattr(target, "_implicit_member", target)
         if not isinstance(target, NameNode):
             self._emit_lvalue_operands(target, prepared)
         if isinstance(target, NameNode):
@@ -425,6 +423,7 @@ class OpcodeGenerator(VisitorBase):
 
     def _emit_store_lvalue(self, target: ASTNode, prepared: tuple[int, ...] | None = None) -> None:
         """弹出栈顶值写入左值，不保留表达式结果。"""
+        target = getattr(target, "_implicit_member", target)
         if not isinstance(target, NameNode):
             self._emit_lvalue_operands(target, prepared)
         if isinstance(target, NameNode):
@@ -463,6 +462,7 @@ class OpcodeGenerator(VisitorBase):
 
     def _emit_store_lvalue_keep(self, target: ASTNode, prepared: tuple[int, ...] | None = None) -> None:
         """写入左值并保留刚写入的值在栈顶。"""
+        target = getattr(target, "_implicit_member", target)
         if not isinstance(target, NameNode):
             self._emit_lvalue_operands(target, prepared)
         if isinstance(target, NameNode):
@@ -497,6 +497,9 @@ class OpcodeGenerator(VisitorBase):
 
     # 基本数据类型
     def visit_NameNode(self, node: NameNode):
+        if getattr(node, "_implicit_member", None) is not None:
+            self.visit(node._implicit_member)
+            return
         if node.name == "__func__":
             if self.current_function_name is None:
                 raise Exception(f"'__func__' 只能在函数体内使用, 在行: {node.start_line}, 列: {node.start_column}")
@@ -763,7 +766,7 @@ class OpcodeGenerator(VisitorBase):
                 self._emit(Opcode.STORE_GLOBAL_VAR, symbol.name)
             if node.init_exp is not None:
                 self.visit(node.init_exp)
-                self._emit(Opcode.COPY_STRUCT, symbol.type_.slot_count)
+                self._emit_implicit_cast_if_needed(node.init_exp)
                 if symbol.address is not None:
                     self._emit(Opcode.STORE_LOCAL_VAR, symbol.address)
                 else:
@@ -828,10 +831,6 @@ class OpcodeGenerator(VisitorBase):
             self.visit(node.value)
             self._emit_implicit_cast_if_needed(node.value)
             self._emit_array_decay_if_needed(node.value)
-            if isinstance(node.target, NameNode):
-                target_symbol = self.symbol_table.lookup_value(node.target.name)
-                if target_symbol is not None and isinstance(target_symbol.type_, StructType):
-                    self._emit(Opcode.COPY_STRUCT, target_symbol.type_.slot_count)
             self._emit_store_lvalue_keep(node.target)
             return
 
@@ -1307,8 +1306,6 @@ class OpcodeGenerator(VisitorBase):
                 user_init_node = statement
                 break
 
-        field_init_statements = []
-        
         for statement in node.body.statements:
             if isinstance(statement, FunctionNode):
                 method_name = statement.name.name
@@ -1390,35 +1387,19 @@ class OpcodeGenerator(VisitorBase):
                 self.symbol_table = original_method_table
                 
             elif isinstance(statement, VarDeclNode):
-                # 重构：字段信息已在TypeChecker中处理，这里只处理带初始化的字段
+                # 初值由独立方法执行，此处记录当前类声明的字段。
                 field_name = statement.name.name
                 vbc_class._fields[field_name] = VBCNull()
-                if statement.init_exp:
-                    line = statement.start_line
-                    column = statement.start_column
-                    this_node = NameNode("this", start_line=line, start_column=column)
-                    assignment_node = AssignmentNode(
-                        target=GetPropertyNode(
-                            obj=this_node,
-                            property_name=statement.name,
-                            start_line=line,
-                            start_column=column,
-                        ),
-                        value=statement.init_exp,
-                        start_line=line,
-                        start_column=column,
-                    )
-                    field_init_statements.append(assignment_node)
 
         final_init_body_statements = []
         final_init_args = []
         
         if user_init_node:
             final_init_args = user_init_node.args
-            final_init_body_statements = field_init_statements + user_init_node.body.statements
+            final_init_body_statements = user_init_node.body.statements
         else:
             final_init_args = []
-            final_init_body_statements = field_init_statements
+            final_init_body_statements = []
 
         final_init_method_node = FunctionNode(
             return_type=TypeNode(NameNode("void", start_line=node.start_line, start_column=node.start_column)),
@@ -1569,6 +1550,9 @@ class OpcodeGenerator(VisitorBase):
             return
         self.visit(node.expression)
         resolved_target = getattr(node, "_cast_target_type", None)
+        if isinstance(resolved_target, ClassType):
+            self._emit(Opcode.CAST, (VBCObjectType.INSTANCE, resolved_target.name))
+            return
         if isinstance(resolved_target, VoidType):
             self._emit(Opcode.POP)
             self._emit(Opcode.LOAD_CONSTANT, self._add_constant(VBCNull()))

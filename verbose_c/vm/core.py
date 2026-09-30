@@ -597,6 +597,12 @@ class VBCVirtualMachine:
         if target_type_enum is None:
             raise RuntimeError("CAST 指令缺少目标类型操作数")
 
+        target_class_name = None
+        if isinstance(target_type_enum, tuple):
+            if len(target_type_enum) != 2 or target_type_enum[0] != VBCObjectType.INSTANCE or not isinstance(target_type_enum[1], str):
+                raise RuntimeError("类转换操作数必须包含 INSTANCE 和目标类名")
+            target_type_enum, target_class_name = target_type_enum
+
         source_obj = self._stack.pop()
         new_obj = None
 
@@ -617,6 +623,16 @@ class VBCVirtualMachine:
         # 规则 4: 指针类型转换（仅保留 C 语义下必要的指针/空值转换）
         elif target_type_enum == VBCObjectType.POINTER:
             if isinstance(source_obj, (VBCPointer, VBCNull)):
+                new_obj = source_obj
+
+        elif target_type_enum == VBCObjectType.INSTANCE:
+            if not target_class_name:
+                raise TypeError("类实例转换缺少目标类名，请重新编译字节码")
+            if isinstance(source_obj, VBCNull):
+                new_obj = source_obj
+            elif isinstance(source_obj, VBCInstance):
+                if not any(class_._name == target_class_name for class_ in source_obj.class_.get_mro()):
+                    raise TypeError(f"类转换失败: 实例的实际类型 '{source_obj.class_._name}' 不能转换为 '{target_class_name}'")
                 new_obj = source_obj
 
         if new_obj is None:
@@ -798,7 +814,7 @@ class VBCVirtualMachine:
 
     @register_instruction(Opcode.COPY_STRUCT)
     def __handle_copy_struct(self, operand):
-        """整体拷贝一个结构体内存块到新分配的块，实现赋值/拷贝初始化的值语义"""
+        """逐槽拷贝结构体到独立存储，保留指针字段指向的目标。"""
         if operand is None:
             raise RuntimeError("COPY_STRUCT 指令缺少操作数")
         slot_count = operand
@@ -911,6 +927,34 @@ class VBCVirtualMachine:
         if num_args != init_method.param_count:
             raise RuntimeError(f"构造函数 '{class_obj._name}.__init__' 期望 {init_method.param_count} 个参数，但提供了 {num_args} 个")
 
+        pending_classes = {class_._name: class_ for class_ in reversed(class_obj.get_mro())}
+        initializers = []
+        while pending_classes:
+            for name, class_ in pending_classes.items():
+                if all(base._name not in pending_classes for base in class_._super_class):
+                    if "<fields>" in class_._methods:
+                        initializers.append(class_._methods["<fields>"])
+                    del pending_classes[name]
+                    break
+            else:
+                raise TypeError("类初始化失败: 继承关系存在循环")
+        if initializers:
+            # 字段先按基类到派生类初始化；显式 super 构造调用不重复执行字段初始化。
+            construction_constants = []
+            construction_bytecode = []
+            for initializer in [*initializers, init_method]:
+                construction_constants.append(self._allocate(VBCBoundMethod(instance, initializer)))
+                construction_bytecode.append((Opcode.LOAD_CONSTANT, len(construction_constants) - 1))
+                argument_count = num_args if initializer is init_method else 0
+                construction_bytecode.extend((Opcode.LOAD_LOCAL_VAR, i + 1) for i in range(argument_count))
+                construction_bytecode.extend([(Opcode.CALL_FUNCTION, argument_count), (Opcode.POP,)])
+            construction_bytecode.extend([(Opcode.LOAD_LOCAL_VAR, 0), (Opcode.RETURN,)])
+            init_method = VBCFunction(
+                name=f"{class_obj._name}.<construct>", bytecode=construction_bytecode,
+                constants=construction_constants, param_count=num_args, local_count=num_args + 1,
+                source_path=init_method.source_path, lineno_table=[],
+            )
+
         if self._current_function is None:
             raise RuntimeError("当前函数为空")
 
@@ -963,7 +1007,7 @@ class VBCVirtualMachine:
         if not current_class._super_class:
             raise AttributeError(f"类 '{current_class._name}' 没有父类，无法执行 super 调用")
 
-        # 从父类开始查找方法 (目前只支持单继承)
+        # super 固定从当前方法所属类的第一个直接父类开始查找。
         super_class = current_class._super_class[0]
         method = super_class.lookup_method(property_name)
 

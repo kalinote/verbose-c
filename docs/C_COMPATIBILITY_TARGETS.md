@@ -36,7 +36,7 @@
   - 【已完成】`--dump tokens` 输出预处理前 token；`--dump preprocess` 输出预处理后 token
   - 【方案变更】【已完成】dump 分「预处理前 / 预处理后」两节 token 表格，不再输出预处理源码文本
   - 【已完成】多文件源码由 `SourceManager`（`verbose_c/fs`）按 path 统一缓存；`get_line_source(path, line)` 支持 include 文件取行
-  - 【待完善】`#include` 为简化实现，与 C17 6.10.2 存在差异（见 P1-6）
+  - 【已完成】`#include` 支持引号、尖括号、宏头文件、用户和系统搜索目录；重复包含与缺失文件行为见 P1-6
   - 【已完成】C17 预定义宏内置：`__FILE__`、`__LINE__`、`__DATE__`、`__TIME__`、`__STDC__`、`__STDC_VERSION__`（201710）、`__STDC_HOSTED__`、`__STDC_UTF_16__`、`__STDC_UTF_32__`；`__func__` 在编译器阶段作为预定义标识符支持
 - 验收标准：
   - 【已完成】普通宏、函数式宏和 `#include "..."` 处理均基于 Token 序列完成
@@ -91,17 +91,20 @@
   - 【已完成】支持 `defined(MACRO)` / `defined MACRO` 基本判断
 - 当前现状：
   - 【已完成】`Preprocessor` 条件栈与指令状态机；假分支不输出 token、不注册 `#define`、不展开 `#include`
-  - 【已完成 MVP】`const_expr.py` 支持整数字面量、`defined()`、`!`、`&&` / `||`、括号及宏展开。右侧语法始终完整解析后再合并真值，`#if 1 || 0` 和 `#if 0 && 1` 均正确选择分支；短路不能掩盖缺失操作数或括号错误
+  - 【已完成】`const_expr.py` 按 C 优先级支持整数/字符常量、`defined`、一元 `+ - ! ~`、算术、移位、比较、按位运算、`&&` / `||`、`?:`、括号及对象/函数宏展开
   - 【已完成】非法条件块抛出 `VBCCompileError`（含文件路径与行号）
-  - 【待完善】`#if` 完整 C17 常量表达式（算术/位运算/比较运算符）未实现
-  - 【待完善】宏展开后剩余的未定义标识符尚未按 `0` 求值；例如 `#if MISSING` 当前报错，可使用 `#ifdef` 或 `defined(MISSING)` 判断是否定义
+  - 【已完成】宏展开后剩余标识符按 `0` 求值，支持八/十/十六进制及 `U/L/LL` 合法后缀；`defined(__LINE__)`、`defined(__FILE__)` 和条件内的动态行号正确处理
+  - 【已完成】逻辑与条件运算符短路仅跳过未选中分支的运算，仍检查完整语法和字面量；`1 || (1 / 0)` 可通过，`1 ||` 必须报错。父条件未生效的嵌套条件及已命中分支后的 `#elif` 不求值
+  - 【已完成】`#undef` 支持撤销用户宏，`#error` 产生编译错误；预定义宏不能由用户重定义或撤销
+  - 【已完成】允许 `#if(...)` / `#elif(...)`，指令续行仅移除反斜杠和换行，保留两侧空白与 token 边界
   - 【已完成】无宏体的 `#define NAME`（include guard 常用）已支持
+- 实现约定：预处理整数使用 64 位 `intmax_t/uintmax_t` 规则，无符号回绕，有符号溢出、除零和非法移位报错；有符号负数右移采用算术移位。普通字符采用 UTF-8 字节，单字节按有符号 8 位解释，多字符最多四字节按大端组成有符号 32 位值；`L/u/U` 字符常量分别采用有符号 32 位、无符号 16/32 位值。浮点常量不属于预处理整数常量表达式
 - 验收标准：
   - 【已完成】带条件编译分支的示例代码可稳定编译且分支选择正确（`tests/grammar/preprocessor_conditional_test.vbc`）
   - 【已完成】嵌套条件编译可正常解析（同上）
   - 【已完成】非法宏块能给出明确错误信息（`tests/error/preprocessor_*.vbc`）
   - 【已完成】include guard 场景（`tests/preprocessor_guarded.inc` + 双次 `#include`）
-  - 【已完成】`tests/test_preprocessor_conditions.py` 覆盖 O0/O1、if/elif 全部逻辑真值组合、优先级、括号、defined、对象/函数宏展开、残缺条件诊断和嵌套条件的实际 include 依赖
+  - 【已完成】`tests/test_preprocessor_conditions.py` 覆盖 O0/O1、if/elif、全部运算层级、整数符号转换与字符转义、短路与残缺语法、宏展开、动态行号、`#undef` 和嵌套条件的实际 include 依赖
 
 
 
@@ -223,12 +226,14 @@
   - 【已完成】验收用例见 `tests/grammar/typedef_test.vbc`、`tests/grammar/enum_test.vbc`、`tests/grammar/struct_test.vbc`；编译期错误见 `tests/error/struct_*.vbc`
   - 【待完善】结构体嵌套字段（字段本身是 struct）、数组类型字段、结构体数组 — 非本期
   - 【待完善】结构体聚合初始化 `struct Point p = {1, 2};` — 非本期
-  - 【待完善】函数按值传参/返回值的结构体拷贝语义，目前退化为地址别名，与数组当前的"退化传址"行为一致 — 非本期
+  - 【已完成】结构体按值实参、返回值、初始化和赋值统一执行 `COPY_STRUCT`，参数修改不影响调用方；支持直接读取函数返回结构体的字段。拷贝逐槽进行，指针字段仍指向原目标，结构体指针传参仍允许修改调用方
+  - 【已完成】`tests/test_object_semantics.py` 覆盖递归调用、实参求值顺序、构造函数/方法传参及返回结构体访问，在 O0/O1、源码缓存和 `.vbb` 重载下保持一致；O1 对结构体参数或返回值的函数保守跳过内联
   - 【待完善】匿名 struct + typedef 组合 `typedef struct { ... } Point;` — 非本期
 - 验收标准：
   - typedef 可用于变量声明/函数参数/指针类型 ✅
   - enum 常量可参与表达式，并可作为 `switch/case` 标签 ✅
   - 结构体字段读写正确，`.`/`->` 语义符合 C 标准，赋值为值拷贝而非引用别名 ✅
+  - 结构体按值传参和返回具有独立存储，指针字段保留浅拷贝语义 ✅
 
 ---
 
@@ -380,39 +385,27 @@
 
 ### 【依赖 C-P0-1】【依赖 C-P0-3】P1-6 `#include` 与 C17 6.10.2 对齐
 
-- 目标能力：
-  - 区分 `#include "file.h"` 与 `#include <file.h>` 的搜索路径
-  - 支持编译器 `-I` 及系统 include 目录
-  - 允许同一头文件被多次 include，重复防护交由 `#ifndef` / `#pragma once`（配合 P0-3 条件编译）
-  - include 目标不存在时输出编译错误而非 warn + 丢弃
-- P0 已实现（简化行为）：
-  - 仅 `#include "path/file"` 双引号形式
-  - 搜索路径：`dirname(当前源文件) / filename`
-  - `_included_files` 绝对路径去重，循环 include 时 warn + 跳过（等同隐式 `#pragma once`）
-  - 找不到文件：warn + 丢弃该预处理指令
-  - 插入时机与宏可见性与 C 标准一致
-- 与 C 标准差异：
+- 当前状态：已完成（2026-09-21）。搜索规则由 `SourceManager.resolve_include()` 统一实现；CLI 支持重复指定 `-I/--include-dir` 和 `-isystem/--system-include`，API 接受 `include_paths` / `system_include_paths`。
 
+| 行为 | 当前实现 |
+| --- | --- |
+| `"file.h"` 搜索 | 发起 include 的文件目录 → 按参数顺序搜索 `-I` → 系统目录 |
+| `<file.h>` 搜索 | 按参数顺序搜索 `-I` → 系统目录，不隐式搜索当前工作目录 |
+| 宏头文件 | `#include HEADER` 展开后须为单个引号或尖括号头文件名 |
+| 重复 include | 每次展开；宏守卫或 `#pragma once` 显式防重 |
+| 相互/自包含 | 有守卫时正常结束；无守卫且超过 64 层时报带包含链的深度错误 |
+| 缺失或不可读文件 | 编译失败，诊断包含 include 指令的真实文件、行列及搜索路径/读取原因 |
+| 条件块 | 各文件独立匹配，头文件不能关闭包含者的 `#if` |
 
-| 行为            | C17 6.10.2          | P0 实现          |
-| ------------- | ------------------- | -------------- |
-| `"file.h"` 搜索 | 当前目录 → 再按 `<>` 规则重搜 | 仅当前文件相对目录      |
-| `<file.h>`    | system/include 目录   | 不支持（warn + 跳过） |
-| 重复 include    | 允许，靠守卫防重复           | 路径去重跳过         |
-| 循环 include    | 无内置防护               | 检测环并跳过         |
-| 找不到文件         | diagnostic（通常错误）    | warn + 丢弃      |
-
-
-- 验收标准：
-  - `#include <stdio.h>` 可通过 `-I` 或系统路径解析
-  - 无 include guard 的头文件被 include 两次时，内容出现两次（与 C 一致）
-  - 找不到 include 文件时编译失败并给出文件与行号
+- 系统目录默认空，需显式指定；目前不附带 C 标准头文件，也不自动发现宿主 SDK。通过 `-I` 或 `-isystem` 提供兼容的 `stdio.h` 即可解析 `<stdio.h>`，这不代表已实现完整标准库。
+- 缓存记录搜索配置、每次有效 include 的解析结果及实际读取文件的摘要；搜索顺序改变、出现更高优先级同名文件或依赖内容变化时重新编译。
+- 验收：`tests/test_include_and_warning_semantics.py` 覆盖 O0/O1、搜索顺序、宏头文件、嵌套相对目录、重复包含、两类守卫、缺失/非法 include、循环深度、跨文件条件块和缓存失效。
 
 
 
 ### P1-7 统一错误诊断与输出（`verbose_c/error`）
 
-- 当前状态（2026-09-16）：核心闭环已完成。`DiagnosticReport` / `DiagnosticEntry` 承载解析、类型、运行时、I/O、字节码和后端错误；`format_error()` 返回纯文本，由 engine 写入 stderr、recorder 记录相同正文。正常退出码、警告和日志约定保持兼容。专项覆盖位于 `tests/test_diagnostics.py`，全量验收入口为 `scripts/verify.ps1`。
+- 当前状态（2026-09-21）：错误与警告闭环已完成。`DiagnosticEntry` 包含 `severity`、`code`、文件、行列和上下文；类型检查在诊断产生处直接构建条目。`format_error()` / `format_warnings()` 返回纯文本，由 engine 统一输出、recorder 记录相同正文。专项覆盖位于 `tests/test_diagnostics.py`、`tests/test_include_and_warning_semantics.py`，全量验收入口为 `scripts/verify.ps1`。
 - 原始问题（实施前基线）：
   - 当前错误/警告输出分散在 `engine.py`、`recorder.py`、`error_collector.py`、`preprocessor.py`、`type_checker_visitor.py`、`vm/core.py` 等模块，格式不统一
   - 终端与 dump 文案不一致：解析错误有较完整报告，dump 中仅 `{ExceptionType}: {message}` 一行摘要
@@ -488,25 +481,27 @@ verbose_c/error/
 
 #### 步骤 3（必须）：类型检查错误接入统一 formatter
 
-- 【已完成】`compiler.py` 抛出 `VBCCompileError` 前，将 `type_checker.errors` 按原顺序转为 `DiagnosticEntry` 列表
+- 【已完成】`compiler.py` 抛出 `VBCCompileError` 时直接复用 `TypeChecker.diagnostics`，按产生顺序保留全部错误，不从消息字符串反解析位置
 - 【已完成】类型检查多条错误时，树形输出每条为 `├─`，最后一条为 `└─`
 - 【已完成】dump 与终端共用同一格式化路径
 
 
 
-#### 步骤 4（后续阶段）：警告输出统一
+#### 步骤 4（已完成）：警告输出统一
 
-- 【未完成】新建 `format_warning(message, path?, line?)` 或 `Diagnostic(severity=warning)`
-- 【未完成】`Preprocessor._warn` 改为只构造 diagnostic，不直接 `print`；由 `engine` 或统一 `ErrorSink` 输出（兼容 `--no-warn`）
-- 【未完成】类型检查 `warnings` 与预处理警告使用同一警告格式
+- 【已完成】`format_warnings()` 统一渲染 `DiagnosticEntry(severity="warning")`，提供位置、上下文与原因
+- 【已完成】`Preprocessor._warn` 只收集诊断，engine 统一写入 stdout；`--no-warn` 同时关闭预处理和类型警告的终端显示，不影响错误、诊断数据和 dump
+- 【已完成】成功、失败、后端失败及源码缓存命中路径均保留已有警告；同一诊断在终端和 dump 各记录一次。旧式 `VBCCompileError.warnings` 消息兼容转换为无位置的 `COMPILER_WARNING`
+- 【已完成】`.vbb.deps.json` 保存结构化警告；直接运行独立 `.vbb` 不恢复源码编译警告
 
 
 
-#### 步骤 5（后续阶段）：扩展 Diagnostic 模型与原生类型诊断
+#### 步骤 5（已完成）：扩展 Diagnostic 模型与原生类型诊断
 
-- 【部分完成】已有文件、行列、原因、上下文、规则栈及调用栈；后续扩展 `severity` 和稳定错误码 `code`
-- 【未完成】`type_checker_visitor` 从 `errors.append(f"...")` 改为 `diagnostics.append(Diagnostic(...))`
-- 【部分完成】formatter 统一消费 `DiagnosticReport`；类型检查器仍保留兼容字符串列表，在编译边界转换
+- 【已完成】在既有字段上增加 `severity` 和稳定分类码 `code`，例如 `PP_INCLUDE_NOT_FOUND`、`NAME_UNDEFINED`、`TYPE_MISMATCH`、`CONVERSION_LOSS`
+- 【已完成】`TypeChecker._diagnose()` 原生收集结构化条目；`errors` / `warnings` 只保留兼容的字符串视图
+- 【已完成】AST 保留 token 的实际源文件，类型诊断可定位 include 文件中的行列与上下文；旧生成解析器通过生成器修订号自动升级
+- 【已完成】formatter 消费同一报告，终端列号从 1 开始，结构化 `column` 保持从 0 开始
 - 收益：多文件/多错误排序、国际化、IDE 集成、稳定错误码
 
 

@@ -30,6 +30,7 @@ def format_report(report: DiagnosticReport) -> str:
     sections = []
     for entry in report.entries:
         chunks = []
+        label = "警告" if entry.severity == "warning" else "错误"
         location = []
         if entry.filepath:
             location.append(f"文件 {entry.filepath}")
@@ -38,10 +39,10 @@ def format_report(report: DiagnosticReport) -> str:
         if entry.column is not None and entry.column >= 0:
             location.append(f"第 {entry.column + 1} 列")
         if location:
-            chunks.append(["错误位置: " + "，".join(location)])
+            chunks.append([label + "位置: " + "，".join(location)])
         chunks.append(f"{report.category}: {entry.message}".splitlines())
         if entry.source_context:
-            context = ["错误上下文:"]
+            context = [label + "上下文:"]
             number_width = max(len(str(number)) for number, _ in entry.source_context)
             for number, source in entry.source_context:
                 expanded = ""
@@ -78,6 +79,11 @@ def format_report(report: DiagnosticReport) -> str:
         lines.append((" └─ " if last else " ├─ ") + section[0])
         lines.extend(("    " if last else " │  ") + line for line in section[1:])
     return "\n".join(lines)
+
+
+def format_warnings(entries: list[DiagnosticEntry]) -> str:
+    """用同一诊断格式渲染编译警告，保持顺序且不执行输出。"""
+    return "编译警告:\n" + format_report(DiagnosticReport("警告", entries)) if entries else ""
 
 
 def format_error(error: Exception) -> str:

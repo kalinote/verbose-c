@@ -26,10 +26,13 @@ from verbose_c.parser.ppg.grammar import (
 from verbose_c.parser.ppg.parser_generator import ParserGenerator
 from verbose_c.parser.lexer.enum import TokenType
 
+PARSER_GENERATOR_REVISION = 1
+
 MODULE_PREFIX = """\
 #!/usr/bin/env python3.8
 # 从 {filename} 文件生成，用于处理 verbose-c 语法
 # 生成于 {datetime}
+VBC_PARSER_REVISION = {parser_revision}
 
 import sys
 
@@ -247,7 +250,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
     def generate(self, filename: str) -> None:
         header = self.grammar.metas.get("header", MODULE_PREFIX)
         if header is not None:
-            self.print(header.rstrip("\n").format(filename=filename, datetime=datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            self.print(header.rstrip("\n").format(filename=filename, datetime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), parser_revision=PARSER_GENERATOR_REVISION))
         subheader = self.grammar.metas.get("subheader", "")
         if subheader:
             self.print(subheader)
@@ -314,6 +317,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
                 self.print("tok = self._tokenizer.peek()")
                 self.print("start_line = tok.line")
                 self.print("start_column = tok.column")
+                self.print("source_path = tok.path")
             if is_loop:
                 self.print("children = []")
             self.visit(rhs, is_loop=is_loop, is_gather=is_gather)
@@ -377,6 +381,7 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
             self.print("tok = self._tokenizer.get_last_non_whitespace_token()")
             self.print("end_line = tok.line")
             self.print("end_column = tok.column")
+            action = f"self._attach_source_path({action}, source_path)"
         if is_loop:
             self.print(f"children.append({action})")
             self.print("mark = self._mark()")

@@ -4,13 +4,15 @@ import os
 from typing import Any
 
 from verbose_c.fs.artifact_store import ArtifactStore
+from verbose_c.fs.source_manager import SourceManager
+from verbose_c.error import DiagnosticEntry
 
 
 class IncrementalCompiler:
     """依赖感知的入口翻译单元缓存复用。"""
 
     SCHEMA_VERSION = 1
-    COMPILER_REVISION = 6  # 条件表达式与 O1 入口识别修复后，需要重新编译旧源码缓存。
+    COMPILER_REVISION = 8  # 预处理语义、头文件搜索和结构化诊断变化后重新编译源码缓存。
 
     def __init__(self, artifact_store: ArtifactStore | None = None) -> None:
         self.artifact_store = artifact_store or ArtifactStore()
@@ -22,6 +24,8 @@ class IncrementalCompiler:
         artifact_path: str | None = None,
         optimize_level: int = 0,
         refresh_parser: bool = False,
+        include_paths: list[str] | None = None,
+        system_include_paths: list[str] | None = None,
     ) -> bool:
         """判断入口文件及其依赖是否需要重新编译。"""
         if refresh_parser:
@@ -48,6 +52,36 @@ class IncrementalCompiler:
         if manifest.get("optimize_level") != optimize_level:
             return True
         if manifest.get("refresh_parser") != refresh_parser:
+            return True
+
+        sources = SourceManager(include_paths, system_include_paths)
+        if manifest.get("include_paths") != sources.include_paths or manifest.get("system_include_paths") != sources.system_include_paths:
+            return True
+        requests = manifest.get("include_requests")
+        if not isinstance(requests, list) or not isinstance(manifest.get("warning_diagnostics"), list):
+            return True
+        try:
+            if not isinstance(manifest.get("warnings"), list) or any(not isinstance(message, str) for message in manifest["warnings"]):
+                return True
+            for record in manifest["warning_diagnostics"]:
+                entry = DiagnosticEntry(**record)
+                if not isinstance(entry.message, str) or not isinstance(entry.code, str) or entry.severity != "warning":
+                    return True
+                if entry.filepath is not None and not isinstance(entry.filepath, str):
+                    return True
+                if any(value is not None and not isinstance(value, int) for value in (entry.line, entry.column)):
+                    return True
+                if not isinstance(entry.highlight_length, int) or not isinstance(entry.source_context, list):
+                    return True
+                if any(len(row) != 2 or not isinstance(row[0], int) or not isinstance(row[1], str) for row in entry.source_context):
+                    return True
+            for request in requests:
+                if not isinstance(request["angled"], bool) or not isinstance(request["name"], str) or not isinstance(request["from_path"], str):
+                    return True
+                resolved = sources.resolve_include(request["name"], request["from_path"], request["angled"])
+                if resolved != request["resolved_path"]:
+                    return True
+        except (OSError, KeyError, TypeError, ValueError):
             return True
 
         files = manifest.get("files")
@@ -78,6 +112,11 @@ class IncrementalCompiler:
         artifact_path: str | None = None,
         optimize_level: int = 0,
         refresh_parser: bool = False,
+        include_paths: list[str] | None = None,
+        system_include_paths: list[str] | None = None,
+        include_requests: list[dict] | None = None,
+        warning_diagnostics: list[dict] | None = None,
+        warnings: list[str] | None = None,
     ) -> str:
         """写入入口文件对应的依赖侧车清单。"""
         entry_path = os.path.abspath(entry_path)
@@ -86,6 +125,7 @@ class IncrementalCompiler:
         file_paths = [entry_path]
         file_paths.extend(os.path.abspath(path) for path in dependencies)
         unique_paths = sorted(dict.fromkeys(file_paths))
+        sources = SourceManager(include_paths, system_include_paths)
 
         manifest = {
             "schema_version": self.SCHEMA_VERSION,
@@ -96,6 +136,11 @@ class IncrementalCompiler:
             "target_abi": ArtifactStore.TARGET_ABI,
             "optimize_level": optimize_level,
             "refresh_parser": refresh_parser,
+            "include_paths": sources.include_paths,
+            "system_include_paths": sources.system_include_paths,
+            "include_requests": include_requests or [],
+            "warning_diagnostics": warning_diagnostics or [],
+            "warnings": warnings or [],
             "files": [
                 {"path": path, "sha256": self.file_hash(path)}
                 for path in unique_paths

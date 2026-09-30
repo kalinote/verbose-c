@@ -3,7 +3,7 @@ import re
 import time
 from typing import Any
 
-from verbose_c.error.format import format_error
+from verbose_c.error.format import format_error, format_warnings
 from verbose_c.vm.memory import MemoryManager
 
 
@@ -157,6 +157,7 @@ class PipelineRecorder:
         self._section_body = ""
         self._vm_section_open = False
         self._error_recorded = False
+        self._recorded_warning_ids: set[int] = set()
 
         if self.dump_path:
             self._write_working_file()
@@ -214,6 +215,7 @@ class PipelineRecorder:
         self._append_section("AST 结构", content)
 
     def on_compiled(self, output) -> None:
+        self.on_warnings(getattr(output, "warning_diagnostics", []))
         if not self.dump_path:
             return
         if self._dump_opcode and output.bytecode and output.optimization_result:
@@ -294,6 +296,13 @@ class PipelineRecorder:
             f.write(entry + "\n")
         self._section_body += entry + "\n"
 
+    def on_warnings(self, entries) -> None:
+        """记录与终端一致的结构化警告正文，不执行终端输出。"""
+        pending = [entry for entry in entries if id(entry) not in self._recorded_warning_ids]
+        if self.dump_path and pending:
+            self._append_section("编译警告", "## 编译警告\n\n```text\n" + format_warnings(pending) + "\n```\n\n")
+            self._recorded_warning_ids.update(id(entry) for entry in pending)
+
     def on_error(self, error: Exception, *, diagnostic: str | None = None) -> None:
         """只记录统一诊断正文，不负责终端输出。"""
         if self._error_recorded:
@@ -306,6 +315,7 @@ class PipelineRecorder:
                 f.write("```\n")
             self._section_body += "```\n"
             self._vm_section_open = False
+        self.on_warnings(getattr(error, "warning_diagnostics", []))
         content = "## 错误信息\n\n```text\n"
         content += (diagnostic if diagnostic is not None else format_error(error)) + "\n"
         content += "```\n\n"

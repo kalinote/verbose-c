@@ -20,6 +20,8 @@ def parse_args():
     parser.add_argument("--log", nargs="?", const="all", help="按模块输出命令行日志（模块: compile, vm, parser, all；默认 all）")
     parser.add_argument("--dump", nargs="?", const="all", help="导出执行过程日志，支持模块: parser, tokens, preprocess, ast, opcode, ir, machine, const, label, vm, memory, all；默认 all")
     parser.add_argument("--no-warn", help="静默编译告警输出", action="store_true")
+    parser.add_argument("-I", "--include-dir", dest="include_paths", action="append", default=[], metavar="DIR", help="追加头文件搜索目录，可重复指定")
+    parser.add_argument("-isystem", "--system-include", dest="system_include_paths", action="append", default=[], metavar="DIR", help="追加系统头文件目录，在 -I 目录之后搜索")
     parser.add_argument("-cp", "--compile-parser", help="编译语法文件生成解析器", action="store_true")
     parser.add_argument("--compile-only", help="只编译不执行源代码", action="store_true")
     parser.add_argument("--emit-exe", metavar="PATH", help="将 .vbc 或 .vbb 编译为独立 Windows x64 exe，包含运行时和基址重定位；只编译不执行")
@@ -453,6 +455,9 @@ def main():
         dump_path = create_dump_path(args.filename) if dump_modules else None
         ext = os.path.splitext(args.filename)[1].lower()
         if ext == ".vbb":
+            if args.include_paths or args.system_include_paths:
+                print("错误: .vbb 输入不支持头文件搜索选项", file=sys.stderr)
+                sys.exit(1)
             if args.output:
                 print("错误: .vbb 输入不支持 -o/--output")
                 sys.exit(1)
@@ -480,6 +485,8 @@ def main():
                 execute=not args.compile_only and not args.run_native_memory and not args.run_native_pe and not args.emit_exe,
                 refresh_parser=args.refresh_parser,
                 show_warnings=not args.no_warn,
+                include_paths=args.include_paths,
+                system_include_paths=args.system_include_paths,
                 optimize_level=args.optimize_level,
                 run_native_memory=args.run_native_memory,
                 run_native_pe=args.run_native_pe,

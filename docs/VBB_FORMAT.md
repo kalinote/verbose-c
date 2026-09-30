@@ -215,7 +215,9 @@ repeat block_count times:
 
 `opcode_value` 对应 [`verbose_c/compiler/opcode.py`](../verbose_c/compiler/opcode.py) 中 `Opcode` 枚举值。加载后恢复为 `(Opcode,)` 或 `(Opcode, operand)` 元组。
 
-数组衰变指令 `ARRAY_DECAY` 新生成的操作数为 `(VBCObjectType, length)`，复用已有 `TUPLE` 编码，保留数组边界。当前 VM 和 IR lowering 仍接受早期 version 2 中仅有 `VBCObjectType` 的操作数；这不表示支持 version 1 文件，且无长度操作数不会凭空补出边界信息。新增操作数和元数据需要使用当前运行时，该变化从编译器修订号 `5` 起使旧源码缓存失效。当前修订号为 `6`，进一步按修复后的预处理条件与 O1 入口识别规则重新编译；直接输入旧 `.vbb` 不会自动寻找源码重编译。
+数组衰变指令 `ARRAY_DECAY` 新生成的操作数为 `(VBCObjectType, length)`，复用已有 `TUPLE` 编码，保留数组边界。当前 VM 和 IR lowering 仍接受早期 version 2 中仅有 `VBCObjectType` 的操作数；这不表示支持 version 1 文件，且无长度操作数不会凭空补出边界信息。新增操作数和元数据需要使用当前运行时，该变化从编译器修订号 `5` 起使旧源码缓存失效。
+
+类实例 `CAST` 的操作数为 `(VBCObjectType.INSTANCE, target_class_name)`，复用 `TUPLE` 编码；VM 根据实际实例的继承关系验证目标类，IR 保留目标类名。结构体值传递复用现有 `COPY_STRUCT` 指令；这些规则从编译器修订号 `7` 起生效。当前修订号为 `8`，新增完整预处理条件、include 搜索和结构化诊断，使旧源码缓存重新编译，文件格式仍为 version 2。直接输入旧 `.vbb` 不会自动寻找源码重编译，也不会自动补上新的拷贝和初始化指令。
 
 ### 5.5 `FUNCTIONS` (5)
 
@@ -251,6 +253,8 @@ repeat class_count times:
 ```
 
 父类、方法、字段均通过 ID 引用，不在类定义中嵌套完整对象。
+
+字段初始化保存为类方法表中的内部 `<fields>` 方法，复用 `FUNCTIONS` 编码；用户构造函数体仍保存为 `__init__`。VM 实例化时编排继承字段初始化和构造调用，运行时合成的 `<construct>` 调用包装不写入文件。
 
 ### 5.7 `STRUCTS` (7)
 
@@ -399,12 +403,12 @@ metadata: {
 | CLI / `run_source_file()` 处理 `.vbc` | 新编译成功后写出 `.vbb`；缓存命中时复用已有产物 |
 | 未指定 `-o/--output` | 写入 `<source_dir>/__vbccache__/<stem>.vbb` |
 | 指定 `-o` | 写入用户指定路径 |
-| 输入 `.vbb` | 跳过源码前端，默认加载并执行；不接受 `-o` 或 `--compile-only` |
+| 输入 `.vbb` | 跳过源码前端，默认加载并执行；不接受 `-o`、`--compile-only` 或 include 搜索参数 |
 | `.vbc --compile-only` | 生成或复用字节码，关闭默认 VM 执行；可同时请求原生导出 |
 | `.vbc/.vbb --emit-exe PATH` | 从字节码构建原生后端并生成独立 exe，不执行目标程序；`-o` 仍只指定源码的 `.vbb` 路径 |
 | `-O0` / `-O1` | 仅影响源码编译；对已有 `.vbb` 不重新优化 |
 
-新编译源码时还写出 `<artifact_path>.deps.json`，由 [`IncrementalCompiler`](../verbose_c/fs/incremental_compile.py) 管理。它记录入口与实际 include 文件的 SHA-256，以及路径、优化等级、编译器修订号、格式版本和 ABI；这份侧车不是 `.vbb` 的 section，直接运行或分发 `.vbb` 不需要它。缓存只检查产物是否存在，内容完整性由加载器上述 CRC32/SHA-256 校验保证，不保存用于比较的产物摘要。
+新编译源码时还写出 `<artifact_path>.deps.json`，由 [`IncrementalCompiler`](../verbose_c/fs/incremental_compile.py) 管理。它记录入口与实际 include 文件的 SHA-256，以及路径、优化等级、编译器修订号、格式版本和 ABI；另外保存用户/系统搜索目录顺序、每次有效 include 的解析结果、兼容警告消息和结构化诊断。缓存复查头文件选择，发现新增同名优先文件或搜索配置变化时重新编译，命中时恢复警告；诊断元数据损坏时回到源码编译。这份侧车不是 `.vbb` 的 section，直接运行或分发 `.vbb` 不需要它，也不恢复源码编译警告。缓存只检查产物是否存在，内容完整性由加载器上述 CRC32/SHA-256 校验保证，不保存用于比较的产物摘要。
 
 独立编译 API `compile_module()` 只返回内存结果，不自行写出文件。需要手动持久化时调用 `ArtifactStore.save_bytecode()`，或使用 CLI / `run_source_file()`。
 

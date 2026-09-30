@@ -30,10 +30,20 @@ class VBCCompileError(VBCError):
     """编译时错误"""
     category = "编译错误"
 
-    def __init__(self, message, line: int | None = None, filepath: str | None = None, warnings: list[str] | None = None, *, report: DiagnosticReport | None = None):
+    def __init__(self, message, line: int | None = None, filepath: str | None = None, warnings: list[str] | None = None, *, report: DiagnosticReport | None = None, warning_diagnostics: list[DiagnosticEntry] | None = None):
         """兼容原有编译异常参数，允许附带结构化诊断。"""
         super().__init__(message, line, filepath, report=report)
         self.warnings = warnings or []
+        self.warning_diagnostics = list(warning_diagnostics or [])
+        known_messages = {entry.message for entry in self.warning_diagnostics}
+        known_messages.update(
+            f"{entry.message}, 在 {entry.line} 行"
+            for entry in self.warning_diagnostics if entry.line is not None
+        )
+        self.warning_diagnostics.extend(
+            DiagnosticEntry(text, severity="warning", code="COMPILER_WARNING")
+            for text in self.warnings if text not in known_messages
+        )
 
 
 class VBCBytecodeError(VBCCompileError):

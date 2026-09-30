@@ -4,6 +4,8 @@ from verbose_c.compiler.ir import format_ir_program, lower_bytecode_unit_to_ir, 
 from verbose_c.compiler.ir.model import IRLoweringError
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.engine.engine import CompilerOutput, run_source_file
+from verbose_c.object.enum import VBCObjectType
+from verbose_c.object.t_null import VBCNull
 from verbose_c.object.t_bool import VBCBool
 from verbose_c.object.t_integer import VBCInteger
 from verbose_c.object.t_string import VBCString
@@ -191,6 +193,19 @@ def test_ir_lowering_lowers_struct_field_opcodes():
     assert "load_field" in ops
     assert "store_field" in ops
     assert "copy_struct" in ops
+
+
+def test_ir_lowering_preserves_class_cast_target():
+    """验证类转换进入 IR 后仍携带目标类名及实例类型。"""
+    function = _lower([
+        (Opcode.LOAD_CONSTANT, 0),
+        (Opcode.CAST, (VBCObjectType.INSTANCE, "Base")),
+        (Opcode.RETURN,),
+    ], constants=[VBCNull()])
+    cast = function.blocks[0].instructions[1]
+    assert cast.op == "cast"
+    assert cast.attrs == {"target_type": "INSTANCE", "target_class": "Base"}
+    assert function.blocks[0].terminator.args == [cast.result]
 
 
 def test_ir_lowering_attaches_program_to_compiler_output():

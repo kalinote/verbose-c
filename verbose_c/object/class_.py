@@ -25,14 +25,32 @@ class VBCClass(VBCObjectWithGC):
         yield from self._methods.values()
         yield from self._fields.values()
 
+    def get_mro(self) -> list["VBCClass"]:
+        """按声明顺序深度优先遍历继承图，对共享祖先去重。
+
+        Returns:
+            与 ClassType 一致的查找顺序，首项为当前类。
+        """
+        classes = []
+        pending = [self]
+        visited = set()
+        while pending:
+            class_ = pending.pop()
+            if class_._name in visited:
+                continue
+            visited.add(class_._name)
+            classes.append(class_)
+            pending.extend(reversed(class_._super_class))
+        return classes
+
     def create_instance(self) -> VBCInstance:
         """
         实例化类
         """
         instance = VBCInstance(class_=self)
         # 将类的字段定义复制到实例中，初始化为默认值
-        for field_name, default_value in self._fields.items():
-            instance.fields[field_name] = default_value
+        for class_ in reversed(self.get_mro()):
+            instance.fields.update(class_._fields)
         return instance
 
     def lookup_method(self, name: str) -> VBCObject | None:

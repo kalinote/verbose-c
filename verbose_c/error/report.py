@@ -20,6 +20,8 @@ class DiagnosticEntry:
     expected_tokens: list[str] = field(default_factory=list)
     actual_token: str | None = None
     rule_stack: list[str] = field(default_factory=list)
+    severity: str = "error"
+    code: str = "VBC000"
 
 
 @dataclass

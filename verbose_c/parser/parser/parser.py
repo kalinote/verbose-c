@@ -208,6 +208,30 @@ def ast_dump(node, annotate_fields=True, indent=None, level=0):
 class Parser:
     """Parsing base class."""
 
+    def _attach_source_path(self, value: T, source_path: str | None) -> T:
+        """为语法动作新建的 AST 节点补源文件，保留子规则已记录的位置。
+
+        Args:
+            value: 语法动作结果，可能是 AST、列表或普通值。
+            source_path: 当前规则首个 token 的文件路径。
+
+        Returns:
+            原动作结果；只补充缺失的 AST 源文件属性。
+        """
+        pending = [value]
+        while pending:
+            item = pending.pop()
+            if isinstance(item, ASTNode):
+                if getattr(item, "source_path", None) is not None:
+                    continue
+                item.source_path = source_path
+                pending.extend(vars(item).values())
+            elif isinstance(item, (list, tuple)):
+                pending.extend(item)
+            elif isinstance(item, dict):
+                pending.extend(item.values())
+        return value
+
     def __init__(self, tokenizer: Tokenizer):
         self._tokenizer = tokenizer
         self._level = 0

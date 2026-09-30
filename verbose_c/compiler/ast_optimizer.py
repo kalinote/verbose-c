@@ -395,6 +395,9 @@ class _ASTConstantOptimizer:
         return self._optimize_node(node, env) or node
 
     def _optimize_expr_NameNode(self, node: NameNode, env: _OptimizationEnv) -> ASTNode:
+        if getattr(node, "_implicit_member", None) is not None:
+            # 隐式成员与 this.field 一样按属性读取，不传播为普通变量。
+            return node
         symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None:
             return node
@@ -686,6 +689,8 @@ class _ASTConstantOptimizer:
     def _copy_source(self, node: ASTNode, env: _OptimizationEnv):
         if not isinstance(node, NameNode) or getattr(node, "_implicit_cast_target", None) is not None:
             return None
+        if getattr(node, "_implicit_member", None) is not None:
+            return None
         symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None or not self._is_copyable_symbol(symbol):
             return None
@@ -929,7 +934,7 @@ class _ASTConstantOptimizer:
         return node
 
     def _cse_signature(self, node: ASTNode):
-        if getattr(node, "_implicit_cast_target", None) is not None:
+        if getattr(node, "_implicit_cast_target", None) is not None or getattr(node, "_implicit_member", None) is not None:
             return None
         if isinstance(node, ConstantValueNode):
             return ("constant", type(node.value).__name__, getattr(node.value, "value", None), repr(getattr(node.value, "_object_type", None)))
@@ -1184,6 +1189,9 @@ class _ASTConstantOptimizer:
                 continue
             symbol = self.symbol_table.lookup_value(statement.name.name)
             if symbol is None or symbol.scope is None or not isinstance(symbol.type_, FunctionType):
+                continue
+            if any(isinstance(type_, StructType) for type_ in [symbol.type_.return_type, *symbol.type_.param_types]):
+                # 内联尚不能保留结构体在实参和返回边界的独立存储。
                 continue
             setattr(symbol.scope, "_vbc_function_name", statement.name.name)
             if self._is_inline_candidate(statement):

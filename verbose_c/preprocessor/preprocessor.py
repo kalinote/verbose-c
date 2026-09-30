@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from verbose_c.error import VBCCompileError
+from verbose_c.error import DiagnosticEntry, DiagnosticReport, VBCCompileError
 from verbose_c.fs.source_manager import SourceManager
 from verbose_c.parser.lexer.enum import TokenType
 from verbose_c.parser.lexer.lexer import Lexer
@@ -27,10 +27,8 @@ DEFINE_PATTERN = re.compile(
     r'^\s*#define\s+([a-zA-Z_][a-zA-Z0-9_]*)(\([^\)]*\))?(?:\s+(.*))?$',
     re.DOTALL,
 )
-INCLUDE_QUOTED_PATTERN = re.compile(r'^\s*#include\s+"([^"]+)"')
-INCLUDE_ANGLE_PATTERN = re.compile(r'^\s*#include\s+<([^>]+)>')
-IF_PATTERN = re.compile(r'^\s*#if\s+(.*)', re.DOTALL)
-ELIF_PATTERN = re.compile(r'^\s*#elif\s+(.*)', re.DOTALL)
+IF_PATTERN = re.compile(r'^\s*#if\b(.*)', re.DOTALL)
+ELIF_PATTERN = re.compile(r'^\s*#elif\b(.*)', re.DOTALL)
 IFDEF_PATTERN = re.compile(r'^\s*#ifdef\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$')
 IFNDEF_PATTERN = re.compile(r'^\s*#ifndef\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$')
 ELSE_PATTERN = re.compile(r'^\s*#else\s*$')
@@ -52,6 +50,7 @@ class Preprocessor:
     """源代码预处理器，负责处理宏指令，如 #include 和 #define。"""
 
     MAX_EXPANSION_DEPTH = 20
+    MAX_INCLUDE_DEPTH = 64
 
     def __init__(
         self,
@@ -62,7 +61,10 @@ class Preprocessor:
         self.source_manager = source_manager
         self.show_warnings = show_warnings
         self.macro_register: dict[str, MacroDefinition] = {}
-        self._included_files = set()
+        self._include_stack: list[str] = []
+        self._once_files: set[str] = set()
+        self.include_requests: list[dict] = []
+        self.diagnostics: list[DiagnosticEntry] = []
         self.dependencies: set[str] = set()
         self._compile_time = compile_time or datetime.now()
         self._cond_stack: list[_CondFrame] = []
@@ -87,13 +89,17 @@ class Preprocessor:
     def _is_active(self) -> bool:
         return not self._cond_stack or self._cond_stack[-1].self_active
 
-    def _error(self, message: str, token: Token) -> None:
-        location = self._token_location(token)
-        if location:
-            full_message = f"{message}，{location}"
-        else:
-            full_message = message
-        raise VBCCompileError(full_message, line=token.line, filepath=token.path)
+    def _error(self, message: str, token: Token, code: str = "PP001") -> None:
+        """抛出带真实指令位置、稳定错误码和已有警告的编译异常。"""
+        entry = DiagnosticEntry(
+            message, filepath=token.path, line=token.line, column=token.column,
+            source_context=self.source_manager.get_context(token.path or "", token.line), code=code,
+        )
+        error = VBCCompileError(message, line=token.line, filepath=token.path,
+                                report=DiagnosticReport("预处理错误", [entry]))
+        error.warning_diagnostics = list(self.diagnostics)
+        error.warnings = [item.message for item in self.diagnostics]
+        raise error
 
     def _push_cond_frame(self, token: Token, condition: bool) -> None:
         parent_active = self._is_active()
@@ -119,13 +125,13 @@ class Preprocessor:
         ifndef_match = IFNDEF_PATTERN.match(value)
         if ifdef_match or ifndef_match:
             name = (ifdef_match or ifndef_match).group(1)
-            defined = name in self.macro_register
+            defined = name in self.macro_register or name in DYNAMIC_PREDEFINED
             self._push_cond_frame(token, defined if ifdef_match else not defined)
             return True
 
         if_match = IF_PATTERN.match(value)
         if if_match:
-            self._push_cond_frame(token, self._eval_cond_expr(if_match.group(1), token))
+            self._push_cond_frame(token, self._is_active() and self._eval_cond_expr(if_match.group(1), token))
             return True
 
         elif_match = ELIF_PATTERN.match(value)
@@ -135,7 +141,7 @@ class Preprocessor:
             frame = self._cond_stack[-1]
             if frame.seen_else:
                 self._error("预处理错误：#else 之后不能有 #elif", token)
-            if frame.branch_taken:
+            if frame.branch_taken or not frame.parent_active:
                 frame.self_active = False
             elif self._eval_cond_expr(elif_match.group(1), token):
                 frame.branch_taken = True
@@ -168,19 +174,8 @@ class Preprocessor:
 
     @staticmethod
     def _join_directive_continuation(text: str) -> str:
-        """合并预处理指令中的反斜杠续行。"""
-        lines = text.splitlines()
-        parts: list[str] = []
-        line_index = 0
-        while line_index < len(lines):
-            line = lines[line_index].strip()
-            while line.endswith("\\") and line_index + 1 < len(lines):
-                line = line[:-1].rstrip() + lines[line_index + 1].strip()
-                line_index += 1
-            if line:
-                parts.append(line)
-            line_index += 1
-        return " ".join(parts)
+        """移除反斜杠续行，保留两侧空白以维持 token 边界。"""
+        return re.sub(r"\\\r?\n", "", text)
 
     def _token_location(self, token: Token) -> str:
         """格式化 token 所在源文件与行号。"""
@@ -192,15 +187,14 @@ class Preprocessor:
             parts.append(f"在 {path} 文件")
         return "，".join(parts)
 
-    def _warn(self, message: str, token: Token | None = None) -> None:
-        """输出带可选位置信息的预处理警告。"""
-        if not self.show_warnings:
-            return
-        location = self._token_location(token) if token else ""
-        if location:
-            print(f"警告: {message}，{location}")
-        else:
-            print(f"警告: {message}")
+    def _warn(self, message: str, token: Token | None = None, code: str = "PP_WARNING") -> None:
+        """只收集结构化警告，显示开关和输出交由编译编排层负责。"""
+        self.diagnostics.append(DiagnosticEntry(
+            message, filepath=token.path if token else None,
+            line=token.line if token else None, column=token.column if token else None,
+            source_context=self.source_manager.get_context(token.path or "", token.line) if token else [],
+            severity="warning", code=code,
+        ))
 
     def _clone_token(self, token: Token) -> Token:
         """浅拷贝单个 Token。"""
@@ -351,11 +345,11 @@ class Preprocessor:
             prev_loc = "，".join(prev_parts)
             cur_loc = self._token_location(token)
             if prev_loc and cur_loc:
-                self._warn(f"宏定义 {name} 已存在，{prev_loc}；当前定义{cur_loc}")
+                self._warn(f"宏定义 {name} 已存在，{prev_loc}", token, "PP_MACRO_REDEFINED")
             elif prev_loc:
-                self._warn(f"宏定义 {name} 已存在，{prev_loc}")
+                self._warn(f"宏定义 {name} 已存在，{prev_loc}", token, "PP_MACRO_REDEFINED")
             else:
-                self._warn(f"宏定义 {name} 已存在", token)
+                self._warn(f"宏定义 {name} 已存在", token, "PP_MACRO_REDEFINED")
             if name in RESERVED_PREDEFINED:
                 self._warn(f"不建议重定义标准预定义宏 {name}", token)
 
@@ -363,7 +357,7 @@ class Preprocessor:
         params = [p.strip() for p in params_str.strip()[1:-1].split(",") if p.strip()] if params_str else []
         try:
             body_tokens = [
-                tok for tok in Lexer(os.path.abspath(token.path or ""), body, macro_body=True).tokenize()
+                tok for tok in Lexer(os.path.abspath(token.path or ""), body, macro_body=True, preprocessor_mode=True).tokenize()
                 if tok.type != TokenType.END
             ]
         except SyntaxError as error:
@@ -379,33 +373,51 @@ class Preprocessor:
         )
 
     def _handle_include(self, token: Token) -> list[Token]:
-        """处理 #include "..." 并返回展开后的 token 列表。"""
-        quoted_match = INCLUDE_QUOTED_PATTERN.match(token.value)
-        if not quoted_match:
-            if INCLUDE_ANGLE_PATTERN.match(token.value):
-                self._warn("暂不支持 #include <...> 形式", token)
+        """展开头文件宏并按搜索配置包含文件，保留每次实际解析结果。"""
+        argument = re.sub(r"^\s*#include\b", "", token.value).strip()
+        try:
+            literal = re.fullmatch(r'(?:"([^"\n]+)"|<([^>\n]+)>)\s*(?:(?:/\*.*?\*/|//[^\n]*)\s*)*', argument, re.DOTALL)
+            if literal:
+                filename = literal.group(1) or literal.group(2)
+                angled = literal.group(2) is not None
+            else:
+                header_tokens = Lexer(token.path, argument, preprocessor_mode=True).tokenize()
+                significant = [item for item in self._rescan(header_tokens[:-1], set()) if item.type not in _INSIGNIFICANT]
+                if len(significant) == 1 and significant[0].type == TokenType.STRING and significant[0].value.startswith('"'):
+                    filename, angled = significant[0].value[1:-1], False
+                elif len(significant) >= 3 and significant[0].value == "<" and significant[-1].value == ">":
+                    filename, angled = "".join(item.value for item in significant[1:-1]), True
+                    if any(item.value in ("<", ">") for item in significant[1:-1]):
+                        raise ValueError("头文件名包含多余的尖括号")
+                else:
+                    raise ValueError("#include 必须指定一个双引号或尖括号头文件名")
+            if not filename:
+                raise ValueError("#include 头文件名不能为空")
+            abs_path = self.source_manager.resolve_include(filename, token.path or "", angled)
+        except FileNotFoundError as error:
+            self._error(str(error), token, "PP_INCLUDE_NOT_FOUND")
+        except (ValueError, SyntaxError) as error:
+            self._error(str(error), token, "PP_INCLUDE_SYNTAX")
+        self.include_requests.append({"name": filename, "from_path": token.path or "", "angled": angled, "resolved_path": abs_path})
+        identity = os.path.normcase(os.path.realpath(abs_path))
+        if identity in self._once_files:
             return []
-
-        filename = quoted_match.group(1)
-        abs_path = self.source_manager.resolve_include(filename, token.path or "")
-
-        if abs_path in self._included_files:
-            self._warn(f"检测到循环包含 '{abs_path}'，已跳过", token)
-            return []
-
-        if not self.source_manager.exists(abs_path):
-            self._warn(f"#include 文件未找到 '{abs_path}'", token)
-            return []
-
+        if len(self._include_stack) >= self.MAX_INCLUDE_DEPTH:
+            self._error("include 嵌套过深，可能存在无保护的循环包含: " + " -> ".join([*self._include_stack, abs_path]), token, "PP_INCLUDE_DEPTH")
         self.dependencies.add(os.path.abspath(abs_path))
-        self._included_files.add(abs_path)
+        self._include_stack.append(abs_path)
+        parent_conditions = self._cond_stack
+        self._cond_stack = []
         try:
             content = self.source_manager.read(abs_path)
             included_tokens = Lexer(abs_path, content).tokenize(compile_errors=True)
             processed = self.process_tokens(included_tokens)
             return [t for t in processed if t.type != TokenType.END]
+        except (OSError, UnicodeError) as error:
+            self._error(f"无法读取头文件 '{abs_path}': {error}", token, "PP_INCLUDE_IO")
         finally:
-            self._included_files.discard(abs_path)
+            self._include_stack.pop()
+            self._cond_stack = parent_conditions
 
     def process_tokens(self, tokens: list[Token]) -> list[Token]:
         """处理 token 序列：注册 define、展开 include 与宏。"""
@@ -425,12 +437,35 @@ class Preprocessor:
                 break
 
             if token.type == TokenType.MACRO_CODE:
+                token = self._clone_token(token)
+                token.value = re.sub(r"^\s*#\s*", "#", self._join_directive_continuation(token.value))
+                directive = re.match(r"^#([A-Za-z_][A-Za-z_0-9]*)\b", token.value)
+                name = directive.group(1) if directive else ""
+                if name in ("ifdef", "ifndef", "else", "endif", "undef", "pragma"):
+                    token.value = re.sub(r"/\*.*?\*/|//[^\n]*", " ", token.value, flags=re.DOTALL)
+                if name in ("if", "ifdef", "ifndef") and not self._is_active():
+                    self._push_cond_frame(token, False)
+                    index += 1
+                    continue
                 if not self._handle_conditional_directive(token) and self._is_active():
                     if DEFINE_PATTERN.match(token.value):
                         self._handle_define(token)
-                    elif INCLUDE_QUOTED_PATTERN.match(token.value) or INCLUDE_ANGLE_PATTERN.match(token.value):
+                    elif name == "include":
                         output.extend(self._handle_include(token))
-                    elif self.show_warnings:
+                    elif re.fullmatch(r"#pragma\s+once\s*", token.value):
+                        self._once_files.add(os.path.normcase(os.path.realpath(token.path)))
+                    elif name == "undef":
+                        macro_name = token.value[len("#undef"):].strip()
+                        if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", macro_name):
+                            self._error("#undef 后需要一个宏名", token, "PP_DIRECTIVE")
+                        if macro_name in RESERVED_PREDEFINED or macro_name in DYNAMIC_PREDEFINED:
+                            self._error("不能取消标准预定义宏", token, "PP_DIRECTIVE")
+                        self.macro_register.pop(macro_name, None)
+                    elif name == "error":
+                        self._error(token.value[len("#error"):].strip() or "#error 指令", token, "PP_ERROR")
+                    elif name in ("if", "ifdef", "ifndef", "elif", "else", "endif"):
+                        self._error("条件编译指令格式无效", token, "PP_CONDITION_SYNTAX")
+                    else:
                         self._warn(f"未识别的预处理指令: {token.value}", token)
                 index += 1
                 continue

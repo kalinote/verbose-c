@@ -1,5 +1,3 @@
-import re
-
 from verbose_c.compiler.enum import CompilerPass, ScopeType
 from verbose_c.compiler.opcode import Opcode
 from verbose_c.compiler.opcode_generator_visitor import OpcodeGenerator
@@ -11,14 +9,15 @@ from verbose_c.object.t_null import VBCNull
 from verbose_c.parser.parser.ast.node import ASTNode
 from verbose_c.typing.types import IntegerType
 from verbose_c.vm.builtins_functions import BUILTIN_FUNCTION_SIGNATURES, BUILTIN_CONSTANTS
-from verbose_c.error import DiagnosticEntry, DiagnosticReport, VBCCompileError
+from verbose_c.error import DiagnosticReport, VBCCompileError
+from verbose_c.fs.source_manager import SourceManager
 
 
 class Compiler:
     """
     编译器
     """
-    def __init__(self, target_ast: ASTNode, optimize_level: int=0, scope_type: ScopeType=ScopeType.GLOBAL, symbol_table: SymbolTable | None = None, source_path: str | None = None, passes_to_run: list[CompilerPass] | None = None, function_name: str | None = None):
+    def __init__(self, target_ast: ASTNode, optimize_level: int=0, scope_type: ScopeType=ScopeType.GLOBAL, symbol_table: SymbolTable | None = None, source_path: str | None = None, passes_to_run: list[CompilerPass] | None = None, function_name: str | None = None, source_manager: SourceManager | None = None):
         self._target_ast = target_ast
         self._optimize_level = optimize_level   # 编译优化等级
         self._scope_type=scope_type
@@ -33,7 +32,7 @@ class Compiler:
             self._populate_builtins()
 
         # 类型检查
-        self._type_checker = TypeChecker(self._symbol_table, source_path=self._source_path)
+        self._type_checker = TypeChecker(self._symbol_table, source_path=self._source_path, source_manager=source_manager)
         # 操作码生成器
         self._opcode_generator = OpcodeGenerator(
             self._symbol_table,
@@ -76,6 +75,11 @@ class Compiler:
         """暴露类型检查阶段收集到的编译告警。"""
         return self._type_checker.warnings
 
+    @property
+    def diagnostics(self):
+        """暴露类型检查原生生成的结构化诊断。"""
+        return self._type_checker.diagnostics
+
     def compile(self):
         """
         执行类型检查与字节码生成，并在错误时抛出编译异常。
@@ -94,16 +98,11 @@ class Compiler:
             if self._type_checker.errors:
                 # 将所有收集到的错误信息合并，并抛出异常
                 combined_error_message = "\n".join(self._type_checker.errors)
-                entries = []
-                for message in self._type_checker.errors:
-                    location = re.search(r", 在 (\d+) 行$", message)
-                    entries.append(DiagnosticEntry(
-                        message[:location.start()] if location else message,
-                        line=int(location.group(1)) if location else None,
-                    ))
+                entries = [entry for entry in self.diagnostics if entry.severity == "error"]
                 raise VBCCompileError(
                     combined_error_message, filepath=self._source_path, warnings=self._type_checker.warnings,
                     report=DiagnosticReport("类型检查错误", entries),
+                    warning_diagnostics=[entry for entry in self.diagnostics if entry.severity == "warning"],
                 )
         
         should_generate = run_all or CompilerPass.GENERATE_CODE in passes

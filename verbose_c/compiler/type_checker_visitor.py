@@ -15,6 +15,8 @@ from verbose_c.typing.types import (
 )
 from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.numeric import NUMERIC_RANKS, cast_numeric, check_integer, numeric_literal
+from verbose_c.error import DiagnosticEntry
+from verbose_c.fs.source_manager import SourceManager
 
 
 # 将字符串类型名映射到编译时Type对象
@@ -49,17 +51,18 @@ class TypeChecker(VisitorBase):
     """
     类型检查器，遍历AST并验证类型规则。
     """
-    def __init__(self, symbol_table: SymbolTable, source_path: str | None = None):
+    def __init__(self, symbol_table: SymbolTable, source_path: str | None = None, source_manager: SourceManager | None = None):
         self.symbol_table = symbol_table
         self.source_path = source_path
-        self.errors: list[str] = []
-        self.warnings: list[str] = []
+        self.source_manager = source_manager or SourceManager()
+        self.diagnostics: list[DiagnosticEntry] = []
+        self._diagnostic_node: ASTNode | None = None
         self.loop_level = 0
         self.switch_level = 0
         self.current_function_return_type: Type | None = None   # 跟踪当前函数返回类型
         self.current_function_name: str | None = None
         self.current_class_type: ClassType | None = None # 跟踪当前类上下文
-        self._called_undefined_functions: dict[str, int] = {}
+        self._called_undefined_functions: dict[str, ASTNode] = {}
         self._register_builtin_types()
 
     def _register_builtin_types(self):
@@ -75,8 +78,49 @@ class TypeChecker(VisitorBase):
                 continue
 
     def visit(self, node: ASTNode) -> Type:
-        """重写 visit 方法以提供更精确的类型提示"""
-        return super().visit(node)
+        """跟踪当前诊断位置，并让合成节点继承所在源文件。"""
+        previous = self._diagnostic_node
+        if node is not None and getattr(node, "source_path", None) is None:
+            node.source_path = getattr(previous, "source_path", None) or self.source_path
+        self._diagnostic_node = node
+        try:
+            return super().visit(node)
+        finally:
+            self._diagnostic_node = previous
+
+    @property
+    def errors(self) -> list[str]:
+        """按原顺序提供兼容的错误字符串视图。"""
+        return [entry.message + (f", 在 {entry.line} 行" if entry.line is not None else "")
+                for entry in self.diagnostics if entry.severity == "error"]
+
+    @property
+    def warnings(self) -> list[str]:
+        """按原顺序提供兼容的警告字符串视图。"""
+        return [entry.message + (f", 在 {entry.line} 行" if entry.line is not None else "")
+                for entry in self.diagnostics if entry.severity == "warning"]
+
+    def _diagnose(self, message: str, node: ASTNode | None = None, *, code: str,
+                  severity: str = "error", line: int | None = None) -> None:
+        """在诊断产生处记录机器可读分类和真实源码位置。
+
+        Args:
+            message: 不包含拼接位置的诊断原因。
+            node: 对应 AST 节点，缺省使用当前访问节点。
+            code: 与诊断文案独立的稳定分类码。
+            severity: error 或 warning。
+            line: 兼容按行调用的类型辅助检查。
+        """
+        node = node or self._diagnostic_node
+        path = getattr(node, "source_path", None) or self.source_path
+        node_line = getattr(node, "start_line", None)
+        line = line if line is not None else node_line
+        column = getattr(node, "start_column", None) if line == node_line else None
+        self.diagnostics.append(DiagnosticEntry(
+            message, filepath=path, line=line, column=column,
+            source_context=self.source_manager.get_context(path or "", line),
+            severity=severity, code=code,
+        ))
 
     def resolve_type_node(self, type_node: TypeNode, report_error: bool = True) -> Type:
         """
@@ -87,7 +131,7 @@ class TypeChecker(VisitorBase):
         
         if not base_type:
             if report_error:
-                self.errors.append(f"未知类型 '{type_name}', 在 {type_node.start_line} 行")
+                self._diagnose(f"未知类型 '{type_name}'", type_node, code="TYPE_UNKNOWN")
             return ErrorType()
 
         # 根据指针级别，递归创建 PointerType
@@ -113,6 +157,9 @@ class TypeChecker(VisitorBase):
             return False
         if target_type == source_type:
             return True
+
+        if isinstance(target_type, ClassType) and isinstance(source_type, ClassType):
+            return source_type.is_subclass_of(target_type)
         
         # 规则3: 允许任何类型赋值给 AnyType
         if isinstance(target_type, AnyType):
@@ -151,7 +198,7 @@ class TypeChecker(VisitorBase):
                 expr._constant_int_value = int(value.value)
                 return int(value.value)
         except (TypeError, ValueError, ArithmeticError) as exc:
-            self.errors.append(f"常量表达式错误: {exc}, 在 {expr.start_line} 行")
+            self._diagnose(f"常量表达式错误: {exc}", expr, code="CONST_INVALID")
         return None
 
     def _eval_case_constant(self, expr: ASTNode) -> int | None:
@@ -181,17 +228,17 @@ class TypeChecker(VisitorBase):
         if not array_dims:
             return base_type
         if isinstance(base_type, StructType):
-            self.errors.append(f"类型错误: 暂不支持结构体数组, 在 {line} 行")
+            self._diagnose(f"类型错误: 暂不支持结构体数组", line=line, code="ARRAY_INVALID")
             return ErrorType()
         if len(array_dims) > 1:
-            self.errors.append(f"类型错误: 当前仅支持一维数组声明, 在 {line} 行")
+            self._diagnose(f"类型错误: 当前仅支持一维数组声明", line=line, code="ARRAY_INVALID")
             return ErrorType()
         dim = array_dims[0]
         if dim is None or isinstance(dim, NullNode):
             return ArrayType(base_type, 0)
         size = self._eval_array_size(dim)
         if size is None:
-            self.errors.append(f"类型错误: 数组长度必须是编译期正整数常量, 在 {line} 行")
+            self._diagnose(f"类型错误: 数组长度必须是编译期正整数常量", line=line, code="ARRAY_INVALID")
             return ErrorType()
         return ArrayType(base_type, size)
 
@@ -204,26 +251,26 @@ class TypeChecker(VisitorBase):
         if declared_size is None or declared_size == 0:
             inferred = count
             if count == 0:
-                self.errors.append(f"类型错误: 无法从空的初始化列表推导数组长度, 在 {line} 行")
+                self._diagnose(f"类型错误: 无法从空的初始化列表推导数组长度", line=line, code="ARRAY_INVALID")
                 return None
             for elem in init_list.elements:
                 elem_type = self.visit(elem)
                 if isinstance(elem_type, ErrorType):
                     return None
                 if not self._is_assignable(element_type, elem_type):
-                    self.errors.append(f"类型错误: 不能将类型 '{elem_type}' 的值用于类型为 '{element_type}' 的数组元素, 在 {elem.start_line} 行")
+                    self._diagnose(f"类型错误: 不能将类型 '{elem_type}' 的值用于类型为 '{element_type}' 的数组元素", elem, code="ARRAY_INVALID")
                 else:
                     self._mark_implicit_cast_if_needed(elem, element_type, elem_type)
             return inferred
         if count > declared_size:
-            self.errors.append(f"类型错误: 初始化列表包含 {count} 个元素, 超过数组长度 {declared_size}, 在 {line} 行")
+            self._diagnose(f"类型错误: 初始化列表包含 {count} 个元素, 超过数组长度 {declared_size}", line=line, code="ARRAY_INVALID")
             return None
         for elem in init_list.elements:
             elem_type = self.visit(elem)
             if isinstance(elem_type, ErrorType):
                 return None
             if not self._is_assignable(element_type, elem_type):
-                self.errors.append(f"类型错误: 不能将类型 '{elem_type}' 的值用于类型为 '{element_type}' 的数组元素, 在 {elem.start_line} 行")
+                self._diagnose(f"类型错误: 不能将类型 '{elem_type}' 的值用于类型为 '{element_type}' 的数组元素", elem, code="ARRAY_INVALID")
             else:
                 self._mark_implicit_cast_if_needed(elem, element_type, elem_type)
         return declared_size
@@ -236,9 +283,7 @@ class TypeChecker(VisitorBase):
         if isinstance(condition_type, ErrorType):
             return
         if not self._is_scalar_truthy_type(condition_type):
-            self.errors.append(
-                f"类型错误: '{stmt}' 语句的条件必须是标量类型（整数、浮点、指针或布尔）, 而不是 '{condition_type}', 在 {line} 行"
-            )
+            self._diagnose(f"类型错误: '{stmt}' 语句的条件必须是标量类型（整数、浮点、指针或布尔）, 而不是 '{condition_type}'", line=line, code="TYPE_MISMATCH")
 
     def _numeric_rank(self, type_: Type) -> float:
         """返回数值类型的隐式转换优先级，用于判断是否窄化。"""
@@ -256,21 +301,19 @@ class TypeChecker(VisitorBase):
             return
 
         if isinstance(target_type, IntegerType) and isinstance(source_type, FloatType):
-            self.warnings.append(
-                f"类型警告: {context} 发生隐式转换 '{source_type}' -> '{target_type}'，可能丢失小数部分, 在 {line} 行"
-            )
+            self._diagnose(f"类型警告: {context} 发生隐式转换 '{source_type}' -> '{target_type}'，可能丢失小数部分", line=line, code="CONVERSION_LOSS", severity="warning")
             return
 
         if isinstance(target_type, (IntegerType, FloatType, BoolType)) and isinstance(source_type, (IntegerType, FloatType, BoolType)):
             target_rank = self._numeric_rank(target_type)
             source_rank = self._numeric_rank(source_type)
             if target_rank < source_rank:
-                self.warnings.append(
-                    f"类型警告: {context} 发生隐式窄化转换 '{source_type}' -> '{target_type}'，可能丢失精度, 在 {line} 行"
-                )
+                self._diagnose(f"类型警告: {context} 发生隐式窄化转换 '{source_type}' -> '{target_type}'，可能丢失精度", line=line, code="CONVERSION_LOSS", severity="warning")
 
     def _mark_implicit_cast_if_needed(self, expr_node: ASTNode, target_type: Type, source_type: Type):
-        """给表达式打标记，提示代码生成阶段插入隐式 CAST。"""
+        """标记值传递边界所需的结构体拷贝或数值转换。"""
+        if isinstance(target_type, StructType) and target_type == source_type:
+            expr_node._struct_copy_slots = target_type.slot_count
         if target_type == source_type:
             return
         if isinstance(target_type, (IntegerType, FloatType, BoolType)) and isinstance(source_type, (IntegerType, FloatType, BoolType)):
@@ -289,7 +332,7 @@ class TypeChecker(VisitorBase):
             try:
                 cast_numeric(value, VBCObjectType.BOOL if isinstance(target_type, BoolType) else target_type.kind)
             except (TypeError, ValueError, ArithmeticError) as exc:
-                self.errors.append(f"类型错误: {exc}, 在 {expr_node.start_line} 行")
+                self._diagnose(f"类型错误: {exc}", expr_node, code="TYPE_MISMATCH")
 
     def _is_castable(self, target_type: Type, source_type: Type) -> bool:
         """
@@ -325,7 +368,10 @@ class TypeChecker(VisitorBase):
         if isinstance(target_type, BoolType) and (isinstance(source_type, StringType) or is_source_numeric):
             return True
             
-        # TODO 规则 7: 允许对象类型之间的向上和向下转型。
+        if isinstance(target_type, ClassType) and isinstance(source_type, NullType):
+            return True
+
+        # 类向下转换还需由 VM 根据实例的实际类型检查。
         if isinstance(target_type, ClassType) and isinstance(source_type, ClassType):
             # 向上转型总是安全的
             if source_type.is_subclass_of(target_type):
@@ -344,10 +390,10 @@ class TypeChecker(VisitorBase):
     def visit_ModuleNode(self, node: ModuleNode) -> Type:
         for statement in node.body:
             self.visit(statement)
-        for name, line in self._called_undefined_functions.items():
+        for name, call in self._called_undefined_functions.items():
             symbol = self.symbol_table.lookup_value(name)
             if symbol and symbol.kind == SymbolKind.FUNCTION and not symbol.is_defined:
-                self.errors.append(f"链接错误: 函数 '{name}' 已声明但未定义, 在 {line} 行")
+                self._diagnose(f"链接错误: 函数 '{name}' 已声明但未定义", call, code="LINK_UNDEFINED")
         self._called_undefined_functions.clear()
         return VoidType()
 
@@ -356,14 +402,14 @@ class TypeChecker(VisitorBase):
         try:
             node.inferred_type = numeric_literal(node.value, node.inferred_type)._object_type
         except (ValueError, ArithmeticError) as exc:
-            self.errors.append(f"数值字面量错误: {exc}, 在 {node.start_line} 行")
+            self._diagnose(f"数值字面量错误: {exc}", node, code="TYPE_MISMATCH")
             return ErrorType()
         if isinstance(node.value, int):
             return IntegerType(node.inferred_type)
         elif isinstance(node.value, float):
             return FloatType(node.inferred_type)
         else:
-            self.errors.append(f"内部错误：意外的数字值类型 {type(node.value)}, 在 {node.start_line} 行")
+            self._diagnose(f"内部错误：意外的数字值类型 {type(node.value)}", node, code="TYPE_INTERNAL")
             return ErrorType()
 
     def visit_StringNode(self, node: StringNode) -> Type:
@@ -392,13 +438,22 @@ class TypeChecker(VisitorBase):
     def visit_NameNode(self, node: NameNode) -> Type:
         if node.name == "__func__":
             if self.current_function_name is None:
-                self.errors.append(f"语法错误: '__func__' 只能在函数体内使用, 在 {node.start_line} 行")
+                self._diagnose(f"语法错误: '__func__' 只能在函数体内使用", node, code="CONTROL_INVALID")
                 return ErrorType()
             return StringType()
         symbol = self.symbol_table.lookup_value(node.name)
         if symbol is None:
-            self.errors.append(f"命名错误: '{node.name}' 未定义, 在 {node.start_line} 行")
+            self._diagnose(f"命名错误: '{node.name}' 未定义", node, code="NAME_UNDEFINED")
             return ErrorType()
+        owner = self.symbol_table
+        while owner is not None and owner.lookup_value(node.name, current_scope_only=True) is not symbol:
+            owner = owner._parent
+        if owner is not None and owner._scope_type == ScopeType.CLASS and symbol.kind in (SymbolKind.VARIABLE, SymbolKind.FUNCTION):
+            node._implicit_member = GetPropertyNode(
+                NameNode("this", start_line=node.start_line, start_column=node.start_column),
+                NameNode(node.name, start_line=node.start_line, start_column=node.start_column),
+                start_line=node.start_line, start_column=node.start_column,
+            )
         return symbol.type_
 
     def visit_UnaryOpNode(self, node: UnaryOpNode) -> Type:
@@ -411,7 +466,7 @@ class TypeChecker(VisitorBase):
             if isinstance(operand_type, ErrorType):
                 return ErrorType()
             if not isinstance(operand_type, PointerType):
-                self.errors.append(f"类型错误: 解引用操作符 '*' 只能用于指针类型, 而不是 '{operand_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 解引用操作符 '*' 只能用于指针类型, 而不是 '{operand_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
             # 解引用的结果是其基础类型
             return operand_type.base_type
@@ -421,14 +476,14 @@ class TypeChecker(VisitorBase):
                 isinstance(node.expr, (NameNode, SubscriptNode, GetPropertyNode))
                 or (isinstance(node.expr, UnaryOpNode) and node.expr.op == Operator.DEREFERENCE)
             ):
-                self.errors.append(f"语法错误: 取地址操作符 '&' 只能用于可取地址的左值, 在 {node.start_line} 行")
+                self._diagnose(f"语法错误: 取地址操作符 '&' 只能用于可取地址的左值", node, code="CONTROL_INVALID")
                 return ErrorType()
             
             operand_type = self.visit(node.expr)
             if isinstance(operand_type, ErrorType):
                 return ErrorType()
             if isinstance(operand_type, ArrayType):
-                self.errors.append(f"语法错误: 取地址操作符 '&' 不能用于数组类型, 在 {node.start_line} 行")
+                self._diagnose(f"语法错误: 取地址操作符 '&' 不能用于数组类型", node, code="CONTROL_INVALID")
                 return ErrorType()
             
             return PointerType(operand_type)
@@ -439,7 +494,7 @@ class TypeChecker(VisitorBase):
 
         if node.op in (Operator.SUBTRACT, Operator.ADD):
             if not isinstance(operand_type, (IntegerType, FloatType, BoolType)):
-                self.errors.append(f"类型错误: 操作符 '{node.op.value}' 不能用于类型 '{operand_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 操作符 '{node.op.value}' 不能用于类型 '{operand_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
             result_type = common_arithmetic_type(operand_type)
             node._numeric_kind = result_type.kind
@@ -448,11 +503,11 @@ class TypeChecker(VisitorBase):
 
         if node.op == Operator.NOT:
             if not self._is_scalar_truthy_type(operand_type):
-                self.errors.append(f"类型错误: 操作符 '!' 只能用于标量类型, 而不是 '{operand_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 操作符 '!' 只能用于标量类型, 而不是 '{operand_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
             return IntegerType(VBCObjectType.INT)
 
-        self.errors.append(f"内部错误: 未知的一元操作符 '{node.op.value}', 在 {node.start_line} 行")
+        self._diagnose(f"内部错误: 未知的一元操作符 '{node.op.value}'", node, code="TYPE_INTERNAL")
         return ErrorType()
 
     def visit_BinaryOpNode(self, node: BinaryOpNode) -> Type:
@@ -469,7 +524,7 @@ class TypeChecker(VisitorBase):
         # 取模运算
         if op == Operator.MODULO:
             if not isinstance(left_type, (IntegerType, BoolType)) or not isinstance(right_type, (IntegerType, BoolType)):
-                self.errors.append(f"类型错误: 取模运算的操作数必须是整数类型, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 取模运算的操作数必须是整数类型, 而不是 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
             result_type = common_arithmetic_type(left_type, right_type)
             node._numeric_kind = result_type.kind
@@ -485,36 +540,36 @@ class TypeChecker(VisitorBase):
                 if op == Operator.ADD:
                     if is_left_pointer and self._is_integer_index_type(right_type):
                         if not self._is_pointer_arithmetic_type(left_type):
-                            self.errors.append(f"类型错误: void* 不支持指针算术, 在 {node.start_line} 行")
+                            self._diagnose(f"类型错误: void* 不支持指针算术", node, code="TYPE_MISMATCH")
                             return ErrorType()
                         node._pointer_arithmetic = "add"
                         return left_type
                     if self._is_integer_index_type(left_type) and is_right_pointer:
                         if not self._is_pointer_arithmetic_type(right_type):
-                            self.errors.append(f"类型错误: void* 不支持指针算术, 在 {node.start_line} 行")
+                            self._diagnose(f"类型错误: void* 不支持指针算术", node, code="TYPE_MISMATCH")
                             return ErrorType()
                         node._pointer_arithmetic = "add_reversed"
                         return right_type
-                    self.errors.append(f"类型错误: 指针加法只能用于指针和整数, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                    self._diagnose(f"类型错误: 指针加法只能用于指针和整数, 而不是 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
                     return ErrorType()
 
                 if op == Operator.SUBTRACT:
                     if is_left_pointer and self._is_integer_index_type(right_type):
                         if not self._is_pointer_arithmetic_type(left_type):
-                            self.errors.append(f"类型错误: void* 不支持指针算术, 在 {node.start_line} 行")
+                            self._diagnose(f"类型错误: void* 不支持指针算术", node, code="TYPE_MISMATCH")
                             return ErrorType()
                         node._pointer_arithmetic = "sub"
                         return left_type
                     if self._is_same_pointer_type(left_type, right_type):
                         if not self._is_pointer_arithmetic_type(left_type):
-                            self.errors.append(f"类型错误: void* 不支持指针差值运算, 在 {node.start_line} 行")
+                            self._diagnose(f"类型错误: void* 不支持指针差值运算", node, code="TYPE_MISMATCH")
                             return ErrorType()
                         node._pointer_arithmetic = "diff"
                         return IntegerType(VBCObjectType.INT)
-                    self.errors.append(f"类型错误: 指针减法只能用于指针减整数或相同类型指针相减, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                    self._diagnose(f"类型错误: 指针减法只能用于指针减整数或相同类型指针相减, 而不是 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
                     return ErrorType()
 
-                self.errors.append(f"类型错误: 操作符 '{op.value}' 不能用于指针类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 操作符 '{op.value}' 不能用于指针类型 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
 
             # 规则 1: 字符串拼接
@@ -530,7 +585,7 @@ class TypeChecker(VisitorBase):
                 return result_type
 
             # 如果以上规则都不匹配，则是类型错误
-            self.errors.append(f"类型错误: 操作符 '{op.value}' 不能用于类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 操作符 '{op.value}' 不能用于类型 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
             return ErrorType()
 
         # 比较运算
@@ -546,12 +601,12 @@ class TypeChecker(VisitorBase):
                 if isinstance(left_type, PointerType) or isinstance(right_type, PointerType):
                     if self._is_same_pointer_type(left_type, right_type):
                         return BoolType()
-                    self.errors.append(f"类型错误: 无法比较不兼容的指针类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                    self._diagnose(f"类型错误: 无法比较不兼容的指针类型 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
                     return ErrorType()
             elif isinstance(left_type, PointerType) or isinstance(right_type, PointerType):
                 if self._is_same_pointer_type(left_type, right_type):
                     return BoolType()
-                self.errors.append(f"类型错误: 指针大小比较要求两侧类型相同, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 指针大小比较要求两侧类型相同, 而不是 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
 
             # 允许数字之间，或相同类型之间比较
@@ -559,7 +614,7 @@ class TypeChecker(VisitorBase):
             is_same_type = type(left_type) is type(right_type) and left_type == right_type
 
             if not (is_numeric or is_same_type):
-                self.errors.append(f"类型错误: 无法比较不兼容的类型 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 无法比较不兼容的类型 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
             if is_numeric:
                 common_type = common_arithmetic_type(left_type, right_type)
@@ -570,11 +625,11 @@ class TypeChecker(VisitorBase):
         # 逻辑运算
         if op in (Operator.LOGICAL_AND, Operator.LOGICAL_OR):
             if not (self._is_scalar_truthy_type(left_type) and self._is_scalar_truthy_type(right_type)):
-                self.errors.append(f"类型错误: 逻辑操作符 '{op.value}' 的操作数必须是标量类型, 而不是 '{left_type}' 和 '{right_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 逻辑操作符 '{op.value}' 的操作数必须是标量类型, 而不是 '{left_type}' 和 '{right_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
             return BoolType()
 
-        self.errors.append(f"内部错误: 未知的二元操作符 '{op.value}', 在 {node.start_line} 行")
+        self._diagnose(f"内部错误: 未知的二元操作符 '{op.value}'", node, code="TYPE_INTERNAL")
         return ErrorType()
 
     # 语句的类型检查
@@ -586,7 +641,7 @@ class TypeChecker(VisitorBase):
 
         if isinstance(declared_type, ArrayType):
             if declared_type.size == 0 and not isinstance(node.init_exp, InitListNode):
-                self.errors.append(f"类型错误: 未指定长度的数组必须提供初始化列表, 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 未指定长度的数组必须提供初始化列表", node, code="ARRAY_INVALID")
                 return ErrorType()
             if node.init_exp is None:
                 pass
@@ -599,17 +654,17 @@ class TypeChecker(VisitorBase):
                 if declared_type.size == 0:
                     declared_type = ArrayType(declared_type.element_type, final_size)
             else:
-                self.errors.append(f"类型错误: 数组初始化必须使用 '{{...}}' 聚合初始化列表, 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 数组初始化必须使用 '{{...}}' 聚合初始化列表", node, code="ARRAY_INVALID")
                 return ErrorType()
         elif node.init_exp:
             if isinstance(node.init_exp, InitListNode):
-                self.errors.append(f"类型错误: 初始化列表只能用于数组声明, 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 初始化列表只能用于数组声明", node, code="ARRAY_INVALID")
                 return ErrorType()
             init_type = self.visit(node.init_exp)
             if isinstance(init_type, ErrorType):
                 return ErrorType()
             if not self._is_assignable(declared_type, init_type):
-                self.errors.append(f"类型错误: 不能将类型 '{init_type}' 的值赋给类型为 '{declared_type}' 的变量 '{node.name.name}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 不能将类型 '{init_type}' 的值赋给类型为 '{declared_type}' 的变量 '{node.name.name}'", node, code="TYPE_MISMATCH")
             else:
                 if isinstance(declared_type, PointerType) and isinstance(init_type, ArrayType):
                     self._mark_array_decay(node.init_exp)
@@ -619,7 +674,7 @@ class TypeChecker(VisitorBase):
         try:
             self.symbol_table.add_symbol(node.name.name, declared_type, kind=SymbolKind.VARIABLE)
         except NameError:
-            self.errors.append(f"命名错误: 变量 '{node.name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
+            self._diagnose(f"命名错误: 变量 '{node.name.name}' 在当前作用域已存在", node, code="NAME_CONFLICT")
 
         return VoidType()
 
@@ -628,18 +683,18 @@ class TypeChecker(VisitorBase):
         if isinstance(base_type, ErrorType):
             return ErrorType()
         if not isinstance(base_type, PointerType):
-            self.errors.append(f"类型错误: 下标操作只能用于数组或指针, 而不是 '{base_type}', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 下标操作只能用于数组或指针, 而不是 '{base_type}'", node, code="ARRAY_INVALID")
             return ErrorType()
 
         index_type = self.visit(node.index)
         if isinstance(index_type, ErrorType):
             return ErrorType()
         if not self._is_integer_index_type(index_type):
-            self.errors.append(f"类型错误: 数组下标必须是整数类型, 而不是 '{index_type}', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 数组下标必须是整数类型, 而不是 '{index_type}'", node, code="ARRAY_INVALID")
             return ErrorType()
 
         if isinstance(base_type.base_type, VoidType):
-            self.errors.append(f"类型错误: void* 不能用于下标访问, 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: void* 不能用于下标访问", node, code="TYPE_MISMATCH")
             return ErrorType()
         node._subscript_base_type = base_type
         array_type = self._visit_subscript_base_type(node.base)
@@ -651,7 +706,7 @@ class TypeChecker(VisitorBase):
         if isinstance(base, NameNode):
             symbol = self.symbol_table.lookup_value(base.name)
             if symbol is None:
-                self.errors.append(f"命名错误: '{base.name}' 未定义, 在 {base.start_line} 行")
+                self._diagnose(f"命名错误: '{base.name}' 未定义", base, code="NAME_UNDEFINED")
                 return ErrorType()
             return symbol.type_
         if isinstance(base, SubscriptNode):
@@ -666,7 +721,7 @@ class TypeChecker(VisitorBase):
         try:
             self.symbol_table.add_type_alias(node.alias_name.name, target_type)
         except NameError:
-            self.errors.append(f"命名错误: 类型 '{node.alias_name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
+            self._diagnose(f"命名错误: 类型 '{node.alias_name.name}' 在当前作用域已存在", node, code="NAME_CONFLICT")
         return VoidType()
 
     def visit_EnumNode(self, node: EnumNode) -> Type:
@@ -677,32 +732,32 @@ class TypeChecker(VisitorBase):
         for enumerator in node.enumerators:
             member_name = enumerator.name.name
             if member_name in seen_names:
-                self.errors.append(f"命名错误: 枚举成员 '{member_name}' 重复, 在 {enumerator.start_line} 行")
+                self._diagnose(f"命名错误: 枚举成员 '{member_name}' 重复", enumerator, code="NAME_CONFLICT")
                 continue
             seen_names.add(member_name)
 
             if enumerator.value is not None:
                 value = self._eval_const_int_expr(enumerator.value)
                 if value is None:
-                    self.errors.append(f"类型错误: 枚举成员 '{member_name}' 的值必须是编译期整型常量, 在 {enumerator.start_line} 行")
+                    self._diagnose(f"类型错误: 枚举成员 '{member_name}' 的值必须是编译期整型常量", enumerator, code="CONST_INVALID")
                     value = next_value
             else:
                 value = next_value
             try:
                 check_integer(value, VBCObjectType.INT)
             except OverflowError as exc:
-                self.errors.append(f"枚举常量错误: {exc}, 在 {enumerator.start_line} 行")
+                self._diagnose(f"枚举常量错误: {exc}", enumerator, code="CONST_INVALID")
             next_value = value + 1
 
             try:
                 self.symbol_table.add_symbol(member_name, int_type, kind=SymbolKind.VARIABLE, const_value=value)
             except NameError:
-                self.errors.append(f"命名错误: 符号 '{member_name}' 在当前作用域已存在, 在 {enumerator.start_line} 行")
+                self._diagnose(f"命名错误: 符号 '{member_name}' 在当前作用域已存在", enumerator, code="NAME_CONFLICT")
 
         try:
             self.symbol_table.add_type_alias(f"enum {node.name.name}", int_type)
         except NameError:
-            self.errors.append(f"命名错误: 类型 'enum {node.name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
+            self._diagnose(f"命名错误: 类型 'enum {node.name.name}' 在当前作用域已存在", node, code="NAME_CONFLICT")
         return VoidType()
 
     def visit_StructNode(self, node: StructNode) -> Type:
@@ -712,19 +767,19 @@ class TypeChecker(VisitorBase):
         for field in node.fields:
             field_name = field.name.name
             if field_name in seen_fields:
-                self.errors.append(f"命名错误: 结构体字段 '{field_name}' 重复, 在 {field.start_line} 行")
+                self._diagnose(f"命名错误: 结构体字段 '{field_name}' 重复", field, code="NAME_CONFLICT")
                 continue
             seen_fields.add(field_name)
 
             if field.array_dims:
-                self.errors.append(f"类型错误: 暂不支持数组类型的结构体字段 '{field_name}', 在 {field.start_line} 行")
+                self._diagnose(f"类型错误: 暂不支持数组类型的结构体字段 '{field_name}'", field, code="ARRAY_INVALID")
                 continue
 
             field_type = self.resolve_type_node(field.var_type)
             if isinstance(field_type, ErrorType):
                 continue
             if isinstance(field_type, StructType):
-                self.errors.append(f"类型错误: 暂不支持嵌套结构体字段 '{field_name}', 在 {field.start_line} 行")
+                self._diagnose(f"类型错误: 暂不支持嵌套结构体字段 '{field_name}'", field, code="TYPE_MISMATCH")
                 continue
 
             fields.append((field_name, field_type))
@@ -733,11 +788,11 @@ class TypeChecker(VisitorBase):
         try:
             self.symbol_table.add_type_alias(f"struct {node.name.name}", struct_type)
         except NameError:
-            self.errors.append(f"命名错误: 类型 'struct {node.name.name}' 在当前作用域已存在, 在 {node.start_line} 行")
+            self._diagnose(f"命名错误: 类型 'struct {node.name.name}' 在当前作用域已存在", node, code="NAME_CONFLICT")
         return VoidType()
 
     def visit_InitListNode(self, node: InitListNode) -> Type:
-        self.errors.append(f"类型错误: 初始化列表只能出现在数组声明中, 在 {node.start_line} 行")
+        self._diagnose(f"类型错误: 初始化列表只能出现在数组声明中", node, code="ARRAY_INVALID")
         return ErrorType()
 
     def visit_AssignmentNode(self, node: AssignmentNode) -> Type:
@@ -745,14 +800,14 @@ class TypeChecker(VisitorBase):
         if isinstance(node.target, UnaryOpNode) and node.target.op == Operator.DEREFERENCE:
             pointer_type = self.visit(node.target.expr)
             if not isinstance(pointer_type, PointerType):
-                self.errors.append(f"类型错误: 赋值目标不是一个指针，无法解引用, 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 赋值目标不是一个指针，无法解引用", node, code="TYPE_MISMATCH")
                 return ErrorType()
             
             target_type = pointer_type.base_type
             value_type = self.visit(node.value)
 
             if not self._is_assignable(target_type, value_type):
-                self.errors.append(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的指针目标, 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的指针目标", node, code="TYPE_MISMATCH")
                 return ErrorType()
             if isinstance(target_type, PointerType) and isinstance(value_type, ArrayType):
                 self._mark_array_decay(node.value)
@@ -768,8 +823,11 @@ class TypeChecker(VisitorBase):
         if isinstance(value_type, ErrorType):
             return ErrorType()
 
+        if getattr(node, "_default_field_init", False) and isinstance(value_type, NullType):
+            return target_type
+
         if not self._is_assignable(target_type, value_type):
-            self.errors.append(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的目标, 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 不能将类型 '{value_type}' 的值赋给类型为 '{target_type}' 的目标", node, code="TYPE_MISMATCH")
             return ErrorType()
         if isinstance(target_type, PointerType) and isinstance(value_type, ArrayType):
             self._mark_array_decay(node.value)
@@ -786,7 +844,7 @@ class TypeChecker(VisitorBase):
             Operator.PERCENT_ASSIGN: Operator.MODULO,
         }
         if node.op not in op_in_bin:
-            self.errors.append(f"类型错误: 不支持的复合赋值运符 '{node.op.value}', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 不支持的复合赋值运符 '{node.op.value}'", node, code="TYPE_MISMATCH")
             return ErrorType()
         
         bin_expr = BinaryOpNode(left=node.left, op=op_in_bin[node.op], right=node.right)
@@ -814,7 +872,7 @@ class TypeChecker(VisitorBase):
             or (isinstance(base, UnaryOpNode) and base.op == Operator.DEREFERENCE)
             or isinstance(base, GetPropertyNode)
         ):
-            self.errors.append(f"类型错误: 自增/自减的操作数必须是可修改左值, 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 自增/自减的操作数必须是可修改左值", node, code="TYPE_MISMATCH")
             return ErrorType()
 
         base_type = self.visit(base)
@@ -823,11 +881,11 @@ class TypeChecker(VisitorBase):
             return ErrorType()
         if isinstance(base_type, PointerType):
             if isinstance(base_type.base_type, VoidType):
-                self.errors.append(f"类型错误: void* 不支持自增/自减, 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: void* 不支持自增/自减", node, code="TYPE_MISMATCH")
                 return ErrorType()
             return base_type
         if not isinstance(base_type, (IntegerType, FloatType)):
-            self.errors.append(f"类型错误: 自增/自减操作数必须是整数、浮点或指针类型, 而不是 '{base_type}', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 自增/自减操作数必须是整数、浮点或指针类型, 而不是 '{base_type}'", node, code="TYPE_MISMATCH")
             return ErrorType()
         node._numeric_kind = common_arithmetic_type(base_type, IntegerType(VBCObjectType.INT)).kind
         return base_type
@@ -859,7 +917,7 @@ class TypeChecker(VisitorBase):
     def visit_SwitchNode(self, node: SwitchNode) -> Type:
         condition_type = self.visit(node.condition)
         if not self._is_integer_index_type(condition_type):
-            self.errors.append(f"类型错误: switch 控制表达式必须是整型, 在 {node.condition.start_line} 行")
+            self._diagnose(f"类型错误: switch 控制表达式必须是整型", node.condition, code="TYPE_MISMATCH")
             return VoidType()
 
         self.switch_level += 1
@@ -875,13 +933,13 @@ class TypeChecker(VisitorBase):
                 if stmt.value is None:
                     default_count += 1
                     if default_count > 1:
-                        self.errors.append(f"语法错误: 多个 default 标签, 在 {stmt.start_line} 行")
+                        self._diagnose(f"语法错误: 多个 default 标签", stmt, code="CONTROL_INVALID")
                 else:
                     val = self._eval_case_constant(stmt.value)
                     if val is None:
-                        self.errors.append(f"类型错误: case 标签必须是编译期整型常量, 在 {stmt.start_line} 行")
+                        self._diagnose(f"类型错误: case 标签必须是编译期整型常量", stmt, code="CONST_INVALID")
                     elif val in case_values:
-                        self.errors.append(f"语法错误: case 值重复, 在 {stmt.start_line} 行")
+                        self._diagnose(f"语法错误: case 值重复", stmt, code="CONTROL_INVALID")
                     else:
                         case_values.add(val)
             else:
@@ -943,12 +1001,12 @@ class TypeChecker(VisitorBase):
 
     def visit_BreakNode(self, node: BreakNode) -> Type:
         if self.loop_level == 0 and self.switch_level == 0:
-            self.errors.append(f"语法错误: 'break' 语句未在循环或 switch 内, 在 {node.start_line} 行")
+            self._diagnose(f"语法错误: 'break' 语句未在循环或 switch 内", node, code="CONTROL_INVALID")
         return VoidType()
 
     def visit_ContinueNode(self, node: ContinueNode) -> Type:
         if self.loop_level == 0:
-            self.errors.append(f"语法错误: 'continue' 语句未在循环内, 在 {node.start_line} 行")
+            self._diagnose(f"语法错误: 'continue' 语句未在循环内", node, code="CONTROL_INVALID")
         return VoidType()
 
     def _build_function_type(self, node: FunctionNode | FunctionDeclNode) -> FunctionType:
@@ -965,15 +1023,15 @@ class TypeChecker(VisitorBase):
             return self.symbol_table.add_symbol(name, func_type, kind=SymbolKind.FUNCTION, is_defined=False)
 
         if existing.kind != SymbolKind.FUNCTION:
-            self.errors.append(f"命名错误: 符号 '{name}' 与函数原型冲突, 在 {line} 行")
+            self._diagnose(f"命名错误: 符号 '{name}' 与函数原型冲突", line=line, code="NAME_CONFLICT")
             return None
 
         if existing.is_defined:
-            self.errors.append(f"命名错误: 函数 '{name}' 重复定义, 在 {line} 行")
+            self._diagnose(f"命名错误: 函数 '{name}' 重复定义", line=line, code="NAME_CONFLICT")
             return None
 
         if not self._function_types_compatible(existing.type_, func_type):
-            self.errors.append(f"类型错误: 函数 '{name}' 的原型声明冲突, 在 {line} 行")
+            self._diagnose(f"类型错误: 函数 '{name}' 的原型声明冲突", line=line, code="TYPE_MISMATCH")
             return None
 
         return existing
@@ -984,15 +1042,15 @@ class TypeChecker(VisitorBase):
             return self.symbol_table.add_symbol(name, func_type, kind=SymbolKind.FUNCTION, is_defined=True)
 
         if existing.kind != SymbolKind.FUNCTION:
-            self.errors.append(f"命名错误: 符号 '{name}' 与函数定义冲突, 在 {line} 行")
+            self._diagnose(f"命名错误: 符号 '{name}' 与函数定义冲突", line=line, code="NAME_CONFLICT")
             return None
 
         if existing.is_defined:
-            self.errors.append(f"命名错误: 函数 '{name}' 重复定义, 在 {line} 行")
+            self._diagnose(f"命名错误: 函数 '{name}' 重复定义", line=line, code="NAME_CONFLICT")
             return None
 
         if not self._function_types_compatible(existing.type_, func_type):
-            self.errors.append(f"类型错误: 函数 '{name}' 的定义与原型不匹配, 在 {line} 行")
+            self._diagnose(f"类型错误: 函数 '{name}' 的定义与原型不匹配", line=line, code="TYPE_MISMATCH")
             return None
 
         existing.is_defined = True
@@ -1011,7 +1069,7 @@ class TypeChecker(VisitorBase):
 
         for param_node in node.args:
             if param_node.name is None:
-                self.errors.append(f"语法错误: 函数定义的形参必须有名字, 在 {param_node.start_line} 行")
+                self._diagnose(f"语法错误: 函数定义的形参必须有名字", param_node, code="CONTROL_INVALID")
                 return VoidType()
 
         param_types = func_type.param_types
@@ -1040,25 +1098,25 @@ class TypeChecker(VisitorBase):
     def visit_ReturnNode(self, node: ReturnNode) -> Type:
         """检查 return 返回值是否符合函数签名，并记录隐式返回转换。"""
         if self.current_function_return_type is None:
-            self.errors.append(f"语法错误: 'return' 语句未在函数内, 在 {node.start_line} 行")
+            self._diagnose(f"语法错误: 'return' 语句未在函数内", node, code="CONTROL_INVALID")
             return VoidType()
 
         # 检查 void 函数的 return
         if isinstance(self.current_function_return_type, VoidType):
             if node.value:
-                self.errors.append(f"类型错误: 'void' 函数不应有返回值, 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: 'void' 函数不应有返回值", node, code="TYPE_MISMATCH")
             return VoidType()
 
         # 检查带返回值的函数的 return
         if not node.value:
             if self.current_function_name == "main" and isinstance(self.current_function_return_type, IntegerType):
                 return VoidType()
-            self.errors.append(f"类型错误: 函数需要一个 '{self.current_function_return_type}' 类型的返回值, 但 'return' 语句为空, 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 函数需要一个 '{self.current_function_return_type}' 类型的返回值, 但 'return' 语句为空", node, code="TYPE_MISMATCH")
             return VoidType()
         
         actual_return_type = self.visit(node.value)
         if not self._is_assignable(self.current_function_return_type, actual_return_type):
-            self.errors.append(f"类型错误: 函数应返回 '{self.current_function_return_type}' 类型, 但返回了 '{actual_return_type}' 类型, 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 函数应返回 '{self.current_function_return_type}' 类型, 但返回了 '{actual_return_type}' 类型", node, code="TYPE_MISMATCH")
         else:
             self._warn_implicit_conversion_if_needed(self.current_function_return_type, actual_return_type, node.start_line, "返回值")
             self._mark_implicit_cast_if_needed(node.value, self.current_function_return_type, actual_return_type)
@@ -1070,18 +1128,18 @@ class TypeChecker(VisitorBase):
         if isinstance(node.name, NameNode):
             symbol = self.symbol_table.lookup_value(node.name.name)
             if symbol and symbol.kind == SymbolKind.FUNCTION and not symbol.is_defined:
-                self._called_undefined_functions[node.name.name] = node.start_line
+                self._called_undefined_functions[node.name.name] = node
 
         callee_type = self.visit(node.name)
         if not isinstance(callee_type, FunctionType):
-            self.errors.append(f"类型错误: 目标不是一个函数，无法调用, 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 目标不是一个函数，无法调用", node, code="TYPE_MISMATCH")
             return ErrorType()
 
         # 检查参数数量
         expected_count = len(callee_type.param_types)
         actual_count = len(node.args)
         if expected_count != actual_count:
-            self.errors.append(f"参数数量错误: 函数期望 {expected_count} 个参数, 但提供了 {actual_count} 个, 在 {node.start_line} 行")
+            self._diagnose(f"参数数量错误: 函数期望 {expected_count} 个参数, 但提供了 {actual_count} 个", node, code="CALL_ARITY")
             return callee_type.return_type # 即使参数数量错误，也返回预期的返回类型，以减少连锁错误
 
         # 逐一检查参数类型
@@ -1089,7 +1147,7 @@ class TypeChecker(VisitorBase):
             actual_arg_type = self.visit(arg_node)
             expected_arg_type = callee_type.param_types[i]
             if not self._is_assignable(expected_arg_type, actual_arg_type):
-                self.errors.append(f"类型错误: 函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型, 在 {arg_node.start_line} 行")
+                self._diagnose(f"类型错误: 函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型", arg_node, code="CALL_ARGUMENT")
             else:
                 if isinstance(expected_arg_type, PointerType) and isinstance(actual_arg_type, ArrayType):
                     self._mark_array_decay(arg_node)
@@ -1100,6 +1158,27 @@ class TypeChecker(VisitorBase):
 
     def visit_ClassNode(self, node: ClassNode) -> Type:
         class_name = node.name.name
+
+        # 字段初始化独立于构造函数体，实例化时按继承顺序各执行一次。
+        field_initializers = []
+        for member in node.body.statements:
+            if isinstance(member, VarDeclNode):
+                assignment = AssignmentNode(
+                    GetPropertyNode(
+                        NameNode("this", start_line=member.start_line, start_column=member.start_column),
+                        member.name, start_line=member.start_line, start_column=member.start_column,
+                    ),
+                    member.init_exp if member.init_exp is not None else NullNode(),
+                    start_line=member.start_line, start_column=member.start_column,
+                )
+                assignment._default_field_init = member.init_exp is None
+                field_initializers.append(assignment)
+        if field_initializers:
+            node.body.statements.append(FunctionNode(
+                TypeNode(NameNode("void")), NameNode("<fields>"), [], {},
+                BlockNode(field_initializers, start_line=node.start_line, start_column=node.start_column),
+                start_line=node.start_line, start_column=node.start_column,
+            ))
         
         # 先解析父类
         super_class: list[ClassType] = []
@@ -1110,12 +1189,12 @@ class TypeChecker(VisitorBase):
 
                 # 验证父类是否存在且为类类型
                 if not isinstance(super_class_type, ClassType):
-                    self.errors.append(f"类型错误: '{super_class_name}' 不是一个有效的基类, 在 {super_class_node.start_line} 行")
+                    self._diagnose(f"类型错误: '{super_class_name}' 不是一个有效的基类", super_class_node, code="TYPE_MISMATCH")
                     continue # 跳过无效的父类
 
                 # 检查是否重复继承
                 if super_class_type in super_class:
-                    self.errors.append(f"语法错误: 重复的基类 '{super_class_name}', 在 {super_class_node.start_line} 行")
+                    self._diagnose(f"语法错误: 重复的基类 '{super_class_name}'", super_class_node, code="CONTROL_INVALID")
                     continue
 
                 super_class.append(super_class_type)
@@ -1125,7 +1204,7 @@ class TypeChecker(VisitorBase):
         try:
             class_symbol = self.symbol_table.add_symbol(class_name, class_type, kind=SymbolKind.CLASS)
         except NameError:
-            self.errors.append(f"命名错误: 符号 '{class_name}' 在当前作用域已存在, 在 {node.start_line} 行")
+            self._diagnose(f"命名错误: 符号 '{class_name}' 在当前作用域已存在", node, code="NAME_CONFLICT")
             class_type = ErrorType()
 
         # 检查类的内部
@@ -1163,6 +1242,11 @@ class TypeChecker(VisitorBase):
                     method_type = FunctionType(param_types, return_type)
                     class_type.methods[member.name.name] = method_type
                     self.symbol_table.add_symbol(member.name.name, method_type, kind=SymbolKind.FUNCTION)
+
+            for name, member_type in {**class_type.methods, **class_type.fields}.items():
+                if self.symbol_table.lookup_value(name, current_scope_only=True) is None and name not in ("__init__", "<fields>"):
+                    kind = SymbolKind.FUNCTION if isinstance(member_type, FunctionType) else SymbolKind.VARIABLE
+                    self.symbol_table.add_symbol(name, member_type, kind=kind)
             
             has_user_defined_init = any(
                 isinstance(member, FunctionNode) and member.name.name == "__init__"
@@ -1198,7 +1282,7 @@ class TypeChecker(VisitorBase):
                 if method_symbol:
                     method_symbol.scope = func_table
                 else:
-                    self.errors.append(f"内部错误: 无法在类 '{class_name}' 中找到方法 '{method_name}' 的符号")
+                    self._diagnose(f"内部错误: 无法在类 '{class_name}' 中找到方法 '{method_name}' 的符号", code="TYPE_INTERNAL")
                     continue
 
                 self.symbol_table = func_table
@@ -1238,7 +1322,7 @@ class TypeChecker(VisitorBase):
             if prop_name in super_class_type.fields:
                 return super_class_type.fields[prop_name]
 
-            self.errors.append(f"属性错误: 父类 '{super_class_type.name}' 没有名为 '{prop_name}' 的属性, 在 {node.start_line} 行")
+            self._diagnose(f"属性错误: 父类 '{super_class_type.name}' 没有名为 '{prop_name}' 的属性", node, code="MEMBER_UNKNOWN")
             return ErrorType()
         
         obj_type = self.visit(node.obj)
@@ -1247,28 +1331,28 @@ class TypeChecker(VisitorBase):
 
         if node.via_pointer:
             if not isinstance(obj_type, PointerType):
-                self.errors.append(f"类型错误: '->' 操作符只能用于指针类型, 而不是 '{obj_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: '->' 操作符只能用于指针类型, 而不是 '{obj_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
             base_type = obj_type.base_type
             if not isinstance(base_type, StructType):
-                self.errors.append(f"类型错误: '->' 操作符目前仅支持指向结构体的指针, 而不是 '{obj_type}', 在 {node.start_line} 行")
+                self._diagnose(f"类型错误: '->' 操作符目前仅支持指向结构体的指针, 而不是 '{obj_type}'", node, code="TYPE_MISMATCH")
                 return ErrorType()
             obj_type = base_type
         elif isinstance(obj_type, PointerType):
-            self.errors.append(f"类型错误: 指针类型不能使用 '.' 访问成员, 请改用 '->', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 指针类型不能使用 '.' 访问成员, 请改用 '->'", node, code="TYPE_MISMATCH")
             return ErrorType()
 
         if isinstance(obj_type, StructType):
             prop_name = node.property_name.name
             field_type = obj_type.field_type(prop_name)
             if field_type is None:
-                self.errors.append(f"属性错误: 结构体 '{obj_type.name}' 没有名为 '{prop_name}' 的字段, 在 {node.start_line} 行")
+                self._diagnose(f"属性错误: 结构体 '{obj_type.name}' 没有名为 '{prop_name}' 的字段", node, code="MEMBER_UNKNOWN")
                 return ErrorType()
             node._struct_type = obj_type
             return field_type
 
         if not isinstance(obj_type, ClassType):
-            self.errors.append(f"类型错误: 只有类的实例或结构体才能访问属性, 而不是 '{obj_type}', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 只有类的实例或结构体才能访问属性, 而不是 '{obj_type}'", node, code="TYPE_MISMATCH")
             return ErrorType()
 
         prop_name = node.property_name.name
@@ -1277,7 +1361,7 @@ class TypeChecker(VisitorBase):
         if prop_name in obj_type.methods:
             return obj_type.methods[prop_name]
 
-        self.errors.append(f"属性错误: 类型 '{obj_type.name}' 没有名为 '{prop_name}' 的属性, 在 {node.start_line} 行")
+        self._diagnose(f"属性错误: 类型 '{obj_type.name}' 没有名为 '{prop_name}' 的属性", node, code="MEMBER_UNKNOWN")
         return ErrorType()
 
     def visit_NewInstanceNode(self, node: NewInstanceNode) -> Type:
@@ -1286,7 +1370,7 @@ class TypeChecker(VisitorBase):
         
         class_type = self.visit(class_call.name)
         if not isinstance(class_type, ClassType):
-            self.errors.append(f"类型错误: 'new' 关键字只能用于类, 而不是 '{class_type}', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 'new' 关键字只能用于类, 而不是 '{class_type}'", node, code="TYPE_MISMATCH")
             return ErrorType()
 
         constructor_type = class_type.methods.get("__init__")
@@ -1295,18 +1379,19 @@ class TypeChecker(VisitorBase):
             expected_count = len(constructor_type.param_types)
             actual_count = len(class_call.args)
             if expected_count != actual_count:
-                self.errors.append(f"构造函数参数数量错误: '{class_type.name}' 的构造函数期望 {expected_count} 个参数, 但提供了 {actual_count} 个, 在 {node.start_line} 行")
+                self._diagnose(f"构造函数参数数量错误: '{class_type.name}' 的构造函数期望 {expected_count} 个参数, 但提供了 {actual_count} 个", node, code="CALL_ARGUMENT")
+                return class_type
             
             for i, arg_node in enumerate(class_call.args):
                 actual_arg_type = self.visit(arg_node)
                 expected_arg_type = constructor_type.param_types[i]
                 if not self._is_assignable(expected_arg_type, actual_arg_type):
-                    self.errors.append(f"类型错误: 构造函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型, 在 {arg_node.start_line} 行")
+                    self._diagnose(f"类型错误: 构造函数参数 {i+1} 期望类型为 '{expected_arg_type}', 但提供了 '{actual_arg_type}' 类型", arg_node, code="CALL_ARGUMENT")
                 else:
                     self._warn_implicit_conversion_if_needed(expected_arg_type, actual_arg_type, arg_node.start_line, f"构造函数参数 {i+1}")
                     self._mark_implicit_cast_if_needed(arg_node, expected_arg_type, actual_arg_type)
         elif len(class_call.args) > 0:
-            self.errors.append(f"构造函数参数错误: 类 '{class_type.name}' 没有定义构造函数, 不能接受参数, 在 {node.start_line} 行")
+            self._diagnose(f"构造函数参数错误: 类 '{class_type.name}' 没有定义构造函数, 不能接受参数", node, code="CALL_ARGUMENT")
 
         return class_type
 
@@ -1396,7 +1481,7 @@ class TypeChecker(VisitorBase):
         if isinstance(target_type, ErrorType) or isinstance(source_type, ErrorType):
             return ErrorType()
         if not self._is_castable(target_type, source_type):
-            self.errors.append(f"类型错误: 无法将类型 '{source_type}' 强制转换为 '{target_type}', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 无法将类型 '{source_type}' 强制转换为 '{target_type}'", node, code="CAST_INVALID")
             return ErrorType()
         node._cast_target_type = target_type
         self._check_constant_conversion(node.expression, target_type)
@@ -1404,11 +1489,11 @@ class TypeChecker(VisitorBase):
 
     def visit_SuperNode(self, node: SuperNode) -> Type:
         if self.current_class_type is None:
-            self.errors.append(f"语法错误: 'super' 只能在类的方法内部使用, 在 {node.start_line} 行")
+            self._diagnose(f"语法错误: 'super' 只能在类的方法内部使用", node, code="CONTROL_INVALID")
             return ErrorType()
 
         if not self.current_class_type.super_class:
-            self.errors.append(f"类型错误: 类 '{self.current_class_type.name}' 没有父类，无法使用 'super', 在 {node.start_line} 行")
+            self._diagnose(f"类型错误: 类 '{self.current_class_type.name}' 没有父类，无法使用 'super'", node, code="TYPE_MISMATCH")
             return ErrorType()
 
         super_class_type = self.current_class_type.super_class[0]

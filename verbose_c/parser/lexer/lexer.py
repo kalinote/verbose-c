@@ -45,7 +45,7 @@ class Lexer:
         TokenType.UNKNOWN: TokenType.UNKNOWN.pattern,
     }
 
-    def __init__(self, filename, source, *, macro_body: bool = False, grammar_mode: bool = False):
+    def __init__(self, filename, source, *, macro_body: bool = False, grammar_mode: bool = False, preprocessor_mode: bool = False):
         self.filename = os.path.abspath(filename) if filename else filename
         self.source = source
         self.grammar_mode = grammar_mode
@@ -58,6 +58,12 @@ class Lexer:
         if macro_body:
             token_types = [t for t in TokenType if t != TokenType.MACRO_CODE]
         patterns = [f"(?P<{t.name}>{t.pattern})" for t in token_types]
+        if preprocessor_mode:
+            overrides = {
+                TokenType.NUMBER: r"(?:[0-9]|\.[0-9])(?:[eEpP][+-]|[a-zA-Z0-9_.])*",
+                TokenType.STRING: r'''[LuU]?'(?:\\.|[^\\'])*'|"(?:\\.|[^"\\])*"''',
+            }
+            patterns = [f"(?P<{t.name}>{overrides.get(t, t.pattern)})" for t in token_types]
         if grammar_mode:
             patterns = [f"(?P<{t.name}>{pattern})" for t, pattern in self.GRAMMAR_PATTERNS.items()]
         self.master_pattern = re.compile("|".join(patterns), re.UNICODE)
@@ -81,6 +87,7 @@ class Lexer:
                 error.msg, filepath=error.filename, line=error.lineno,
                 column=error.offset - 1 if error.offset is not None else None,
                 source_context=[(error.lineno, error.text.rstrip("\r\n"))] if error.text else [],
+                code="LEX_INVALID_TOKEN",
             )
             raise VBCCompileError(
                 error.msg, line=error.lineno, filepath=error.filename,

@@ -13,6 +13,7 @@ from verbose_c.compiler.ir.model import (
 )
 from verbose_c.compiler.ir.validator import validate_ir_function
 from verbose_c.compiler.opcode import Opcode
+from verbose_c.object.enum import VBCObjectType
 from verbose_c.object.function import VBCFunction
 
 
@@ -327,10 +328,16 @@ class _LoweringContext:
         if opcode == Opcode.CAST:
             self._require_operand(opcode, operand, pc)
             value = self._pop(stack, pc, opcode.name)
+            cast_attrs = {}
+            if isinstance(operand, tuple):
+                if len(operand) != 2 or operand[0] != VBCObjectType.INSTANCE or not isinstance(operand[1], str):
+                    raise self._error(pc, "类转换操作数必须包含 INSTANCE 和目标类名")
+                cast_attrs["target_class"] = operand[1]
+                operand = operand[0]
             target_type = getattr(operand, "name", str(operand))
             result = self._temp(target_type)
             block.instructions.append(
-                IRInstruction("cast", result=result, args=[value], attrs={"target_type": target_type}, source_pc=pc, source_line=line)
+                IRInstruction("cast", result=result, args=[value], attrs={"target_type": target_type, **cast_attrs}, source_pc=pc, source_line=line)
             )
             stack.append(result)
             return

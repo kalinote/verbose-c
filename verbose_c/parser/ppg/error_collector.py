@@ -112,6 +112,7 @@ class ErrorCollector:
             highlight_length=1 if actual_token_at_furthest.type == TokenType.END else max(1, len(actual)),
             expected_tokens=sorted(self.furthest_expected), actual_token=actual,
             rule_stack=best_error.rule_stack.copy() if best_error else [],
+            code="PARSE_UNEXPECTED_TOKEN",
         )])
 
     def format_error_report(self) -> str:

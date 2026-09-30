@@ -5,7 +5,7 @@ import sys
 import tempfile
 import time
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from verbose_c.fs.source_manager import SourceManager
@@ -16,8 +16,9 @@ from verbose_c.parser.parser.ast.node import ASTNode
 from verbose_c.compiler.compiler import Compiler
 from verbose_c.parser.ppg.build import build_python_parser_and_generator
 from verbose_c.parser.ppg.validator import validate_grammar
-from verbose_c.error import VBCCompileError, VBCIOError, VBCRuntimeError
-from verbose_c.error.format import format_error
+from verbose_c.parser.ppg.python_generator import PARSER_GENERATOR_REVISION
+from verbose_c.error import DiagnosticEntry, VBCCompileError, VBCIOError, VBCRuntimeError
+from verbose_c.error.format import format_error, format_warnings
 from verbose_c.fs.artifact_store import ArtifactStore
 from verbose_c.fs.incremental_compile import IncrementalCompiler
 from verbose_c.engine.recorder import PipelineRecorder, create_dump_path
@@ -69,6 +70,8 @@ class CompilerOutput:
     optimization_result: Any | None = None
     ast_optimization_result: Any | None = None
     dependencies: list[str] = field(default_factory=list)
+    include_requests: list[dict] = field(default_factory=list)
+    warning_diagnostics: list[DiagnosticEntry] = field(default_factory=list)
 
 
 @dataclass
@@ -92,6 +95,7 @@ class RunResult:
     warnings: list[str] = field(default_factory=list)
     error: Exception | None = None
     export_report: NativeExportReport | None = None
+    warning_diagnostics: list[DiagnosticEntry] = field(default_factory=list)
 
 
 def _build_parser_generation_report(
@@ -162,8 +166,12 @@ def generate_parser(grammar_path: str, output_path: str) -> ParserGenerationRepo
 
 
 def ensure_parser(refresh_parser: bool = False) -> ParserGenerationReport | None:
-    """若 parser.py 不存在或需要刷新，则生成解析器并返回报告。"""
-    if refresh_parser or not os.path.exists(default_parser_output):
+    """缺失、显式刷新或生成器修订不匹配时重新生成解析器。"""
+    outdated = refresh_parser or not os.path.exists(default_parser_output)
+    if not outdated:
+        with open(default_parser_output, "r", encoding="utf-8") as parser_file:
+            outdated = f"\nVBC_PARSER_REVISION = {PARSER_GENERATOR_REVISION}\n" not in parser_file.read(2048)
+    if outdated:
         return generate_parser(grammar_file, default_parser_output)
     return None
 
@@ -190,6 +198,8 @@ def compile_module(
     require_machine: bool = False,
     require_native_code: bool = False,
     native_aot: bool = False,
+    include_paths: list[str] | None = None,
+    system_include_paths: list[str] | None = None,
 ) -> CompilerOutput:
     """
     编译单个模块文件，分阶段执行并在每阶段完成后通知 recorder。
@@ -211,7 +221,7 @@ def compile_module(
 
     file_path = os.path.abspath(file_path)
 
-    source_manager = SourceManager()
+    source_manager = SourceManager(include_paths, system_include_paths)
     
     # 词法分析
     tokenizer = Tokenizer(file_path, source_manager)
@@ -221,58 +231,74 @@ def compile_module(
         recorder.on_raw_tokens(raw_tokens)
 
     preprocessor = Preprocessor(source_manager)
-    processed_tokens = preprocessor.process_tokens(raw_tokens)
-    tokenizer.tokens = processed_tokens
-    tokenizer._total_tokens = len(processed_tokens)
-    tokenizer._index = 0
-    context.tokens = processed_tokens
-    if recorder:
-        recorder.on_preprocessed_tokens(processed_tokens)
+    compiler = None
+    try:
+        processed_tokens = preprocessor.process_tokens(raw_tokens)
+        tokenizer.tokens = processed_tokens
+        tokenizer._total_tokens = len(processed_tokens)
+        tokenizer._index = 0
+        context.tokens = processed_tokens
+        if recorder:
+            recorder.on_preprocessed_tokens(processed_tokens)
 
-    # 语法分析
-    parser = parser_module.GeneratedParser(tokenizer)
-    ast_node = parser.start()
-    if ast_node is None:
-        error_report = parser.get_error_report() if parser.has_errors() else "未知的解析错误"
-        report = parser.error_collector.get_report()
-        raise VBCCompileError(
-            f"在文件 {file_path} 中解析失败:\n{error_report}", filepath=file_path, report=report,
+        # 语法分析
+        parser = parser_module.GeneratedParser(tokenizer)
+        ast_node = parser.start()
+        if ast_node is None:
+            error_report = parser.get_error_report() if parser.has_errors() else "未知的解析错误"
+            report = parser.error_collector.get_report()
+            raise VBCCompileError(
+                f"在文件 {file_path} 中解析失败:\n{error_report}", filepath=file_path, report=report,
+            )
+
+        context.ast_node = ast_node
+        if recorder:
+            recorder.on_ast(ast_node)
+
+        compiler = Compiler(ast_node, source_path=file_path, optimize_level=optimize_level, source_manager=source_manager)
+        compiler.compile()
+        opcode_gen = compiler.opcode_generator
+        context.warnings = compiler.warnings
+
+        output = CompilerOutput(
+            bytecode=compiler.bytecode,
+            constant_pool=compiler.constant_pool,
+            function_compilation_results=opcode_gen.function_compilation_results,
+            labels=opcode_gen.labels,
+            tokens=tokenizer.tokens,
+            ast_node=ast_node,
+            processed_code="",
+            lineno_table=opcode_gen.lineno_table,
+            warnings=[entry.message for entry in preprocessor.diagnostics] + compiler.warnings,
+            parser_generation_report=context.parser_generation_report,
+            optimization_result=opcode_gen.optimization_result,
+            ast_optimization_result=compiler.ast_optimization_result,
+            dependencies=sorted(preprocessor.dependencies),
+            include_requests=preprocessor.include_requests,
+            warning_diagnostics=preprocessor.diagnostics + [entry for entry in compiler.diagnostics if entry.severity == "warning"],
         )
-
-    context.ast_node = ast_node
-    if recorder:
-        recorder.on_ast(ast_node)
-
-    compiler = Compiler(ast_node, source_path=file_path, optimize_level=optimize_level)
-    compiler.compile()
-    opcode_gen = compiler.opcode_generator
-    context.warnings = compiler.warnings
-
-    output = CompilerOutput(
-        bytecode=compiler.bytecode,
-        constant_pool=compiler.constant_pool,
-        function_compilation_results=opcode_gen.function_compilation_results,
-        labels=opcode_gen.labels,
-        tokens=tokenizer.tokens,
-        ast_node=ast_node,
-        processed_code="",
-        lineno_table=opcode_gen.lineno_table,
-        warnings=compiler.warnings,
-        parser_generation_report=context.parser_generation_report,
-        optimization_result=opcode_gen.optimization_result,
-        ast_optimization_result=compiler.ast_optimization_result,
-        dependencies=sorted(preprocessor.dependencies),
-    )
-    _populate_backend_outputs(
-        output,
-        require_ir=require_ir,
-        require_machine=require_machine,
-        require_native_code=require_native_code,
-        native_aot=native_aot,
-    )
-    if recorder:
-        recorder.on_compiled(output)
-    return output
+        _populate_backend_outputs(
+            output,
+            require_ir=require_ir,
+            require_machine=require_machine,
+            require_native_code=require_native_code,
+            native_aot=native_aot,
+        )
+        if recorder:
+            recorder.on_compiled(output)
+        return output
+    except VBCCompileError as error:
+        # 跨阶段失败也保留此前警告，按产生顺序去重同一诊断对象。
+        entries = list(preprocessor.diagnostics)
+        if compiler is not None:
+            entries.extend(entry for entry in compiler.diagnostics if entry.severity == "warning")
+        entries.extend(error.warning_diagnostics)
+        error.warning_diagnostics = list({id(entry): entry for entry in entries}.values())
+        prior = [entry.message for entry in preprocessor.diagnostics]
+        if compiler is not None:
+            prior.extend(compiler.warnings)
+        error.warnings = prior + [message for message in error.warnings if message not in prior]
+        raise
 
 
 def _populate_backend_outputs(
@@ -505,6 +531,8 @@ def _run_file_pipeline(
     run_native_pe: bool = False,
     native_result_path: str | None = None,
     native_export_request: NativeExportRequest | None = None,
+    include_paths: list[str] | None = None,
+    system_include_paths: list[str] | None = None,
 ) -> RunResult:
     """
     统一执行源码或字节码文件的编译输出流水线。
@@ -543,6 +571,8 @@ def _run_file_pipeline(
     compilation_output = None
     captured_error = None
     compile_warnings: list[str] = []
+    warning_diagnostics: list[DiagnosticEntry] = []
+    shown_warning_ids: set[int] = set()
     exit_code = 0
     vm = None
     export_report = None
@@ -568,6 +598,8 @@ def _run_file_pipeline(
                 artifact_path=artifact_path,
                 optimize_level=optimize_level,
                 refresh_parser=refresh_parser,
+                include_paths=include_paths,
+                system_include_paths=system_include_paths,
             )
             if require_native_code or _dump_requires_fresh_compilation(dump_modules):
                 needs_recompile = True
@@ -582,12 +614,12 @@ def _run_file_pipeline(
                     require_machine=False,
                     require_native_code=require_native_code,
                     native_aot=export_request.aot,
+                    include_paths=include_paths,
+                    system_include_paths=system_include_paths,
                 )
                 recorder_notified = True
                 compile_warnings = compilation_output.warnings or []
-                if show_warnings and compile_warnings:
-                    for warning_line in compile_warnings:
-                        print(f"警告: {warning_line}")
+                warning_diagnostics = compilation_output.warning_diagnostics
 
                 artifact_store.save_bytecode(
                     artifact_path,
@@ -606,10 +638,23 @@ def _run_file_pipeline(
                     artifact_path=artifact_path,
                     optimize_level=optimize_level,
                     refresh_parser=refresh_parser,
+                    include_paths=include_paths,
+                    system_include_paths=system_include_paths,
+                    include_requests=compilation_output.include_requests,
+                    warning_diagnostics=[asdict(entry) for entry in warning_diagnostics],
+                    warnings=compile_warnings,
                 )
                 recorder.log_compile_done()
             else:
                 compilation_output, source_path = _load_bytecode_compilation_output(artifact_path)
+                manifest = incremental_compiler._load_manifest(incremental_compiler.manifest_path_for_artifact(artifact_path))
+                warning_diagnostics = [DiagnosticEntry(**{**entry, "source_context": [tuple(row) for row in entry.get("source_context", [])]})
+                                       for entry in manifest["warning_diagnostics"]]
+                compile_warnings = manifest.get("warnings", [entry.message for entry in warning_diagnostics])
+                compilation_output.warning_diagnostics = warning_diagnostics
+                compilation_output.warnings = compile_warnings
+                compilation_output.dependencies = [item["path"] for item in manifest["files"] if item["path"] != os.path.abspath(filename)]
+                compilation_output.include_requests = manifest["include_requests"]
         else:
             compilation_output, source_path = _load_bytecode_compilation_output(filename)
             needs_backend = bool(
@@ -627,6 +672,10 @@ def _run_file_pipeline(
 
         if not recorder_notified:
             recorder.on_compiled(compilation_output)
+
+        if show_warnings and warning_diagnostics:
+            print(format_warnings(warning_diagnostics))
+            shown_warning_ids.update(id(entry) for entry in warning_diagnostics)
 
         if run_native_memory:
             exit_code = _run_native_memory_output(compilation_output, source_path, native_result_path)
@@ -660,10 +709,12 @@ def _run_file_pipeline(
         exit_code = 1
         diagnostic = format_error(e)
         print(diagnostic, file=sys.stderr)
-        compile_warnings = e.warnings or []
-        if show_warnings and compile_warnings:
-            for warning_line in compile_warnings:
-                print(f"警告: {warning_line}")
+        compile_warnings.extend(message for message in e.warnings if message not in compile_warnings)
+        extra_diagnostics = e.warning_diagnostics or [
+            DiagnosticEntry(message, severity="warning", code="COMPILER_WARNING") for message in e.warnings
+        ]
+        warning_diagnostics = list({id(entry): entry for entry in [*warning_diagnostics, *extra_diagnostics]}.values())
+        e.warning_diagnostics = warning_diagnostics
         recorder.on_error(e, diagnostic=diagnostic)
     except Exception as e:
         captured_error = e
@@ -672,6 +723,9 @@ def _run_file_pipeline(
         print(diagnostic, file=sys.stderr)
         recorder.on_error(e, diagnostic=diagnostic)
     finally:
+        pending_warnings = [entry for entry in warning_diagnostics if id(entry) not in shown_warning_ids]
+        if show_warnings and pending_warnings:
+            print(format_warnings(pending_warnings))
         if vm is not None:
             recorder.on_memory(vm.memory)
         final_path = recorder.finalize(success=captured_error is None)
@@ -685,6 +739,7 @@ def _run_file_pipeline(
         warnings=compile_warnings,
         error=captured_error,
         export_report=export_report,
+        warning_diagnostics=warning_diagnostics,
     )
 
 
@@ -703,6 +758,8 @@ def run_source_file(
     run_native_pe: bool = False,
     native_result_path: str | None = None,
     native_export_request: NativeExportRequest | None = None,
+    include_paths: list[str] | None = None,
+    system_include_paths: list[str] | None = None,
 ) -> RunResult:
     """编译并可选执行单个源文件，由 recorder 负责 log 与 dump 输出。"""
     return _run_file_pipeline(
@@ -720,6 +777,8 @@ def run_source_file(
         run_native_pe=run_native_pe,
         native_result_path=native_result_path,
         native_export_request=native_export_request,
+        include_paths=include_paths,
+        system_include_paths=system_include_paths,
     )
 
 
